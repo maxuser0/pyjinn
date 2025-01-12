@@ -1,0 +1,4 @@
+rootProject.name = 'pyjinn'
+include 'grammar'
+include 'parser'
+include 'interpreter'

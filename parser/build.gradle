@@ -1,0 +1,36 @@
+plugins {
+    id 'java-library'
+}
+
+group = 'org.pyjinn'
+version = '0.1'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    implementation libs.guava
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation files('deps/antlr-runtime-4.13.2.jar')
+}
+
+// Parser depends on the grammar project's sources.
+compileJava.dependsOn(':grammar:copyGrammarSources')
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+jar {
+    archiveBaseName = "pyjinn-parser"
+    archiveVersion = project.version
+}

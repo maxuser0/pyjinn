@@ -1,0 +1,84 @@
+plugins {
+    id 'java-library'
+    id 'application'
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+group = 'org.pyjinn'
+version = '0.1'
+
+repositories {
+    mavenCentral()
+}
+
+sourceSets {
+    // Library code:
+    main {
+        java {
+            srcDirs = ['src/main/java']
+        }
+    }
+    // Standalone interpreter:
+    app {
+        java {
+            srcDirs = ['src/app/java']
+        }
+    }
+}
+
+dependencies {
+    implementation libs.guava
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation project(':parser')
+
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    appImplementation sourceSets.main.output
+}
+
+application {
+    mainClass = 'org.pyjinn.interpreter.App'
+}
+
+run {
+    classpath = sourceSets.app.runtimeClasspath
+}
+
+shadowJar {
+    archiveBaseName = "pyjinn-interpreter"
+    archiveVersion = project.version
+    minimize()
+
+    from {
+        sourceSets.app.output
+    }
+    manifest {
+        attributes 'Main-Class': 'org.pyjinn.interpreter.App'
+    }
+}
+
+configurations {
+    appImplementation.extendsFrom implementation
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaExec) {
+    standardInput = System.in
+}
+
+jar {
+    archiveBaseName = "pyjinn-interpreter"
+    archiveVersion = project.version
+}

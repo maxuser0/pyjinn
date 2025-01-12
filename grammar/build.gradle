@@ -1,0 +1,55 @@
+plugins {
+    id 'java-library'
+    id 'antlr'
+}
+
+group = 'org.pyjinn'
+version = '0.1'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    antlr "org.antlr:antlr4:4.13.2"
+}
+
+generateGrammarSource {
+    outputDirectory = file("$buildDir/generated/antlr")
+    maxHeapSize = "128m"
+    arguments += [
+        '-package', 'org.pyjinn.grammar',
+        '-visitor',
+        '-no-listener',
+        '-long-messages'
+    ]
+}
+
+task copyGrammarSources(type: Copy, dependsOn: generateGrammarSource) {
+    def generatedSourcesDir = file("$buildDir/generated/antlr")
+    def grammarSourcesDir = file("$projectDir/src/main/java/org/pyjinn/grammar")
+    def targetDir = file("$projectDir/../parser/src/main/java/org/pyjinn/grammar")
+
+    from generatedSourcesDir
+    from grammarSourcesDir
+
+    into targetDir
+
+    inputs.dir generatedSourcesDir
+    inputs.dir grammarSourcesDir
+    outputs.dir targetDir
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+jar {
+    enabled = false // Don't create a JAR for the grammar project.
+}
+
+task cleanGeneratedSources(type: Delete) {
+    delete fileTree("$projectDir/../parser/src/main/java/org/pyjinn/grammar")
+}
