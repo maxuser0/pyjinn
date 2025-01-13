@@ -10,10 +10,11 @@ repositories {
 }
 
 dependencies {
+    implementation libs.antlr4.runtime
+    implementation libs.gson
+
     testImplementation libs.junit.jupiter
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    implementation libs.gson
-    implementation files('deps/antlr-runtime-4.13.2.jar')
 }
 
 // Parser depends on the grammar project's sources.
