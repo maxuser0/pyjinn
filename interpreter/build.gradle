@@ -1,6 +1,5 @@
 plugins {
     id 'java-library'
-    id 'application'
     id 'com.gradleup.shadow' version '8.3.5'
 }
 
@@ -11,54 +10,21 @@ repositories {
     mavenCentral()
 }
 
-sourceSets {
-    // Library code:
-    main {
-        java {
-            srcDirs = ['src/main/java']
-        }
-    }
-    // Standalone interpreter:
-    app {
-        java {
-            srcDirs = ['src/app/java']
-        }
-    }
-}
-
 dependencies {
-    implementation libs.gson
     implementation project(':parser')
+    implementation libs.gson
 
     testImplementation libs.junit.jupiter
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-
-    appImplementation sourceSets.main.output
-}
-
-application {
-    mainClass = 'org.pyjinn.interpreter.App'
-}
-
-run {
-    classpath = sourceSets.app.runtimeClasspath
 }
 
 shadowJar {
-    archiveBaseName = "pyjinn-interpreter"
-    archiveVersion = project.version
-    minimize()
-
-    from {
-        sourceSets.app.output
-    }
-    manifest {
-        attributes 'Main-Class': 'org.pyjinn.interpreter.App'
-    }
+    archiveBaseName = "pyjinn-lib"
+    exclude 'com/google/gson/**'
 }
 
-configurations {
-    appImplementation.extendsFrom implementation
+tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    relocate 'org.antlr', 'org.pyjinn.shadow.antlr'
 }
 
 java {
@@ -71,10 +37,6 @@ java {
 
 tasks.named('test') {
     useJUnitPlatform()
-}
-
-tasks.withType(JavaExec) {
-    standardInput = System.in
 }
 
 jar {

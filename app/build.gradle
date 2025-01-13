@@ -1,0 +1,47 @@
+plugins {
+    id 'application'
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+group = 'org.pyjinn'
+version = '0.1'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation libs.gson
+    implementation project(':parser')
+    implementation project(':interpreter')
+}
+
+application {
+    mainClass = 'org.pyjinn.app.App'
+}
+
+shadowJar {
+    archiveBaseName = "pyjinn-app"
+    archiveVersion = project.version
+    minimize()
+    manifest {
+        attributes 'Main-Class': 'org.pyjinn.app.App'
+    }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.withType(JavaExec) {
+    standardInput = System.in
+}
+
+jar {
+    archiveBaseName = "pyjinn-app"
+    archiveVersion = project.version
+}

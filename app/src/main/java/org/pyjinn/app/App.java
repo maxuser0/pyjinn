@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2025 Greg Christiana <maxuser@pyjinn.org>
 // SPDX-License-Identifier: MIT
 
-package org.pyjinn.interpreter;
+package org.pyjinn.app;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -10,6 +10,7 @@ import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.stream.Collectors;
+import org.pyjinn.interpreter.Script;
 import org.pyjinn.parser.PyjinnParser;
 
 public class App {

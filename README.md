@@ -21,20 +21,20 @@ Python grammar, and Gson for JSON processing which is used for representing the 
 To build the standalone interpreter, run:
 
 ```
-$ ./gradlew interpreter:shadowJar
+$ ./gradlew app:shadowJar
 ```
 
-This builds the all-in-one jar file, `pyjinn-interpreter-0.1-all.jar`:
+This builds the all-in-one jar file, `pyjinn-app-0.1-all.jar`:
 
 ```
-$ ls -lh interpreter/build/libs/pyjinn-interpreter-0.1-all.jar
--rw-r--r--@ 1 maxuser  staff   1.0M Jan 12 16:20 interpreter/build/libs/pyjinn-interpreter-0.1-all.jar
+$ ls -lh app/build/libs/pyjinn-app-0.1-all.jar
+-rw-r--r--@ 1 maxuser  staff   1.0M Jan 12 16:20 app/build/libs/pyjinn-app-0.1-all.jar
 ```
 
 Run the standalone interpreter using `java -jar ...`, e.g. on Mac, Linux, or with WSL on Windows:
 
 ```
-$ echo 'print([x for x in range(10) if x > 2])' |java -jar ./interpreter/build/libs/pyjinn-interpreter-0.1-all.jar 
+$ echo 'print([x for x in range(10) if x > 2])' |java -jar app/build/libs/pyjinn-app-0.1-all.jar
 [3, 4, 5, 6, 7, 8, 9]
 ```
 
@@ -43,21 +43,19 @@ $ echo 'print([x for x in range(10) if x > 2])' |java -jar ./interpreter/build/l
 To build the Pyjinn parser and interpreter for embedding in a Java application, run:
 
 ```
-$ ./gradlew parser:build
-$ ./gradlew interpreter:build
+$ ./gradlew interpreter:shadowJar
 ```
 
-These commands create jar files at:
+This builds the jar file:
 
 ```
-$ ls -lh */build/libs/pyjinn-*-0.1.jar
--rw-r--r--@ 1 maxuser  staff   165K Jan 12 16:20 interpreter/build/libs/pyjinn-interpreter-0.1.jar
--rw-r--r--@ 1 maxuser  staff   351K Jan 12 16:19 parser/build/libs/pyjinn-parser-0.1.jar
+$ ls -lh interpreter/build/libs/pyjinn-lib-0.1-all.jar
+-rw-r--r--@ 1 maxuser  staff   849K Jan 12 16:20 interpreter/build/libs/pyjinn-lib-0.1-all.jar
 ```
 
 ## Code Structure
 
-Code is organized into 3 subprojects: `grammar`, `parser`, and `interpreter`.
+Code is organized into 4 subprojects: `grammar`, `parser`, `interpreter`, and `app`
 
 ### grammar
 
@@ -70,7 +68,13 @@ JSON format that follows the AST structure of the Python `ast` module.
 
 ### interpreter
 
-Reads Python source code (or AST in JSON format) and executes it.
+Reads Python source code (or AST in JSON format) and executes it. Builds a library suitable for
+embedding in a Java app.
+
+### app
+
+Standalone app containing all required runtime dependencies for executing the parser and
+interpreter on Python code passed on stdin.
 
 ## Java integration
 
@@ -80,7 +84,7 @@ Python lambdas and functions to Java method params that are an interface type th
 lambdas.  E.g.
 
 ```
-java -jar ./interpreter/build/libs/pyjinn-interpreter-0.1-all.jar << 'EOF'
+$ java -jar app/build/libs/pyjinn-app-0.1-all.jar << 'EOF'
 pythonList = [x for x in range(10) if x > 2]
 javaList = pythonList.getJavaList()
 filteredJavaList = javaList.stream().filter(lambda x: x < 7).map(lambda x: 2 * x).toList()
