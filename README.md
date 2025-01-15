@@ -92,3 +92,29 @@ print(filteredJavaList)
 EOF
 [6, 8, 10, 12]  # <- output
 ```
+
+## Publishing to local Maven repo
+
+Make the Pyjinn library available to other projects by publishing it to your local Maven repository:
+
+```
+$ ./gradlew interpreter:publishToMavenLocal
+```
+
+On Mac, Linux, and WSL on Windows the Pyjinn library will be published to:
+
+```
+~/.m2/repository/org/pyjinn/pyjinn-lib/0.1/pyjinn-lib-0.1-all.jar
+```
+
+Make it available to other Gradle projects by adding the following to their `build.gradle`:
+
+```
+repositories {
+    mavenLocal()
+}
+
+dependencies {
+    implementation 'org.pyjinn:pyjinn-lib:0.1:all'
+}
+```

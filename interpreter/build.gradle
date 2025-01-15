@@ -1,6 +1,7 @@
 plugins {
     id 'java-library'
     id 'com.gradleup.shadow' version '8.3.5'
+    id 'maven-publish'
 }
 
 group = 'org.pyjinn'
@@ -25,6 +26,18 @@ shadowJar {
 
 tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
     relocate 'org.antlr', 'org.pyjinn.shadow.antlr'
+}
+
+publishing {
+    publications {
+        shadow(MavenPublication) {
+            from components.shadow
+            artifactId = 'pyjinn-lib'
+        }
+    }
+    repositories {
+        mavenLocal()
+    }
 }
 
 java {
