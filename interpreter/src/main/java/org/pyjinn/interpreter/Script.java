@@ -43,8 +43,18 @@ import java.util.stream.StreamSupport;
 
 public class Script {
 
+  private final ClassLoader classLoader;
+
   private final ConcurrentHashMap<ExecutableCacheKey, Optional<Executable>> executableCache =
       new ConcurrentHashMap<>();
+
+  public Script() {
+    this(ClassLoader.getSystemClassLoader());
+  }
+
+  public Script(ClassLoader classLoader) {
+    this.classLoader = classLoader;
+  }
 
   private Context globals = Context.createGlobals(executableCache);
 
@@ -58,7 +68,7 @@ public class Script {
 
   public Script parse(JsonElement element, String scriptFilename) {
     globals.setScriptFilename(scriptFilename);
-    var parser = new JsonAstParser(executableCache);
+    var parser = new JsonAstParser(classLoader, executableCache);
     parser.parseGlobals(element, globals);
     return this;
   }
@@ -83,9 +93,12 @@ public class Script {
 
   public static class JsonAstParser {
 
+    private final ClassLoader classLoader;
     private final Map<ExecutableCacheKey, Optional<Executable>> executableCache;
 
-    public JsonAstParser(Map<ExecutableCacheKey, Optional<Executable>> executableCache) {
+    public JsonAstParser(
+        ClassLoader classLoader, Map<ExecutableCacheKey, Optional<Executable>> executableCache) {
+      this.classLoader = classLoader;
       this.executableCache = executableCache;
     }
 
@@ -444,7 +457,7 @@ public class Script {
               if (arg instanceof ConstantExpression constExpr
                   && constExpr.value() instanceof String constString) {
                 try {
-                  return new JavaClassId(Class.forName(constString), executableCache);
+                  return new JavaClassId(classLoader.loadClass(constString), executableCache);
                 } catch (ClassNotFoundException e) {
                   throw new IllegalArgumentException(e);
                 }
