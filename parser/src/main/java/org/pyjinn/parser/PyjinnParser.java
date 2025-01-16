@@ -12,6 +12,7 @@ import java.util.Optional;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
+import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.pyjinn.grammar.PythonLexer;
@@ -26,7 +27,7 @@ public class PyjinnParser {
     return parseTrees(pyjinnCode).jsonAst();
   }
 
-  static ParserOutput parseTrees(String pyjinnCode) throws Exception {
+  public static ParserOutput parseTrees(String pyjinnCode) throws Exception {
     CharStream input = CharStreams.fromString(pyjinnCode);
     PythonLexer lexer = new PythonLexer(input);
     CommonTokenStream tokens = new CommonTokenStream(lexer);
@@ -42,8 +43,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitFile_input(PythonParser.File_inputContext ctx) {
-    JsonObject node = new JsonObject();
-    node.addProperty("type", "Module");
+    var node = createNode(ctx, "Module");
     node.add("body", visitStatements(ctx.statements()));
     return node;
   }
@@ -72,7 +72,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.compound_stmt() != null) {
       return visitCompound_stmt(ctx.compound_stmt());
     }
-    return defaultResult();
+    return defaultResult(ctx);
   }
 
   @Override
@@ -97,12 +97,35 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
     // TODO(maxuser): Support these statement types:
     if (ctx.try_stmt() != null) {
-      TODO.addProperty("TODO", "TryStmt");
+      return visitTry_stmt(ctx.try_stmt());
     }
     if (ctx.with_stmt() != null) {
       TODO.addProperty("TODO", "WithStmt");
     }
     return TODO;
+  }
+
+  @Override
+  public JsonElement visitTry_stmt(PythonParser.Try_stmtContext ctx) {
+    var node = createNode(ctx, "Try");
+    node.add("body", visitBlock(ctx.block()));
+    var handlers = new JsonArray();
+    for (var exceptBlock : ctx.except_block()) {
+      var handler = createNode(exceptBlock);
+      var expression = exceptBlock.expression();
+      var name = exceptBlock.NAME();
+      handler.add("type", expression == null ? JsonNull.INSTANCE : visitExpression(expression));
+      handler.addProperty("name", name == null ? null : name.getText());
+      handler.add("body", visitExcept_block(exceptBlock));
+      handlers.add(handler);
+    }
+    node.add("handlers", handlers);
+    if (ctx.finally_block() != null) {
+      node.add("finalbody", visitBlock(ctx.finally_block().block()));
+    } else {
+      node.add("finalbody", new JsonArray());
+    }
+    return node;
   }
 
   @Override
@@ -115,8 +138,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       PythonParser.BlockContext block,
       PythonParser.Elif_stmtContext elif_stmt,
       PythonParser.Else_blockContext else_block) {
-    var node = new JsonObject();
-    node.addProperty("type", "If");
+    var node = createNode(test, "If");
     node.add("test", visitNamed_expression(test));
     node.add("body", visitBlock(block));
     if (elif_stmt != null) {
@@ -142,11 +164,32 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   }
 
   @Override
+  public JsonElement visitRaise_stmt(PythonParser.Raise_stmtContext ctx) {
+    var node = createNode(ctx, "Raise");
+    var exc = new JsonArray();
+    for (var expr : ctx.expression()) {
+      exc.add(visitExpression(expr));
+    }
+    node.add("exc", maybeSingleton(exc));
+    return node;
+  }
+
+  @Override
+  public JsonElement visitGlobal_stmt(PythonParser.Global_stmtContext ctx) {
+    var node = createNode(ctx, "Global");
+    var names = new JsonArray();
+    for (var name : ctx.NAME()) {
+      names.add(name.getText());
+    }
+    node.add("names", names);
+    return node;
+  }
+
+  @Override
   public JsonElement visitFor_stmt(PythonParser.For_stmtContext ctx) {
-    var node = new JsonObject();
-    node.addProperty("type", "For");
-    node.add("target", maybeSingleton(visitStar_targets(ctx.star_targets())));
-    node.add("iter", maybeSingleton(visitStar_expressions(ctx.star_expressions())));
+    var node = createNode(ctx, "For");
+    node.add("target", singletonOrTuple(visitStar_targets(ctx.star_targets())));
+    node.add("iter", singletonOrTuple(visitStar_expressions(ctx.star_expressions())));
     node.add("body", visitBlock(ctx.block()));
 
     // TODO(maxuser): Support for/else_block.
@@ -161,8 +204,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitWhile_stmt(PythonParser.While_stmtContext ctx) {
-    var node = new JsonObject();
-    node.addProperty("type", "While");
+    var node = createNode(ctx, "While");
     node.add("test", visitNamed_expression(ctx.named_expression()));
     node.add("body", visitBlock(ctx.block()));
 
@@ -184,7 +226,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       node.getAsJsonObject().add("decorator_list", decorators);
       return node;
     }
-    return defaultResult();
+    return defaultResult(ctx);
   }
 
   @Override
@@ -200,29 +242,38 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitFunction_def_raw(PythonParser.Function_def_rawContext ctx) {
-    var node = new JsonObject();
-    node.addProperty("type", "FunctionDef");
+    var node = createNode(ctx, "FunctionDef");
     node.addProperty("name", ctx.NAME().getText());
 
-    var arguments = new JsonObject();
-    arguments.addProperty("type", "arguments");
+    var arguments = createNode("arguments");
     var args = new JsonArray();
+    var defaults = new JsonArray();
+
     if (ctx.params() != null) {
       var parameters = ctx.params().parameters();
       if (parameters != null) {
         var paramList = parameters.param_no_default();
         if (paramList != null && !paramList.isEmpty()) {
           for (var param : paramList) {
-            JsonObject argNode = new JsonObject();
-            argNode.addProperty("type", "arg");
+            var argNode = createNode(param, "arg");
             argNode.addProperty("arg", param.param().NAME().getText());
             args.add(argNode);
+          }
+        }
+        var defaultParamList = parameters.param_with_default();
+        if (defaultParamList != null && !defaultParamList.isEmpty()) {
+          for (var defaultParam : defaultParamList) {
+            var argNode = createNode(defaultParam, "arg");
+            argNode.addProperty("arg", defaultParam.param().NAME().getText());
+            args.add(argNode);
+            defaults.add(visitExpression(defaultParam.default_assignment().expression()));
           }
         }
       }
     }
 
     arguments.add("args", args);
+    arguments.add("defaults", defaults);
     node.add("args", arguments);
 
     node.add("body", visitBlock(ctx.block()));
@@ -238,13 +289,12 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       node.getAsJsonObject().add("decorator_list", decorators);
       return node;
     }
-    return defaultResult();
+    return defaultResult(ctx);
   }
 
   @Override
   public JsonElement visitClass_def_raw(PythonParser.Class_def_rawContext ctx) {
-    var node = new JsonObject();
-    node.addProperty("type", "ClassDef");
+    var node = createNode(ctx, "ClassDef");
     node.addProperty("name", ctx.NAME().getText());
     // TODO(maxuser): Support "bases".
     node.add("body", visitBlock(ctx.block()));
@@ -272,19 +322,53 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitSimple_stmt(PythonParser.Simple_stmtContext ctx) {
+    if (ctx.BREAK() != null) {
+      return createNode(ctx, "Break");
+    }
+    if (ctx.del_stmt() != null) {
+      return visitDel_stmt(ctx.del_stmt());
+    }
     if (ctx.assignment() != null) {
       return visitAssignment(ctx.assignment());
     }
     if (ctx.return_stmt() != null) {
       return visitReturn_stmt(ctx.return_stmt());
     }
+    if (ctx.raise_stmt() != null) {
+      return visitRaise_stmt(ctx.raise_stmt());
+    }
+    if (ctx.global_stmt() != null) {
+      return visitGlobal_stmt(ctx.global_stmt());
+    }
     if (ctx.star_expressions() != null) {
-      var node = new JsonObject();
-      node.addProperty("type", "Expr");
+      var node = createNode(ctx, "Expr");
       node.add("value", maybeSingleton(visitStar_expressions(ctx.star_expressions())));
       return node;
     }
-    return defaultResult();
+    return defaultResult(ctx);
+  }
+
+  @Override
+  public JsonElement visitDel_stmt(PythonParser.Del_stmtContext ctx) {
+    var node = createNode(ctx, "Delete");
+    var targets = new JsonArray();
+    for (var target : ctx.del_targets().del_target()) {
+      var atom = target.del_t_atom();
+      if (atom != null) {
+        if (atom.NAME() != null) {
+          var nameNode = createNode(atom, "Name");
+          nameNode.addProperty("id", atom.NAME().getText());
+          targets.add(nameNode);
+          // TODO(maxuser): What about atom.del_target() and atom.del_targets()?
+        }
+      } else {
+        targets.add(
+            handle_tprimary_and_slices(target.t_primary(), target.slices(), target.NAME())
+                .orElseGet(() -> defaultResult(ctx)));
+      }
+    }
+    node.add("targets", targets);
+    return node;
   }
 
   private static JsonElement maybeSingleton(JsonElement element) {
@@ -294,33 +378,51 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     return element;
   }
 
+  private static JsonElement singletonOrTuple(JsonElement element) {
+    if (element.isJsonArray()) {
+      var array = element.getAsJsonArray();
+      if (array.size() == 1) {
+        return element.getAsJsonArray().get(0);
+      }
+      var tuple = createNode("Tuple");
+      tuple.add("elts", array);
+      return tuple;
+    }
+    return element;
+  }
+
   @Override
   public JsonElement visitReturn_stmt(PythonParser.Return_stmtContext ctx) {
-    JsonObject returnNode = new JsonObject();
-    returnNode.addProperty("type", "Return");
+    var returnNode = createNode(ctx, "Return");
 
     if (ctx.star_expressions() != null) { // Check if there's a return value
       returnNode.add("value", maybeSingleton(visit(ctx.star_expressions())));
+    } else {
+      returnNode.add("value", JsonNull.INSTANCE);
     }
 
     return returnNode;
   }
 
+  private JsonObject createOp(String op) {
+    var node = createNode(op);
+    return node;
+  }
+
   @Override
   public JsonElement visitAssignment(PythonParser.AssignmentContext ctx) {
     if (ctx.augassign() != null) {
-      var assign = new JsonObject();
-      assign.addProperty("type", "AugAssign");
+      var assign = createNode(ctx, "AugAssign");
       assign.add("target", visitSingle_target(ctx.single_target()));
-      var op = new JsonObject();
+      final JsonObject op;
       if (ctx.augassign().PLUSEQUAL() != null) {
-        op.addProperty("type", "Add");
+        op = createOp("Add");
       } else if (ctx.augassign().MINEQUAL() != null) {
-        op.addProperty("type", "Sub");
+        op = createOp("Sub");
       } else if (ctx.augassign().STAREQUAL() != null) {
-        op.addProperty("type", "Mult");
+        op = createOp("Mult");
       } else if (ctx.augassign().SLASHEQUAL() != null) {
-        op.addProperty("type", "Div");
+        op = createOp("Div");
       } else {
         // TODO(maxuser): Support the remaining augassign operators:
         // ATEQUAL()
@@ -341,22 +443,21 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
 
     var expression = ctx.expression();
-    JsonObject assignmentNode = new JsonObject();
-    assignmentNode.addProperty("type", expression == null ? "Assign" : "AnnAssign");
+    final boolean annotatedAssign = expression != null;
+    JsonObject assignmentNode = createNode(ctx, annotatedAssign ? "AnnAssign" : "Assign");
 
     var name = ctx.NAME();
     if (name != null) {
-      var target = new JsonObject();
-      target.addProperty("type", "Name");
+      var target = createNode(ctx, "Name");
       target.addProperty("id", name.getText());
       assignmentNode.add("target", target);
     }
-    if (expression != null) {
+    if (annotatedAssign) {
       assignmentNode.add("annotation", visitExpression(expression));
     }
     var annotated_rhs = ctx.annotated_rhs();
     if (annotated_rhs != null) {
-      assignmentNode.add("annotated_rhs", visit(annotated_rhs));
+      assignmentNode.add("value", singletonOrTuple(visit(annotated_rhs)));
     }
     TerminalNode LPAR = ctx.LPAR();
     if (LPAR != null) {
@@ -381,7 +482,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
     var star_expressions = ctx.star_expressions();
     if (star_expressions != null) {
-      assignmentNode.add("value", maybeSingleton(visitStar_expressions(star_expressions)));
+      assignmentNode.add("value", singletonOrTuple(visitStar_expressions(star_expressions)));
     }
     var star_targets = ctx.star_targets();
     if (star_targets != null && !star_targets.isEmpty()) {
@@ -392,8 +493,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       if (targets.size() <= 1) {
         assignmentNode.add("targets", targets);
       } else {
-        var tupleNode = new JsonObject();
-        tupleNode.addProperty("type", "Tuple");
+        var tupleNode = createNode("Tuple");
         tupleNode.add("elts", targets);
         var array = new JsonArray();
         array.add(tupleNode);
@@ -413,8 +513,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.single_subscript_attribute_target() != null) {
       return visitSingle_subscript_attribute_target(ctx.single_subscript_attribute_target());
     } else {
-      var node = new JsonObject();
-      node.addProperty("type", "Name");
+      var node = createNode(ctx, "Name");
       node.addProperty("id", ctx.NAME().getText());
       return node;
     }
@@ -461,8 +560,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (optionalResult.isPresent()) {
       return optionalResult.get();
     } else {
-      var node = new JsonObject();
-      node.addProperty("type", "Name");
+      var node = createNode(ctx, "Name");
       if (ctx.star_atom() != null) {
         node.add("id", visitStar_atom(ctx.star_atom()));
       } else {
@@ -480,14 +578,12 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       var value = visitT_primary(t_primary);
       if (slices != null) {
         JsonObject slice = visitSlices(slices).getAsJsonObject();
-        var subscript = new JsonObject();
-        subscript.addProperty("type", "Subscript");
+        var subscript = createNode(slices, "Subscript");
         subscript.add("value", value);
         subscript.add("slice", slice);
         return Optional.of(subscript);
       } else { // TODO(maxuser): check if ctx.DOT() isn't null to indicate attribute?
-        var attribute = new JsonObject();
-        attribute.addProperty("type", "Attribute");
+        var attribute = createNode(t_primary, "Attribute");
         attribute.add("value", value);
         if (name != null) {
           attribute.addProperty("attr", name.getText());
@@ -512,8 +608,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       return bitwise_or_node;
     }
 
-    var node = new JsonObject();
-    node.addProperty("type", "Compare");
+    var node = createNode(ctx, "Compare");
     node.add("left", bitwise_or_node);
 
     var ops = new JsonArray();
@@ -556,68 +651,71 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     return node;
   }
 
-  private JsonObject createComparisonOp(String op) {
-    var node = new JsonObject();
-    node.addProperty("type", op);
-    return node;
-  }
-
   @Override
   public JsonElement visitSum(PythonParser.SumContext ctx) {
-    JsonObject node = new JsonObject();
     if (ctx.getChildCount() == 3) { // binary op: left op right
-      node.addProperty("type", "BinOp");
+      var node = createNode(ctx, "BinOp");
       node.add("left", visit(ctx.getChild(0))); // Visit the left operand
-      var opNode = new JsonObject();
+      final JsonObject op;
       if (ctx.PLUS() != null) {
-        opNode.addProperty("type", "Add");
+        op = createOp("Add");
       } else if (ctx.MINUS() != null) {
-        opNode.addProperty("type", "Sub");
+        op = createOp("Sub");
       } else {
         throw new UnsupportedOperationException(
             "Unsupported operator: " + ctx.getChild(1).getText());
       }
-      node.add("op", opNode);
+      node.add("op", op);
       node.add("right", visit(ctx.getChild(2))); // Visit the right operand
+      return node;
     } else {
       return visit(ctx.term());
     }
-    return node;
   }
 
   @Override
   public JsonElement visitTerm(PythonParser.TermContext ctx) {
-    JsonObject node = new JsonObject();
     if (ctx.getChildCount() == 3) { // binary op: left op right
-      node.addProperty("type", "BinOp");
+      var node = createNode(ctx, "BinOp");
       node.add("left", visit(ctx.getChild(0))); // Visit the left operand
-      var opNode = new JsonObject();
+      final JsonObject op;
       if (ctx.STAR() != null) {
-        opNode.addProperty("type", "Mult");
+        op = createOp("Mult");
       } else if (ctx.SLASH() != null) {
-        opNode.addProperty("type", "Div");
+        op = createOp("Div");
       } else if (ctx.PERCENT() != null) {
-        opNode.addProperty("type", "Mod");
+        op = createOp("Mod");
       } else {
         throw new UnsupportedOperationException(
             "Unsupported operator: " + ctx.getChild(1).getText());
       }
-      node.add("op", opNode);
+      node.add("op", op);
       node.add("right", visit(ctx.getChild(2))); // Visit the right operand
+      return node;
     } else if (ctx.factor() != null) {
       return visit(ctx.factor());
     } else if (ctx.term() != null) {
       return visit(ctx.term());
     }
-    return node;
+    return defaultResult(ctx);
   }
 
   @Override
   public JsonElement visitFactor(PythonParser.FactorContext ctx) {
     if (ctx.getChildCount() == 2) {
-      JsonObject unaryOp = new JsonObject();
-      unaryOp.addProperty("type", "UnaryOp");
-      unaryOp.addProperty("op", ctx.getChild(0).getText());
+      var unaryOp = createNode(ctx, "UnaryOp");
+      unaryOp.add(
+          "op",
+          createOp(
+              switch (ctx.getChild(0).getText()) {
+                case "+" -> "UAdd";
+                case "-" -> "USub";
+                case "~" -> "Invert";
+                default ->
+                    throw new UnsupportedOperationException(
+                        "Unsupported operator at line %d: %s"
+                            .formatted(ctx.start.getLine(), ctx.getChild(0).getText()));
+              }));
       unaryOp.add("operand", visit(ctx.getChild(1)));
       return unaryOp;
     } else {
@@ -642,19 +740,18 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       if (ctx.LPAR() != null) {
         var call = visitArguments(ctx.arguments());
         call.add("func", primary);
+        addLinenoIfAbsent(call, ctx);
         return call;
       }
       if (ctx.LSQB() != null) {
         var slice = visitSlices(ctx.slices()).getAsJsonObject();
-        var subscript = new JsonObject();
-        subscript.addProperty("type", "Subscript");
+        var subscript = createNode(ctx.slices(), "Subscript");
         subscript.add("value", primary);
         subscript.add("slice", slice);
         return subscript;
       }
       if (ctx.DOT() != null) { // Check for attribute access
-        var attributeNode = new JsonObject();
-        attributeNode.addProperty("type", "Attribute");
+        var attributeNode = createNode(ctx.primary(), "Attribute");
         attributeNode.add("value", primary); // expr on lhs of the dot
         attributeNode.addProperty("attr", ctx.NAME().getText()); // name on rhs of the dot
         return attributeNode;
@@ -673,19 +770,18 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.LPAR() != null) {
       var call = visitArguments(ctx.arguments());
       call.add("func", primary);
+      addLinenoIfAbsent(call, ctx);
       return call;
     }
     if (ctx.LSQB() != null) {
       JsonObject slice = visitSlices(ctx.slices()).getAsJsonObject();
-      var subscript = new JsonObject();
-      subscript.addProperty("type", "Subscript");
+      var subscript = createNode(ctx.slices(), "Subscript");
       subscript.add("value", primary);
       subscript.add("slice", slice);
       return subscript;
     }
     if (ctx.DOT() != null) { // Check for attribute access
-      JsonObject attributeNode = new JsonObject();
-      attributeNode.addProperty("type", "Attribute");
+      JsonObject attributeNode = createNode(ctx.t_primary(), "Attribute");
       attributeNode.add("value", primary); // expr on lhs of the dot
       attributeNode.addProperty("attr", ctx.NAME().getText()); // name on rhs of the dot
       return attributeNode;
@@ -703,8 +799,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx != null && ctx.args() != null) {
       return visitArgs(ctx.args());
     } else {
-      var call = new JsonObject();
-      call.addProperty("type", "Call");
+      var call = createNode("Call");
       call.add("args", new JsonArray());
       call.add("keywords", new JsonArray());
       return call;
@@ -721,15 +816,13 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     var keywords = new JsonArray();
     if (ctx.kwargs() != null) {
       for (var kwarg : ctx.kwargs().kwarg_or_starred()) {
-        var keyword = new JsonObject();
-        keyword.addProperty("type", "keyword");
+        var keyword = createNode(kwarg, "keyword");
         keyword.addProperty("arg", kwarg.NAME().getText());
         keyword.add("value", visitExpression(kwarg.expression()));
         keywords.add(keyword);
       }
     }
-    var call = new JsonObject();
-    call.addProperty("type", "Call");
+    var call = createNode(ctx, "Call");
     call.add("args", args);
     call.add("keywords", keywords);
     return call;
@@ -752,14 +845,13 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
     if (ctx.expression() != null) {
       var indices = ctx.expression();
-      var node = new JsonObject();
-      node.addProperty("type", "Slice");
+      var node = createNode(ctx, "Slice");
       node.add("lower", indices.size() >= 1 ? visitExpression(indices.get(0)) : null);
       node.add("upper", indices.size() >= 2 ? visitExpression(indices.get(1)) : null);
       node.add("step", indices.size() >= 3 ? visitExpression(indices.get(2)) : null);
       return node;
     }
-    return defaultResult();
+    return defaultResult(ctx);
   }
 
   @Override
@@ -767,7 +859,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.expression() != null) {
       return visitExpression(ctx.expression());
     }
-    return defaultResult();
+    return defaultResult(ctx);
   }
 
   @Override
@@ -777,8 +869,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     } else if (ctx.disjunction().size() > 0) {
       if (ctx.IF() != null && ctx.ELSE() != null) {
         // Conditional expression (e.g., x if y else z)
-        var conditional = new JsonObject();
-        conditional.addProperty("type", "Conditional");
+        var conditional = createNode(ctx, "IfExp");
         conditional.add("test", visit(ctx.disjunction(1))); // Condition
         conditional.add("body", visit(ctx.disjunction(0))); // Value if true
         conditional.add("orelse", visit(ctx.expression())); // Value if false
@@ -791,8 +882,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
         for (PythonParser.DisjunctionContext disjunctionContext : ctx.disjunction()) {
           disjunctions.add(visit(disjunctionContext));
         }
-        var disjunctionNode = new JsonObject();
-        disjunctionNode.addProperty("type", "Disjunctions");
+        var disjunctionNode = createNode(ctx, "Disjunctions");
         disjunctionNode.add("values", disjunctions);
         return disjunctionNode;
       }
@@ -802,8 +892,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonObject visitLambdef(PythonParser.LambdefContext ctx) {
-    var lambdaNode = new JsonObject();
-    lambdaNode.addProperty("type", "Lambda");
+    var lambdaNode = createNode(ctx, "Lambda");
     lambdaNode.add("args", visit(ctx.lambda_params()));
     lambdaNode.add("body", visit(ctx.expression()));
     return lambdaNode;
@@ -816,14 +905,12 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitLambda_parameters(PythonParser.Lambda_parametersContext ctx) {
-    JsonObject args = new JsonObject();
-    args.addProperty("type", "arguments");
+    JsonObject args = createNode(ctx, "arguments");
     JsonArray argList = new JsonArray();
     if (ctx.lambda_param_no_default() != null) {
       for (var param : ctx.lambda_param_no_default()) {
         var lp = param.lambda_param();
-        JsonObject argNode = new JsonObject();
-        argNode.addProperty("type", "arg");
+        JsonObject argNode = createNode(lp, "arg");
         argNode.addProperty("arg", lp.NAME().getText());
         argList.add(argNode);
       }
@@ -837,9 +924,8 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.conjunction().size() == 1) {
       return visitConjunction(ctx.conjunction(0));
     } else {
-      var disjunction = new JsonObject();
-      disjunction.addProperty("type", "BoolOp");
-      disjunction.addProperty("op", "or");
+      var disjunction = createNode(ctx, "BoolOp");
+      disjunction.add("op", createOp("Or"));
       JsonArray values = new JsonArray();
       for (PythonParser.ConjunctionContext conjunctionContext : ctx.conjunction()) {
         values.add(visit(conjunctionContext));
@@ -854,9 +940,8 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.inversion().size() == 1) {
       return visitInversion(ctx.inversion(0));
     } else {
-      var conjunction = new JsonObject();
-      conjunction.addProperty("type", "BoolOp");
-      conjunction.addProperty("op", "and");
+      var conjunction = createNode(ctx, "BoolOp");
+      conjunction.add("op", createOp("And"));
       JsonArray values = new JsonArray();
       for (PythonParser.InversionContext inversionContext : ctx.inversion()) {
         values.add(visit(inversionContext));
@@ -868,14 +953,18 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitInversion(PythonParser.InversionContext ctx) {
-    if (ctx.NOT() != null) {
-      var unaryOp = new JsonObject();
-      unaryOp.addProperty("type", "UnaryOp");
-      unaryOp.addProperty("op", "not");
-      unaryOp.add("operand", visit(ctx.comparison()));
-      return unaryOp;
+    try {
+      if (ctx.NOT() != null) {
+        var unaryOp = createNode(ctx, "UnaryOp");
+        unaryOp.add("op", createOp("Not"));
+        unaryOp.add("operand", visitInversion(ctx.inversion()));
+        return unaryOp;
+      } else {
+        return visitComparison(ctx.comparison());
+      }
+    } catch (Exception e) {
+      throw new RuntimeException("Parse error at line %d".formatted(ctx.start.getLine()), e);
     }
-    return visitComparison(ctx.comparison());
   }
 
   @Override
@@ -883,74 +972,89 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     JsonObject atomNode = new JsonObject();
 
     if (ctx.NAME() != null) {
-      atomNode.addProperty("type", "Name");
-      atomNode.addProperty("id", ctx.NAME().getText());
+      var name = createNode(ctx, "Name");
+      name.addProperty("id", ctx.NAME().getText());
+      return name;
     } else if (ctx.NUMBER() != null) {
-      atomNode.addProperty("type", "Constant");
+      var number = createNode(ctx, "Constant");
       try {
-        atomNode.addProperty("value", Integer.parseInt(ctx.NUMBER().getText()));
-        atomNode.addProperty("typename", "int");
+        number.addProperty("value", Integer.parseInt(ctx.NUMBER().getText()));
+        number.addProperty("typename", "int");
       } catch (NumberFormatException e) {
-        atomNode.addProperty("value", Double.parseDouble(ctx.NUMBER().getText()));
-        atomNode.addProperty("typename", "float");
+        number.addProperty("value", Double.parseDouble(ctx.NUMBER().getText()));
+        number.addProperty("typename", "float");
       }
+      return number;
     } else if (ctx.strings() != null) {
       return visitStrings(ctx.strings());
     } else if (ctx.TRUE() != null) {
-      atomNode.addProperty("type", "Constant");
-      atomNode.addProperty("value", true);
-      atomNode.addProperty("typename", "bool");
+      var trueBool = createNode(ctx, "Constant");
+      trueBool.addProperty("value", true);
+      trueBool.addProperty("typename", "bool");
+      return trueBool;
     } else if (ctx.FALSE() != null) {
-      atomNode.addProperty("type", "Constant");
-      atomNode.addProperty("value", false);
-      atomNode.addProperty("typename", "bool");
+      var falseBool = createNode(ctx, "Constant");
+      falseBool.addProperty("value", false);
+      falseBool.addProperty("typename", "bool");
+      return falseBool;
     } else if (ctx.NONE() != null) {
-      atomNode.addProperty("type", "Constant");
-      atomNode.add("value", JsonNull.INSTANCE);
-      atomNode.addProperty("typename", "NoneType");
+      var none = createNode(ctx, "Constant");
+      none.add("value", JsonNull.INSTANCE);
+      none.addProperty("typename", "NoneType");
+      return none;
     } else if (ctx.tuple() != null) {
-      atomNode.addProperty("type", "Tuple");
-      atomNode.add("elts", visitTuple(ctx.tuple()));
+      var tuple = createNode(ctx, "Tuple");
+      tuple.add("elts", visitTuple(ctx.tuple()));
+      return tuple;
     } else if (ctx.list() != null) {
-      atomNode.addProperty("type", "List");
-      atomNode.add("elts", visitList(ctx.list()));
+      var list = createNode(ctx, "List");
+      list.add("elts", visitList(ctx.list()));
+      return list;
     } else if (ctx.dict() != null) {
-      atomNode.addProperty("type", "Dict");
+      var dict = createNode(ctx, "Dict");
       var keys = new JsonArray();
       var values = new JsonArray();
-      for (var kv : ctx.dict().double_starred_kvpairs().double_starred_kvpair()) {
-        var pair = kv.kvpair();
-        if (pair.expression().size() != 2) {
-          throw new UnsupportedOperationException("Unsupported dict pair: " + kv.getText());
+      try {
+        var kvpairs = ctx.dict().double_starred_kvpairs();
+        if (kvpairs != null) {
+          var kvpair = kvpairs.double_starred_kvpair();
+          for (var kv : kvpair) {
+            var pair = kv.kvpair();
+            if (pair.expression().size() != 2) {
+              throw new UnsupportedOperationException("Unsupported dict pair: " + kv.getText());
+            }
+            keys.add(visitExpression(pair.expression(0)));
+            values.add(visitExpression(pair.expression(1)));
+          }
         }
-        keys.add(visitExpression(pair.expression(0)));
-        values.add(visitExpression(pair.expression(1)));
+      } catch (Exception e) {
+        throw new RuntimeException("Parse error at line %d".formatted(ctx.start.getLine()), e);
       }
-      atomNode.add("keys", keys);
-      atomNode.add("values", values);
+      dict.add("keys", keys);
+      dict.add("values", values);
+      return dict;
     } else if (ctx.set() != null) {
-      atomNode.addProperty("type", "Set");
-      atomNode.add("elts", visitSet(ctx.set()));
+      var set = createNode(ctx, "Set");
+      set.add("elts", visitSet(ctx.set()));
+      return set;
     } else if (ctx.listcomp() != null) {
       return visitListcomp(ctx.listcomp());
+    } else if (ctx.group() != null) {
+      return visitNamed_expression(ctx.group().named_expression());
     } else {
       throw new UnsupportedOperationException("Unsupported atom: " + ctx.getText());
     }
     // Add handling for other atom types (e.g., booleans, None, etc.)
-
-    return atomNode;
   }
 
   @Override
   public JsonElement visitListcomp(PythonParser.ListcompContext ctx) {
-    var node = new JsonObject();
-    node.addProperty("type", "ListComp");
+    var node = createNode(ctx, "ListComp");
     node.add("elt", visitNamed_expression(ctx.named_expression()));
 
     var generators = new JsonArray();
     for (var clause : ctx.for_if_clauses().for_if_clause()) {
-      var comprehension = new JsonObject();
-      comprehension.addProperty("type", "comprehension");
+      var comprehension = createNode(clause, "comprehension");
       comprehension.add("target", maybeSingleton(visitStar_targets(clause.star_targets())));
       var ifs = new JsonArray();
       boolean first = true;
@@ -1004,7 +1108,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       }
       return array;
     }
-    return defaultResult();
+    return defaultResult(ctx);
   }
 
   @Override
@@ -1022,8 +1126,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
                 joinedStrValues.add(createConstantStringNode(runningConstant));
                 runningConstant = "";
               }
-              var formattedValue = new JsonObject();
-              formattedValue.addProperty("type", "FormattedValue");
+              var formattedValue = createNode(expressions, "FormattedValue");
               formattedValue.add("value", maybeSingleton(visitStar_expressions(expressions)));
               joinedStrValues.add(formattedValue);
             }
@@ -1044,15 +1147,17 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       }
     }
 
-    var joinedStr = new JsonObject();
-    joinedStr.addProperty("type", "JoinedStr");
+    if (joinedStrValues.isEmpty()) {
+      return createConstantStringNode("");
+    }
+
+    var joinedStr = createNode(ctx, "JoinedStr");
     joinedStr.add("values", joinedStrValues);
     return joinedStr;
   }
 
   private static JsonObject createConstantStringNode(String str) {
-    var node = new JsonObject();
-    node.addProperty("type", "Constant");
+    var node = createNode("Constant");
     node.addProperty("value", str);
     node.addProperty("typename", "str");
     return node;
@@ -1178,8 +1283,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitAssignment_expression(PythonParser.Assignment_expressionContext ctx) {
-    JsonObject assignNode = new JsonObject();
-    assignNode.addProperty("type", "Assign");
+    var assignNode = createNode(ctx, "Assign");
     assignNode.addProperty("debug", "TODO");
     // TODO(maxuser): implement
     return assignNode;
@@ -1188,5 +1292,41 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   @Override
   protected JsonElement defaultResult() {
     return new JsonObject();
+  }
+
+  private JsonElement defaultResult(ParserRuleContext ctx) {
+    var node = createNode(ctx, "Unknown");
+    node.addProperty("debug_context", ctx.getClass().getSimpleName());
+    node.addProperty("debug_text", ctx.getText());
+    return node;
+  }
+
+  private static void addLinenoIfAbsent(JsonObject node, ParserRuleContext ctx) {
+    if (!node.has("lineno")) {
+      node.addProperty("lineno", ctx.start.getLine());
+    }
+  }
+
+  private static JsonObject createComparisonOp(String op) {
+    return createNode(op);
+  }
+
+  private static JsonObject createNode(String type) {
+    var node = new JsonObject();
+    node.addProperty("type", type);
+    return node;
+  }
+
+  private JsonObject createNode(ParserRuleContext ctx, String type) {
+    var node = new JsonObject();
+    node.addProperty("type", type);
+    node.addProperty("lineno", ctx.start.getLine());
+    return node;
+  }
+
+  private JsonObject createNode(ParserRuleContext ctx) {
+    var node = new JsonObject();
+    node.addProperty("lineno", ctx.start.getLine());
+    return node;
   }
 }

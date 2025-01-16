@@ -13,6 +13,38 @@ import com.google.gson.JsonObject;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
+// TODO(maxsuer): Add tests for:
+// del x
+// del x.y
+// del x[y]
+// if not x: y
+// for x in y: break
+// x: y = z
+// x: y = z, w
+// x = z, w
+// -1.2
+// ~1
+// blockAttrs = "" if match.group(2) is None else match.group(2)
+// "" # should result in an empty str constant, not empty JoinedStr
+// return # AST node should have a null value
+// for i, x in y, z: w # both i, x and y, z should be tuples in AST
+// global x
+// global x, y
+// raise x
+// def f(x, y=None): return
+//
+// try:
+//   x
+// except:
+//   w
+// finally:
+//  z
+//
+// try:
+//   x
+// except y as z:
+//   w
+
 class PyjinnParserTest {
 
   @Test

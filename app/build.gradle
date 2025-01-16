@@ -11,6 +11,7 @@ repositories {
 }
 
 dependencies {
+    implementation libs.antlr4.runtime
     implementation libs.gson
     implementation project(':parser')
     implementation project(':interpreter')

@@ -9,6 +9,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.pyjinn.interpreter.Script;
 import org.pyjinn.parser.PyjinnParser;
@@ -20,18 +23,34 @@ public class App {
             .lines()
             .collect(Collectors.joining("\n"));
 
-    final JsonElement jsonAst;
-    if (args.length > 0 && args[0].equals("read-ast")) {
+    Set<String> argsSet = new HashSet<>(Arrays.asList(args));
+
+    JsonElement jsonAst = null;
+    if (argsSet.contains("read-ast")) {
       jsonAst = JsonParser.parseString(stdinString);
-      String[] shiftedArgs = new String[args.length - 1];
-      System.arraycopy(args, 1, shiftedArgs, 0, args.length - 1);
-      args = shiftedArgs;
-    } else if (args.length > 0 && args[0].equals("dump-ast")) {
-      jsonAst = PyjinnParser.parse(stdinString);
-      Gson gson = new GsonBuilder().serializeNulls().setPrettyPrinting().create();
-      System.out.println(gson.toJson(jsonAst));
-      return;
+      argsSet.remove("read-ast");
     } else {
+      boolean intermediateOutput = false;
+      if (argsSet.contains("dump-parse-tree")) {
+        var parserOutput = PyjinnParser.parseTrees(stdinString);
+        var parser = parserOutput.parser();
+        System.out.println(parserOutput.parseTree().toStringTree(parser));
+        argsSet.remove("dump-parse-tree");
+        intermediateOutput = true;
+      }
+      if (argsSet.contains("dump-ast")) {
+        jsonAst = PyjinnParser.parse(stdinString);
+        Gson gson = new GsonBuilder().serializeNulls().setPrettyPrinting().create();
+        System.out.println(gson.toJson(jsonAst));
+        argsSet.remove("dump-ast");
+        intermediateOutput = true;
+      }
+      if (intermediateOutput) {
+        return;
+      }
+    }
+
+    if (jsonAst == null) {
       jsonAst = PyjinnParser.parse(stdinString);
     }
 

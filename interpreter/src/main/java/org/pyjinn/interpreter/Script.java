@@ -198,6 +198,7 @@ public class Script {
           parseFunctionArgs(
               getAttr(getAttr(element, "args").getAsJsonObject(), "args").getAsJsonArray());
       Statement body = parseStatementBlock(getBody(element));
+      // TODO(maxuser): Support default args and keyword args.
       var func =
           new FunctionDef(
               getLineno(element), enclosingClassName, identifier, decorators, args, body);
@@ -698,7 +699,7 @@ public class Script {
         throw new IllegalArgumentException(
             String.format(
                 "Expected %d params but got %d for function: %s",
-                function.args().size(), params.length, function));
+                function.args().size(), params.length, function.identifier().name()));
       }
       return function.invoke(enclosingContext, params);
     }
@@ -1942,6 +1943,7 @@ public class Script {
 
     public static Op parse(String opName) {
       switch (opName) {
+        // TODO(maxuser): Support "UAdd" (+) and "Invert" (~).
         case "USub":
           return Op.SUB;
         case "Not":
