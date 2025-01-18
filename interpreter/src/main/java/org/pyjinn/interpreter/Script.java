@@ -2322,6 +2322,8 @@ public class Script {
         return Boolean.class;
       } else if (type == int.class) {
         return Integer.class;
+      } else if (type == long.class) {
+        return Long.class;
       } else if (type == float.class) {
         return Float.class;
       } else if (type == double.class) {
@@ -3712,12 +3714,13 @@ public class Script {
 
           var newStackTrace = new StackTraceElement[stackTrace.length + scriptStack.size()];
           for (int i = 0; i < scriptStack.size(); ++i) {
+            var scriptFrame = scriptStack.get(i);
             newStackTrace[i] =
                 new StackTraceElement(
-                    scriptStack.get(i).classMethodName().type,
-                    scriptStack.get(i).classMethodName().method,
+                    scriptFrame == null ? "<null>" : scriptFrame.classMethodName().type,
+                    scriptFrame == null ? "<null>" : scriptFrame.classMethodName().method,
                     globals.globalScriptFilename,
-                    scriptStack.get(i).lineno());
+                    scriptFrame == null ? -1 : scriptFrame.lineno());
           }
           System.arraycopy(stackTrace, 0, newStackTrace, scriptStack.size(), stackTrace.length);
           e.setStackTrace(newStackTrace);
