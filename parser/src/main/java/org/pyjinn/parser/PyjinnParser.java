@@ -893,9 +893,16 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   @Override
   public JsonObject visitLambdef(PythonParser.LambdefContext ctx) {
     var lambdaNode = createNode(ctx, "Lambda");
-    lambdaNode.add("args", visit(ctx.lambda_params()));
+    var params = ctx.lambda_params();
+    lambdaNode.add("args", params == null ? createEmptyLambdaParams() : visit(params));
     lambdaNode.add("body", visit(ctx.expression()));
     return lambdaNode;
+  }
+
+  private static JsonObject createEmptyLambdaParams() {
+    JsonObject args = createNode("arguments");
+    args.add("args", new JsonArray());
+    return args;
   }
 
   @Override

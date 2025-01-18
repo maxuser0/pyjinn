@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 // global x, y
 // raise x
 // def f(x, y=None): return
+// lambda: x # lambda with no args
 //
 // try:
 //   x
