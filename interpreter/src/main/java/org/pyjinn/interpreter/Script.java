@@ -677,6 +677,8 @@ public class Script {
       return bool;
     } else if (value instanceof String str) {
       return !str.isEmpty() && !str.equals("False");
+    } else if (value.getClass().isArray()) {
+      return Array.getLength(value) > 0;
     } else if (value instanceof Lengthable lengthable) {
       return lengthable.__len__() != 0;
     } else if (value instanceof Collection<?> collection) {
@@ -1235,14 +1237,15 @@ public class Script {
       if (context.skipStatement()) {
         return;
       }
+      PyException pyException = null;
       try {
         context.exec(tryBody);
       } catch (Exception e) {
         // PyException exists only to prevent all eval/exec/invoke methods from declaring that they
         // throw Exception.  Unwrap the underlying exception here.
         final Object exception;
-        if (e instanceof PyException pyException) {
-          exception = pyException.thrown;
+        if (e instanceof PyException pe) {
+          exception = pe.thrown;
         } else {
           exception = e;
         }
@@ -1267,10 +1270,20 @@ public class Script {
           }
         }
         if (!handled) {
-          throw new PyException(e);
+          pyException = new PyException(e);
+          pyException.setStackTrace(e.getStackTrace()); // Keep original (script) stack trace.
+          throw pyException;
         }
       } finally {
-        finallyBlock.ifPresent(fb -> context.exec(fb));
+        try {
+          finallyBlock.ifPresent(fb -> context.exec(fb));
+        } catch (Exception e) {
+          if (pyException != null) {
+            // When suppressing an old exception, limit the stack frames of the new exception.
+            e.addSuppressed(pyException);
+            throw e;
+          }
+        }
       }
     }
 
@@ -2215,7 +2228,8 @@ public class Script {
         Predicate<T> filter,
         Object[] paramValues,
         boolean traverseSuperclasses) {
-      if (traverseSuperclasses && !isPublic(clss)) {
+      // TODO(maxuser): Generalize the restriction on class names and make it user-configurable.
+      if (traverseSuperclasses && (!isPublic(clss) || clss.getName().startsWith("sun."))) {
         for (var iface : clss.getInterfaces()) {
           var viableExecutable =
               findBestMatchingExecutable(iface, executableGetter, filter, paramValues, true);

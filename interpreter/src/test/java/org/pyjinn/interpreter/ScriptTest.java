@@ -5807,6 +5807,7 @@ public class ScriptTest {
   // - when checking methods of a non-public class, search for a public interface or superclass
   // - bound Python methods, e.g. `f = obj.func` where obj.func(...) is invoked by f(...)
   // - AugAssign for field setters of PyObject, e.g. `self.x += 1`
+  // - empty Java array treated as False in a bool context
 
   // TODO(maxuser): Implement parity for most common str methods
 }
