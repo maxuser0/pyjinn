@@ -5433,6 +5433,131 @@ public class ScriptTest {
       }
       """;
 
+  /* Generated from Python code:
+
+      Math = JavaClass("mapped.M")
+
+      def calc():
+        return Math.p + Math.s(9)
+  */
+  private static final String mappedSymbolsJsonAst =
+      """
+        {
+        "type": "Module",
+        "body": [
+          {
+            "type": "Assign",
+            "targets": [
+              {
+                "type": "Name",
+                "id": "Math",
+                "lineno": 1,
+                "col_offset": 0
+              }
+            ],
+            "value": {
+              "type": "Call",
+              "func": {
+                "type": "Name",
+                "id": "JavaClass",
+                "lineno": 1,
+                "col_offset": 7
+              },
+              "args": [
+                {
+                  "type": "Constant",
+                  "value": "mapped.M",
+                  "lineno": 1,
+                  "col_offset": 17,
+                  "typename": "str"
+                }
+              ],
+              "keywords": [],
+              "lineno": 1,
+              "col_offset": 7
+            },
+            "type_comment": null,
+            "lineno": 1,
+            "col_offset": 0
+          },
+          {
+            "type": "FunctionDef",
+            "name": "calc",
+            "args": {
+              "type": "arguments",
+              "posonlyargs": [],
+              "args": [],
+              "vararg": null,
+              "kwonlyargs": [],
+              "kw_defaults": [],
+              "kwarg": null,
+              "defaults": []
+            },
+            "body": [
+              {
+                "type": "Return",
+                "value": {
+                  "type": "BinOp",
+                  "left": {
+                    "type": "Attribute",
+                    "value": {
+                      "type": "Name",
+                      "id": "Math",
+                      "lineno": 4,
+                      "col_offset": 9
+                    },
+                    "attr": "p",
+                    "lineno": 4,
+                    "col_offset": 9
+                  },
+                  "op": {
+                    "type": "Add"
+                  },
+                  "right": {
+                    "type": "Call",
+                    "func": {
+                      "type": "Attribute",
+                      "value": {
+                        "type": "Name",
+                        "id": "Math",
+                        "lineno": 4,
+                        "col_offset": 18
+                      },
+                      "attr": "s",
+                      "lineno": 4,
+                      "col_offset": 18
+                    },
+                    "args": [
+                      {
+                        "type": "Constant",
+                        "value": 9,
+                        "lineno": 4,
+                        "col_offset": 25,
+                        "typename": "int"
+                      }
+                    ],
+                    "keywords": [],
+                    "lineno": 4,
+                    "col_offset": 18
+                  },
+                  "lineno": 4,
+                  "col_offset": 9
+                },
+                "lineno": 4,
+                "col_offset": 2
+              }
+            ],
+            "decorator_list": [],
+            "returns": null,
+            "type_comment": null,
+            "lineno": 3,
+            "col_offset": 0
+          }
+        ],
+        "type_ignores": []
+      }
+      """;
+
   @Test
   public void timesTwo() {
     double x = Math.PI;
@@ -5776,6 +5901,28 @@ public class ScriptTest {
                 "Handled exception: java.lang.IllegalArgumentException: Thrown from Python.",
                 "Finally!")),
         output);
+  }
+
+  @Test
+  public void mappedSymbols() {
+    var jsonAst = JsonParser.parseString(mappedSymbolsJsonAst);
+    var script =
+        new Script(
+            ClassLoader.getSystemClassLoader(),
+            className -> className.equals("mapped.M") ? "java.lang.Math" : className,
+            (clazz, memberName) ->
+                clazz == Math.class
+                    ? switch (memberName) {
+                      case "p" -> "PI";
+                      case "s" -> "sqrt";
+                      default -> memberName;
+                    }
+                    : memberName);
+    var func = script.parse(jsonAst).exec().getFunction("calc");
+    System.out.println(func);
+
+    var output = script.invoke(func);
+    assertEquals(6.141592653589793, ((Number) output).doubleValue(), 0.000000001);
   }
 
   // TODO(maxuser): Add tests for:

@@ -35,7 +35,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
@@ -44,19 +44,25 @@ import java.util.stream.StreamSupport;
 public class Script {
 
   private final ClassLoader classLoader;
-
-  private final ConcurrentHashMap<ExecutableCacheKey, Optional<Executable>> executableCache =
-      new ConcurrentHashMap<>();
+  private final SymbolCache symbolCache;
+  private final Context globals;
 
   public Script() {
     this(ClassLoader.getSystemClassLoader());
   }
 
   public Script(ClassLoader classLoader) {
-    this.classLoader = classLoader;
+    this(classLoader, className -> className, (clazz, memberName) -> memberName);
   }
 
-  private Context globals = Context.createGlobals(executableCache);
+  public Script(
+      ClassLoader classLoader,
+      java.util.function.Function<String, String> classMapping,
+      BiFunction<Class<?>, String, String> memberMapping) {
+    this.classLoader = classLoader;
+    this.symbolCache = new SymbolCache(classMapping, memberMapping);
+    this.globals = Context.createGlobals(symbolCache);
+  }
 
   public Context globals() {
     return globals;
@@ -68,7 +74,7 @@ public class Script {
 
   public Script parse(JsonElement element, String scriptFilename) {
     globals.setScriptFilename(scriptFilename);
-    var parser = new JsonAstParser(classLoader, executableCache);
+    var parser = new JsonAstParser(classLoader, symbolCache);
     parser.parseGlobals(element, globals);
     return this;
   }
@@ -94,12 +100,11 @@ public class Script {
   public static class JsonAstParser {
 
     private final ClassLoader classLoader;
-    private final Map<ExecutableCacheKey, Optional<Executable>> executableCache;
+    private final SymbolCache symbolCache;
 
-    public JsonAstParser(
-        ClassLoader classLoader, Map<ExecutableCacheKey, Optional<Executable>> executableCache) {
+    public JsonAstParser(ClassLoader classLoader, SymbolCache symbolCache) {
       this.classLoader = classLoader;
-      this.executableCache = executableCache;
+      this.symbolCache = symbolCache;
     }
 
     public void parseGlobals(JsonElement element, Context globals) {
@@ -458,7 +463,9 @@ public class Script {
               if (arg instanceof ConstantExpression constExpr
                   && constExpr.value() instanceof String constString) {
                 try {
-                  return new JavaClassId(classLoader.loadClass(constString), executableCache);
+                  return new JavaClassId(
+                      classLoader.loadClass(symbolCache.getRuntimeClassName(constString)),
+                      symbolCache);
                 } catch (ClassNotFoundException e) {
                   throw new IllegalArgumentException(e);
                 }
@@ -483,9 +490,9 @@ public class Script {
             var object = parseExpression(getAttr(element, "value"));
             var attr = new Identifier(getAttr(element, "attr").getAsString());
             if (parseContext == ParseContext.CALLER) {
-              return new BoundMethodExpression(object, attr, executableCache);
+              return new BoundMethodExpression(object, attr, symbolCache);
             } else {
-              return new FieldAccess(object, attr, executableCache);
+              return new FieldAccess(object, attr, symbolCache);
             }
           }
 
@@ -596,66 +603,6 @@ public class Script {
 
     private static JsonArray getBody(JsonElement element) {
       return element.getAsJsonObject().get("body").getAsJsonArray();
-    }
-  }
-
-  private static class ExecutableCacheKey {
-    private final Object[] callSignature;
-
-    private enum ExecutableType {
-      INSTANCE_METHOD,
-      STATIC_METHOD,
-      CONSTRUCTOR
-    }
-
-    public static ExecutableCacheKey forMethod(
-        Class<?> methodClass, boolean isStaticMethod, String methodName, Object[] paramValues) {
-      Object[] callSignature = new Object[paramValues.length + 3];
-      callSignature[0] =
-          isStaticMethod
-              ? ExecutableType.STATIC_METHOD.ordinal()
-              : ExecutableType.INSTANCE_METHOD.ordinal();
-      callSignature[1] = methodClass;
-      callSignature[2] = methodName;
-      for (int i = 0; i < paramValues.length; ++i) {
-        Object paramValue = paramValues[i];
-        callSignature[i + 3] = paramValue == null ? null : paramValue.getClass();
-      }
-      return new ExecutableCacheKey(callSignature);
-    }
-
-    public static ExecutableCacheKey forConstructor(Class<?> ctorClass, Object[] paramValues) {
-      Object[] callSignature = new Object[paramValues.length + 2];
-      callSignature[0] = ExecutableType.CONSTRUCTOR.ordinal();
-      callSignature[1] = ctorClass;
-      for (int i = 0; i < paramValues.length; ++i) {
-        Object paramValue = paramValues[i];
-        callSignature[i + 2] = paramValue == null ? null : paramValue.getClass();
-      }
-      return new ExecutableCacheKey(callSignature);
-    }
-
-    private ExecutableCacheKey(Object[] callSignature) {
-      this.callSignature = callSignature;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-      if (this == o) return true;
-      if (o == null || getClass() != o.getClass()) return false;
-
-      ExecutableCacheKey other = (ExecutableCacheKey) o;
-      return Arrays.equals(callSignature, other.callSignature);
-    }
-
-    @Override
-    public int hashCode() {
-      return Arrays.hashCode(callSignature);
-    }
-
-    @Override
-    public String toString() {
-      return Arrays.deepToString(callSignature);
     }
   }
 
@@ -2910,8 +2857,7 @@ public class Script {
     }
   }
 
-  public record JavaClassId(
-      Class<?> clss, Map<ExecutableCacheKey, Optional<Executable>> executableCache)
+  public record JavaClassId(Class<?> clss, SymbolCache symbolCache)
       implements Expression, Function {
     @Override
     public Object eval(Context context) {
@@ -2927,7 +2873,7 @@ public class Script {
     public Object call(Object... params) {
       var cacheKey = ExecutableCacheKey.forConstructor(clss, params);
       Optional<Constructor<?>> matchedCtor =
-          executableCache
+          symbolCache
               .computeIfAbsent(
                   cacheKey,
                   ignoreKey ->
@@ -3101,8 +3047,7 @@ public class Script {
     }
   }
 
-  public record TypeFunction(Map<ExecutableCacheKey, Optional<Executable>> executableCache)
-      implements Function {
+  public record TypeFunction(SymbolCache symbolCache) implements Function {
     @Override
     public Object call(Object... params) {
       expectNumParams(params, 1);
@@ -3110,7 +3055,7 @@ public class Script {
       if (value instanceof JavaClassId classId) {
         return classId.clss();
       } else {
-        return new JavaClassId(value.getClass(), executableCache);
+        return new JavaClassId(value.getClass(), symbolCache);
       }
     }
   }
@@ -3365,13 +3310,10 @@ public class Script {
   }
 
   public record BoundMethodExpression(
-      Expression object,
-      Identifier methodId,
-      Map<ExecutableCacheKey, Optional<Executable>> executableCache)
-      implements Expression {
+      Expression object, Identifier methodId, SymbolCache symbolCache) implements Expression {
     @Override
     public Object eval(Context context) {
-      return new BoundMethod(object.eval(context), methodId.name(), executableCache, object);
+      return new BoundMethod(object.eval(context), methodId.name(), symbolCache, object);
     }
 
     @Override
@@ -3381,10 +3323,7 @@ public class Script {
   }
 
   public record BoundMethod(
-      Object object,
-      String methodName,
-      Map<ExecutableCacheKey, Optional<Executable>> executableCache,
-      Expression objectExpression)
+      Object object, String methodName, SymbolCache symbolCache, Expression objectExpression)
       implements Function {
     @Override
     public Object call(Object... params) {
@@ -3413,7 +3352,7 @@ public class Script {
       String mappedMethodName = mapMethodName(clss, isStaticMethod, methodName);
       var cacheKey = ExecutableCacheKey.forMethod(clss, isStaticMethod, methodName, mappedParams);
       Optional<Method> matchedMethod =
-          executableCache
+          symbolCache
               .computeIfAbsent(
                   cacheKey,
                   ignoreKey ->
@@ -3422,7 +3361,9 @@ public class Script {
                           Class<?>::getMethods,
                           m ->
                               Modifier.isStatic(m.getModifiers()) == isStaticMethod
-                                  && m.getName().equals(mappedMethodName),
+                                  && m.getName()
+                                      .equals(
+                                          symbolCache.getRuntimeMemberName(clss, mappedMethodName)),
                           mappedParams,
                           /* traverseSuperclasses= */ true))
               .map(Method.class::cast);
@@ -3528,10 +3469,7 @@ public class Script {
     }
   }
 
-  public record FieldAccess(
-      Expression object,
-      Identifier field,
-      Map<ExecutableCacheKey, Optional<Executable>> executableCache)
+  public record FieldAccess(Expression object, Identifier field, SymbolCache symbolCache)
       implements Expression {
     @Override
     public Object eval(Context context) {
@@ -3543,7 +3481,7 @@ public class Script {
         } else if (pyObject.type.__dict__.__contains__(field.name())) {
           return pyObject.type.__dict__.__getitem__(field.name());
         } else if (pyObject.type.instanceMethods.containsKey(field.name())) {
-          return new BoundMethod(pyObject, field.name(), executableCache, object);
+          return new BoundMethod(pyObject, field.name(), symbolCache, object);
         } else {
           throw new NoSuchElementException(
               "Type %s has no field or method named `%s`".formatted(pyObject.type.name, field));
@@ -3565,7 +3503,8 @@ public class Script {
       }
 
       try {
-        var fieldAccess = objectClass.getField(field.name());
+        var fieldAccess =
+            objectClass.getField(symbolCache.getRuntimeMemberName(objectClass, field.name()));
         return fieldAccess.get(isClass ? null : objectValue);
       } catch (NoSuchFieldException | IllegalAccessException e) {
         throw new IllegalArgumentException(e);
@@ -3630,11 +3569,10 @@ public class Script {
       globalScriptFilename = filename;
     }
 
-    public static Context createGlobals(
-        Map<ExecutableCacheKey, Optional<Executable>> executableCache) {
+    public static Context createGlobals(SymbolCache symbolCache) {
       var context = new Context();
       context.setVariable("__stdout__", (Consumer<String>) System.out::println);
-      context.setVariable("math", new JavaClassId(math.class, executableCache));
+      context.setVariable("math", new JavaClassId(math.class, symbolCache));
       context.setVariable("int", new IntFunction());
       context.setVariable("float", new FloatFunction());
       context.setVariable("str", new StrFunction());
@@ -3643,7 +3581,7 @@ public class Script {
       context.setVariable("tuple", new TupleFunction());
       context.setVariable("list", new ListFunction());
       context.setVariable("print", new PrintFunction(context));
-      context.setVariable("type", new TypeFunction(executableCache));
+      context.setVariable("type", new TypeFunction(symbolCache));
       context.setVariable("range", new RangeFunction());
       context.setVariable("enumerate", new EnumerateFunction());
       context.setVariable("abs", new AbsFunction());
