@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 public class ScriptTest {
@@ -5911,13 +5912,14 @@ public class ScriptTest {
             ClassLoader.getSystemClassLoader(),
             className -> className.equals("mapped.M") ? "java.lang.Math" : className,
             (clazz, memberName) ->
-                clazz == Math.class
-                    ? switch (memberName) {
-                      case "p" -> "PI";
-                      case "s" -> "sqrt";
-                      default -> memberName;
-                    }
-                    : memberName);
+                Set.of(
+                    clazz == Math.class
+                        ? switch (memberName) {
+                          case "p" -> "PI";
+                          case "s" -> "sqrt";
+                          default -> memberName;
+                        }
+                        : memberName));
     var func = script.parse(jsonAst).exec().getFunction("calc");
     System.out.println(func);
 

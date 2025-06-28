@@ -52,13 +52,13 @@ public class Script {
   }
 
   public Script(ClassLoader classLoader) {
-    this(classLoader, className -> className, (clazz, memberName) -> memberName);
+    this(classLoader, className -> className, (clazz, memberName) -> Set.of(memberName));
   }
 
   public Script(
       ClassLoader classLoader,
       java.util.function.Function<String, String> classMapping,
-      BiFunction<Class<?>, String, String> memberMapping) {
+      BiFunction<Class<?>, String, Set<String>> memberMapping) {
     this.classLoader = classLoader;
     this.symbolCache = new SymbolCache(classMapping, memberMapping);
     this.globals = Context.createGlobals(symbolCache);
@@ -3361,9 +3361,9 @@ public class Script {
                           Class<?>::getMethods,
                           m ->
                               Modifier.isStatic(m.getModifiers()) == isStaticMethod
-                                  && m.getName()
-                                      .equals(
-                                          symbolCache.getRuntimeMemberName(clss, mappedMethodName)),
+                                  && symbolCache
+                                      .getRuntimeMemberNames(clss, mappedMethodName)
+                                      .contains(m.getName()),
                           mappedParams,
                           /* traverseSuperclasses= */ true))
               .map(Method.class::cast);
@@ -3502,12 +3502,20 @@ public class Script {
         objectClass = objectValue.getClass();
       }
 
-      try {
-        var fieldAccess =
-            objectClass.getField(symbolCache.getRuntimeMemberName(objectClass, field.name()));
-        return fieldAccess.get(isClass ? null : objectValue);
-      } catch (NoSuchFieldException | IllegalAccessException e) {
-        throw new IllegalArgumentException(e);
+      Exception exception = null;
+      for (String fieldName : symbolCache.getRuntimeMemberNames(objectClass, field.name())) {
+        try {
+          var fieldAccess = objectClass.getField(fieldName);
+          return fieldAccess.get(isClass ? null : objectValue);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+          exception = e;
+        }
+      }
+      if (exception != null) {
+        throw new IllegalArgumentException(exception);
+      } else {
+        throw new IllegalArgumentException(
+            "No such field: %s.%s".formatted(objectClass.getName(), field));
       }
     }
 

@@ -2,6 +2,7 @@ package org.pyjinn.interpreter;
 
 import java.lang.reflect.Executable;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -19,13 +20,14 @@ public class SymbolCache {
 
   // Mapping from an object's runtime class and its member's pretty name to its runtime
   // name.
-  private final BiFunction<Class<?>, String, String> memberMapping;
+  private final BiFunction<Class<?>, String, Set<String>> memberMapping;
 
   private final ConcurrentHashMap<ExecutableCacheKey, Optional<Executable>> executables =
       new ConcurrentHashMap<>();
 
   public SymbolCache(
-      Function<String, String> classMapping, BiFunction<Class<?>, String, String> memberMapping) {
+      Function<String, String> classMapping,
+      BiFunction<Class<?>, String, Set<String>> memberMapping) {
     this.classMapping = classMapping;
     this.memberMapping = memberMapping;
   }
@@ -36,7 +38,7 @@ public class SymbolCache {
   }
 
   /** Maps a class member's pretty name to its runtime name. */
-  public String getRuntimeMemberName(Class<?> clazz, String memberName) {
+  public Set<String> getRuntimeMemberNames(Class<?> clazz, String memberName) {
     return memberMapping.apply(clazz, memberName);
   }
 
