@@ -5911,15 +5911,9 @@ public class ScriptTest {
         new Script(
             ClassLoader.getSystemClassLoader(),
             className -> className.equals("mapped.M") ? "java.lang.Math" : className,
-            (clazz, memberName) ->
-                Set.of(
-                    clazz == Math.class
-                        ? switch (memberName) {
-                          case "p" -> "PI";
-                          case "s" -> "sqrt";
-                          default -> memberName;
-                        }
-                        : memberName));
+            (clazz, fieldName) -> clazz == Math.class && fieldName.equals("p") ? "PI" : fieldName,
+            (clazz, methodName) ->
+                Set.of(clazz == Math.class && methodName.equals("s") ? "sqrt" : methodName));
     var func = script.parse(jsonAst).exec().getFunction("calc");
     System.out.println(func);
 

@@ -18,18 +18,24 @@ public class SymbolCache {
   // Mapping from class's pretty name to its runtime name.
   private final Function<String, String> classMapping;
 
-  // Mapping from an object's runtime class and its member's pretty name to its runtime
+  // Mapping from an object's runtime class and its method's pretty name to its runtime
+  // names.
+  private final BiFunction<Class<?>, String, Set<String>> methodMapping;
+
+  // Mapping from an object's runtime class and its field's pretty name to its runtime
   // name.
-  private final BiFunction<Class<?>, String, Set<String>> memberMapping;
+  private final BiFunction<Class<?>, String, String> fieldMapping;
 
   private final ConcurrentHashMap<ExecutableCacheKey, Optional<Executable>> executables =
       new ConcurrentHashMap<>();
 
   public SymbolCache(
       Function<String, String> classMapping,
-      BiFunction<Class<?>, String, Set<String>> memberMapping) {
+      BiFunction<Class<?>, String, String> fieldMapping,
+      BiFunction<Class<?>, String, Set<String>> methodMapping) {
     this.classMapping = classMapping;
-    this.memberMapping = memberMapping;
+    this.fieldMapping = fieldMapping;
+    this.methodMapping = methodMapping;
   }
 
   /** Maps a class' pretty name to its runtime name. */
@@ -37,9 +43,14 @@ public class SymbolCache {
     return classMapping.apply(className);
   }
 
-  /** Maps a class member's pretty name to its runtime name. */
-  public Set<String> getRuntimeMemberNames(Class<?> clazz, String memberName) {
-    return memberMapping.apply(clazz, memberName);
+  /** Maps a class method's pretty name to its runtime names. */
+  public Set<String> getRuntimeMethodNames(Class<?> clazz, String methodName) {
+    return methodMapping.apply(clazz, methodName);
+  }
+
+  /** Maps a class field's pretty name to its runtime name. */
+  public String getRuntimeFieldName(Class<?> clazz, String fieldName) {
+    return fieldMapping.apply(clazz, fieldName);
   }
 
   public Optional<Executable> computeIfAbsent(

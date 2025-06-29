@@ -52,15 +52,20 @@ public class Script {
   }
 
   public Script(ClassLoader classLoader) {
-    this(classLoader, className -> className, (clazz, memberName) -> Set.of(memberName));
+    this(
+        classLoader,
+        className -> className,
+        (clazz, fieldName) -> fieldName,
+        (clazz, methodName) -> Set.of(methodName));
   }
 
   public Script(
       ClassLoader classLoader,
       java.util.function.Function<String, String> classMapping,
-      BiFunction<Class<?>, String, Set<String>> memberMapping) {
+      BiFunction<Class<?>, String, String> fieldMapping,
+      BiFunction<Class<?>, String, Set<String>> methodMapping) {
     this.classLoader = classLoader;
-    this.symbolCache = new SymbolCache(classMapping, memberMapping);
+    this.symbolCache = new SymbolCache(classMapping, fieldMapping, methodMapping);
     this.globals = Context.createGlobals(symbolCache);
   }
 
@@ -3362,7 +3367,7 @@ public class Script {
                           m ->
                               Modifier.isStatic(m.getModifiers()) == isStaticMethod
                                   && symbolCache
-                                      .getRuntimeMemberNames(clss, mappedMethodName)
+                                      .getRuntimeMethodNames(clss, mappedMethodName)
                                       .contains(m.getName()),
                           mappedParams,
                           /* traverseSuperclasses= */ true))
@@ -3502,20 +3507,13 @@ public class Script {
         objectClass = objectValue.getClass();
       }
 
-      Exception exception = null;
-      for (String fieldName : symbolCache.getRuntimeMemberNames(objectClass, field.name())) {
-        try {
-          var fieldAccess = objectClass.getField(fieldName);
-          return fieldAccess.get(isClass ? null : objectValue);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-          exception = e;
-        }
-      }
-      if (exception != null) {
-        throw new IllegalArgumentException(exception);
-      } else {
-        throw new IllegalArgumentException(
-            "No such field: %s.%s".formatted(objectClass.getName(), field));
+      String fieldName = symbolCache.getRuntimeFieldName(objectClass, field.name());
+      try {
+        // TODO(maxuser): Cache the selected Field from key [objectClass, field.name()].
+        var fieldAccess = objectClass.getField(fieldName);
+        return fieldAccess.get(isClass ? null : objectValue);
+      } catch (NoSuchFieldException | IllegalAccessException e) {
+        throw new IllegalArgumentException(e);
       }
     }
 
