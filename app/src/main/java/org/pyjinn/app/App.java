@@ -18,6 +18,9 @@ import org.pyjinn.parser.PyjinnParser;
 
 public class App {
   public static void main(String[] args) throws Exception {
+    // Log script debug output to stderr.
+    Script.setDebugLogger((str, params) -> System.err.printf(str + "%n", params));
+
     String stdinString =
         new BufferedReader(new InputStreamReader(System.in))
             .lines()

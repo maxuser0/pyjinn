@@ -47,6 +47,18 @@ public class Script {
   private final SymbolCache symbolCache;
   private final Context globals;
 
+  public interface DebugLogger {
+    void log(String str, Object... args);
+  }
+
+  private static DebugLogger logger = (str, args) -> {};
+
+  // To enable debug logging to stderr:
+  // Script.setDebugLogger((str, args) -> System.err.printf(str + "%n", args));
+  public static void setDebugLogger(DebugLogger newLogger) {
+    logger = newLogger;
+  }
+
   public Script() {
     this(ClassLoader.getSystemClassLoader());
   }
@@ -2876,6 +2888,24 @@ public class Script {
 
     @Override
     public Object call(Object... params) {
+      // Treat calls on an interface as a "cast" that attempts to promote params[0] from a
+      // Script.Function to a proxy for this interface.
+      if (clss.isInterface()) {
+        if (params.length != 1) {
+          throw new IllegalArgumentException(
+              "Calling interface %s with %d params but expected 1"
+                  .formatted(clss.getName(), params.length));
+        }
+        var param = params[0];
+        if (param instanceof Function function) {
+          return InterfaceProxy.promoteFunctionToJavaInterface(clss, function);
+        } else {
+          throw new IllegalArgumentException(
+              "Calling interface %s with non-function param of type %s"
+                  .formatted(clss.getName(), param.getClass().getName()));
+        }
+      }
+
       var cacheKey = ExecutableCacheKey.forConstructor(clss, params);
       Optional<Constructor<?>> matchedCtor =
           symbolCache
@@ -3464,6 +3494,13 @@ public class Script {
           params[i] = implement(functionalParamType, function);
         }
       }
+    }
+
+    public static Object promoteFunctionToJavaInterface(Class<?> clazz, Function function) {
+      if (clazz.isInterface() && clazz != Function.class) {
+        return implement(clazz, function);
+      }
+      return function;
     }
 
     private static long numAbstractMethods(Class<?> clss) {
