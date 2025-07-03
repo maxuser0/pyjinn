@@ -81,7 +81,7 @@ public class Script {
     this.globals = GlobalContext.create(symbolCache);
   }
 
-  public Context globals() {
+  public Environment globals() {
     return globals;
   }
 
@@ -481,8 +481,7 @@ public class Script {
                   && constExpr.value() instanceof String constString) {
                 try {
                   return new JavaClassId(
-                      classLoader.loadClass(symbolCache.getRuntimeClassName(constString)),
-                      symbolCache);
+                      classLoader.loadClass(symbolCache.getRuntimeClassName(constString)));
                 } catch (ClassNotFoundException e) {
                   throw new IllegalArgumentException(e);
                 }
@@ -2880,8 +2879,7 @@ public class Script {
     }
   }
 
-  public record JavaClassId(Class<?> clss, SymbolCache symbolCache)
-      implements Expression, Function {
+  public record JavaClassId(Class<?> clss) implements Expression, Function {
     @Override
     public Object eval(Context context) {
       return this;
@@ -2912,19 +2910,7 @@ public class Script {
         }
       }
 
-      var cacheKey = ExecutableCacheKey.forConstructor(clss, params);
-      Optional<Constructor<?>> matchedCtor =
-          symbolCache
-              .computeIfAbsent(
-                  cacheKey,
-                  ignoreKey ->
-                      TypeChecker.findBestMatchingExecutable(
-                          clss,
-                          Class<?>::getConstructors,
-                          c -> true,
-                          params,
-                          /* traverseSuperclasses= */ false))
-              .map(Constructor.class::cast);
+      Optional<Constructor<?>> matchedCtor = env.findConstructor(clss, params);
       if (matchedCtor.isPresent()) {
         try {
           return matchedCtor.get().newInstance(params);
@@ -2987,6 +2973,8 @@ public class Script {
   }
 
   public static class IntFunction implements Function {
+    public static final IntFunction INSTANCE = new IntFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3000,6 +2988,8 @@ public class Script {
   }
 
   public static class FloatFunction implements Function {
+    public static final FloatFunction INSTANCE = new FloatFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3013,6 +3003,8 @@ public class Script {
   }
 
   public static class StrFunction implements Function {
+    public static final StrFunction INSTANCE = new StrFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3021,6 +3013,8 @@ public class Script {
   }
 
   public static class BoolFunction implements Function {
+    public static final BoolFunction INSTANCE = new BoolFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3029,6 +3023,8 @@ public class Script {
   }
 
   public static class LenFunction implements Function {
+    public static final LenFunction INSTANCE = new LenFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3050,6 +3046,8 @@ public class Script {
   }
 
   public static class TupleFunction implements Function {
+    public static final TupleFunction INSTANCE = new TupleFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectMaxParams(params, 1);
@@ -3063,6 +3061,8 @@ public class Script {
   }
 
   public static class ListFunction implements Function {
+    public static final ListFunction INSTANCE = new ListFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectMaxParams(params, 1);
@@ -3078,17 +3078,21 @@ public class Script {
     }
   }
 
-  public record PrintFunction(Context context) implements Function {
+  public static class PrintFunction implements Function {
+    public static final PrintFunction INSTANCE = new PrintFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       @SuppressWarnings("unchecked")
-      var out = (Consumer<String>) context.getVariable("__stdout__");
+      var out = (Consumer<String>) env.getVariable("__stdout__");
       out.accept(Arrays.stream(params).map(PyObjects::toString).collect(joining(" ")));
       return null;
     }
   }
 
-  public record TypeFunction(SymbolCache symbolCache) implements Function {
+  public record TypeFunction() implements Function {
+    public static final TypeFunction INSTANCE = new TypeFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3096,12 +3100,14 @@ public class Script {
       if (value instanceof JavaClassId classId) {
         return classId.clss();
       } else {
-        return new JavaClassId(value.getClass(), symbolCache);
+        return new JavaClassId(value.getClass());
       }
     }
   }
 
   public static class RangeFunction implements Function {
+    public static final RangeFunction INSTANCE = new RangeFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       return new RangeIterable(params);
@@ -3109,6 +3115,8 @@ public class Script {
   }
 
   public static class EnumerateFunction implements Function {
+    public static final EnumerateFunction INSTANCE = new EnumerateFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       if (params.length == 0 || params.length > 2) {
@@ -3161,6 +3169,8 @@ public class Script {
   }
 
   public static class AbsFunction implements Function {
+    public static final AbsFunction INSTANCE = new AbsFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3170,6 +3180,8 @@ public class Script {
   }
 
   public static class RoundFunction implements Function {
+    public static final RoundFunction INSTANCE = new RoundFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3179,6 +3191,8 @@ public class Script {
   }
 
   public static class MinFunction implements Function {
+    public static final MinFunction INSTANCE = new MinFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       if (params.length == 0) {
@@ -3196,6 +3210,8 @@ public class Script {
   }
 
   public static class MaxFunction implements Function {
+    public static final MaxFunction INSTANCE = new MaxFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       if (params.length == 0) {
@@ -3213,6 +3229,8 @@ public class Script {
   }
 
   public static class OrdFunction implements Function {
+    public static final OrdFunction INSTANCE = new OrdFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3226,6 +3244,8 @@ public class Script {
   }
 
   public static class ChrFunction implements Function {
+    public static final ChrFunction INSTANCE = new ChrFunction();
+
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
@@ -3576,46 +3596,52 @@ public class Script {
     void setVariable(String name, Object value);
 
     void deleteVariable(String name);
+
+    Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params);
   }
 
   private static class GlobalContext extends Context implements Environment {
     private String globalScriptFilename;
+    private final SymbolCache symbolCache;
     private final List<Statement> globalStatements;
 
     // NOTE: globalCallStack does not support multithreaded scripts.
     private final Deque<CallSite> globalCallStack;
 
-    private GlobalContext() {
+    private GlobalContext(SymbolCache symbolCache) {
       globals = this;
       globalStatements = new ArrayList<>();
       globalScriptFilename = "<stdin>";
       globalCallStack = new ArrayDeque<>();
+      this.symbolCache = symbolCache;
     }
 
+    private static JavaClassId MATH_CLASS = new JavaClassId(math.class);
+
     public static GlobalContext create(SymbolCache symbolCache) {
-      var context = new GlobalContext();
+      var context = new GlobalContext(symbolCache);
       context.setVariable("__stdout__", (Consumer<String>) System.out::println);
 
-      // TODO(maxuser): Most of these functions are stateless, so share their instances across
-      // scripts/contexts.
-      context.setVariable("math", new JavaClassId(math.class, symbolCache));
-      context.setVariable("int", new IntFunction());
-      context.setVariable("float", new FloatFunction());
-      context.setVariable("str", new StrFunction());
-      context.setVariable("bool", new BoolFunction());
-      context.setVariable("len", new LenFunction());
-      context.setVariable("tuple", new TupleFunction());
-      context.setVariable("list", new ListFunction());
-      context.setVariable("print", new PrintFunction(context));
-      context.setVariable("type", new TypeFunction(symbolCache));
-      context.setVariable("range", new RangeFunction());
-      context.setVariable("enumerate", new EnumerateFunction());
-      context.setVariable("abs", new AbsFunction());
-      context.setVariable("round", new RoundFunction());
-      context.setVariable("min", new MinFunction());
-      context.setVariable("max", new MaxFunction());
-      context.setVariable("ord", new OrdFunction());
-      context.setVariable("chr", new ChrFunction());
+      // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
+      // globals.
+      context.setVariable("math", MATH_CLASS);
+      context.setVariable("int", IntFunction.INSTANCE);
+      context.setVariable("float", FloatFunction.INSTANCE);
+      context.setVariable("str", StrFunction.INSTANCE);
+      context.setVariable("bool", BoolFunction.INSTANCE);
+      context.setVariable("len", LenFunction.INSTANCE);
+      context.setVariable("tuple", TupleFunction.INSTANCE);
+      context.setVariable("list", ListFunction.INSTANCE);
+      context.setVariable("print", PrintFunction.INSTANCE);
+      context.setVariable("range", RangeFunction.INSTANCE);
+      context.setVariable("enumerate", EnumerateFunction.INSTANCE);
+      context.setVariable("abs", AbsFunction.INSTANCE);
+      context.setVariable("round", RoundFunction.INSTANCE);
+      context.setVariable("min", MinFunction.INSTANCE);
+      context.setVariable("max", MaxFunction.INSTANCE);
+      context.setVariable("ord", OrdFunction.INSTANCE);
+      context.setVariable("chr", ChrFunction.INSTANCE);
+      context.setVariable("type", TypeFunction.INSTANCE);
       return context;
     }
 
@@ -3632,6 +3658,21 @@ public class Script {
         globals.exec(statement);
       }
       globalStatements.clear();
+    }
+
+    public Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params) {
+      var cacheKey = ExecutableCacheKey.forConstructor(clss, params);
+      return symbolCache
+          .computeIfAbsent(
+              cacheKey,
+              ignoreKey ->
+                  TypeChecker.findBestMatchingExecutable(
+                      clss,
+                      Class<?>::getConstructors,
+                      c -> true,
+                      params,
+                      /* traverseSuperclasses= */ false))
+          .map(Constructor.class::cast);
     }
   }
 
