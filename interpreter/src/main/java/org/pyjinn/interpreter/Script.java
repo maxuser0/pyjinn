@@ -660,7 +660,7 @@ public class Script {
 
   public record BoundFunction(FunctionDef function, Context enclosingContext) implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       if (params.length != function.args().size()) {
         throw new IllegalArgumentException(
             String.format(
@@ -677,7 +677,7 @@ public class Script {
   public record CtorFunction(PyClass[] type, FunctionDef function, Context enclosingContext)
       implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       Object[] ctorParams = new Object[params.length + 1];
       var self = new PyObject(type[0]);
       ctorParams[0] = self;
@@ -717,7 +717,7 @@ public class Script {
                 .map(Identifier::name)
                 .toList();
         ctor =
-            params -> {
+            (env, params) -> {
               Function.expectNumParams(
                   params, uninitializedFieldNames.size(), identifier.name() + ".__init__");
               var object = new PyObject(type[0]);
@@ -732,7 +732,7 @@ public class Script {
             };
       } else {
         ctor =
-            params -> {
+            (env, params) -> {
               Function.expectNumParams(params, 0, identifier.name() + ".__init__");
               return new PyObject(type[0]);
             };
@@ -875,7 +875,7 @@ public class Script {
      * @param params arguments passed to PyObject method
      * @return return value wrapped in an array of 1 element, or empty array if no matching method
      */
-    public Object[] callMethod(String methodName, Object... params) {
+    public Object[] callMethod(Environment env, String methodName, Object... params) {
       Object[] methodParams = new Object[params.length + 1];
       methodParams[0] = this;
       System.arraycopy(params, 0, methodParams, 1, params.length);
@@ -883,7 +883,7 @@ public class Script {
       if (method == null) {
         return new Object[] {};
       }
-      return new Object[] {method.call(methodParams)};
+      return new Object[] {method.call(env, methodParams)};
     }
 
     @Override
@@ -972,7 +972,13 @@ public class Script {
 
     private static PyClass CLASS_TYPE =
         new PyClass(
-            "type", params -> null, false, Map.of(), Map.of(), Optional.empty(), Optional.empty());
+            "type",
+            (env, params) -> null,
+            false,
+            Map.of(),
+            Map.of(),
+            Optional.empty(),
+            Optional.empty());
 
     public PyClass(
         String name,
@@ -993,12 +999,12 @@ public class Script {
     }
 
     @Override
-    public Object call(Object... params) {
-      return ctor.call(params);
+    public Object call(Environment env, Object... params) {
+      return ctor.call(env, params);
     }
 
     @Override
-    public Object[] callMethod(String methodName, Object... params) {
+    public Object[] callMethod(Environment env, String methodName, Object... params) {
       var method = classLevelMethods.get(methodName);
       if (method == null) {
         return new Object[] {};
@@ -1011,7 +1017,7 @@ public class Script {
       } else {
         methodParams = params;
       }
-      return new Object[] {method.function().call(methodParams)};
+      return new Object[] {method.function().call(env, methodParams)};
     }
 
     @Override
@@ -2712,7 +2718,7 @@ public class Script {
     }
 
     private Function createFunction(Context enclosingContext) {
-      return params -> {
+      return (env, params) -> {
         if (args.size() != params.length) {
           throw new IllegalArgumentException(
               String.format(
@@ -2887,7 +2893,7 @@ public class Script {
     }
 
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       // Treat calls on an interface as a "cast" that attempts to promote params[0] from a
       // Script.Function to a proxy for this interface.
       if (clss.isInterface()) {
@@ -2898,7 +2904,7 @@ public class Script {
         }
         var param = params[0];
         if (param instanceof Function function) {
-          return InterfaceProxy.promoteFunctionToJavaInterface(clss, function);
+          return InterfaceProxy.promoteFunctionToJavaInterface(env, clss, function);
         } else {
           throw new IllegalArgumentException(
               "Calling interface %s with non-function param of type %s"
@@ -2943,7 +2949,7 @@ public class Script {
   }
 
   public interface Function {
-    Object call(Object... params);
+    Object call(Environment env, Object... params);
 
     static void expectNumParams(Object[] params, int n, Object message) {
       if (params.length != n) {
@@ -2982,7 +2988,7 @@ public class Script {
 
   public static class IntFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof String string) {
@@ -2995,7 +3001,7 @@ public class Script {
 
   public static class FloatFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof String string) {
@@ -3008,7 +3014,7 @@ public class Script {
 
   public static class StrFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       return PyObjects.toString(params[0]);
     }
@@ -3016,7 +3022,7 @@ public class Script {
 
   public static class BoolFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       return convertToBool(params[0]);
     }
@@ -3024,7 +3030,7 @@ public class Script {
 
   public static class LenFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var value = params[0];
       if (value.getClass().isArray()) {
@@ -3045,7 +3051,7 @@ public class Script {
 
   public static class TupleFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectMaxParams(params, 1);
       if (params.length == 0) {
         return new PyTuple(new Object[] {});
@@ -3058,7 +3064,7 @@ public class Script {
 
   public static class ListFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectMaxParams(params, 1);
       if (params.length == 0) {
         return new PyList();
@@ -3074,7 +3080,7 @@ public class Script {
 
   public record PrintFunction(Context context) implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       @SuppressWarnings("unchecked")
       var out = (Consumer<String>) context.getVariable("__stdout__");
       out.accept(Arrays.stream(params).map(PyObjects::toString).collect(joining(" ")));
@@ -3084,7 +3090,7 @@ public class Script {
 
   public record TypeFunction(SymbolCache symbolCache) implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof JavaClassId classId) {
@@ -3097,14 +3103,14 @@ public class Script {
 
   public static class RangeFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       return new RangeIterable(params);
     }
   }
 
   public static class EnumerateFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       if (params.length == 0 || params.length > 2) {
         throw new IllegalArgumentException(
             "Expected 1 or 2 params but got %d for function: enumerate".formatted(params.length));
@@ -3156,7 +3162,7 @@ public class Script {
 
   public static class AbsFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var num = (Number) params[0];
       return num.doubleValue() > 0. ? num : Numbers.negate(num);
@@ -3165,7 +3171,7 @@ public class Script {
 
   public static class RoundFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var num = (Number) params[0];
       return Math.round(num.floatValue());
@@ -3174,7 +3180,7 @@ public class Script {
 
   public static class MinFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       if (params.length == 0) {
         throw new IllegalArgumentException("min expected at least 1 argument, got 0");
       }
@@ -3191,7 +3197,7 @@ public class Script {
 
   public static class MaxFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       if (params.length == 0) {
         throw new IllegalArgumentException("max expected at least 1 argument, got 0");
       }
@@ -3208,7 +3214,7 @@ public class Script {
 
   public static class OrdFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       if (params[0] instanceof String string && string.length() == 1) {
         return (int) string.charAt(0);
@@ -3221,7 +3227,7 @@ public class Script {
 
   public static class ChrFunction implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       if (params[0] instanceof Integer codePointInteger) {
         int codePoint = codePointInteger;
@@ -3250,7 +3256,7 @@ public class Script {
       if (caller instanceof Function function) {
         try {
           context.enterFunction(lineno);
-          return function.call(paramValues);
+          return function.call(context.env(), paramValues);
         } finally {
           context.leaveFunction();
         }
@@ -3361,10 +3367,10 @@ public class Script {
       Object object, String methodName, SymbolCache symbolCache, Expression objectExpression)
       implements Function {
     @Override
-    public Object call(Object... params) {
+    public Object call(Environment env, Object... params) {
       Object[] pyObjectMethodResult;
       if (object instanceof PyObject pyObject
-          && (pyObjectMethodResult = pyObject.callMethod(methodName, params)).length == 1) {
+          && (pyObjectMethodResult = pyObject.callMethod(env, methodName, params)).length == 1) {
         return pyObjectMethodResult[0];
       }
 
@@ -3403,7 +3409,7 @@ public class Script {
                           /* traverseSuperclasses= */ true))
               .map(Method.class::cast);
       if (matchedMethod.isPresent()) {
-        InterfaceProxy.promoteFunctionalParams(matchedMethod.get(), mappedParams);
+        InterfaceProxy.promoteFunctionalParams(env, matchedMethod.get(), mappedParams);
         try {
           return matchedMethod.get().invoke(isStaticMethod ? null : object, mappedParams);
         } catch (IllegalAccessException | InvocationTargetException e) {
@@ -3451,10 +3457,12 @@ public class Script {
   public static class InterfaceProxy implements InvocationHandler {
 
     private static final Object[] EMPTY_ARGS = new Object[0];
+    private final Environment env;
     private final Function function;
     private final boolean multipleMethods;
 
-    private InterfaceProxy(Function function, boolean multipleMethods) {
+    private InterfaceProxy(Environment env, Function function, boolean multipleMethods) {
+      this.env = env;
       this.function = function;
       this.multipleMethods = multipleMethods;
     }
@@ -3465,11 +3473,11 @@ public class Script {
      * @param iface
      * @param function
      */
-    public static Object implement(Class<?> iface, Function function) {
+    public static Object implement(Environment env, Class<?> iface, Function function) {
       return Proxy.newProxyInstance(
           iface.getClassLoader(),
           new Class<?>[] {iface},
-          new InterfaceProxy(function, numAbstractMethods(iface) > 1));
+          new InterfaceProxy(env, function, numAbstractMethods(iface) > 1));
     }
 
     @Override
@@ -3478,27 +3486,29 @@ public class Script {
         args = EMPTY_ARGS;
       }
       if (multipleMethods) {
-        return function.call(method, args);
+        return function.call(env, method, args);
       } else {
-        return function.call(args);
+        return function.call(env, args);
       }
     }
 
-    public static void promoteFunctionalParams(Executable executable, Object[] params) {
+    public static void promoteFunctionalParams(
+        Environment env, Executable executable, Object[] params) {
       for (int i = 0; i < params.length; ++i) {
         var param = params[i];
         Class<?> functionalParamType;
         if (param instanceof Function function
             && (functionalParamType = executable.getParameterTypes()[i]).isInterface()
             && functionalParamType != Function.class) {
-          params[i] = implement(functionalParamType, function);
+          params[i] = implement(env, functionalParamType, function);
         }
       }
     }
 
-    public static Object promoteFunctionToJavaInterface(Class<?> clazz, Function function) {
+    public static Object promoteFunctionToJavaInterface(
+        Environment env, Class<?> clazz, Function function) {
       if (clazz.isInterface() && clazz != Function.class) {
-        return implement(clazz, function);
+        return implement(env, clazz, function);
       }
       return function;
     }
@@ -3625,9 +3635,7 @@ public class Script {
     }
   }
 
-  // TODO(maxuser): Split this into a script-global Environment object that's passed into
-  // Function::call so that globals can be accessed from script functions.
-  public static class Context {
+  private static class Context {
     private static final Object NOT_FOUND = new Object();
 
     private final Context enclosingContext;
@@ -3660,6 +3668,10 @@ public class Script {
       this.globals = globals;
       this.enclosingContext = enclosingContext == globals ? null : enclosingContext;
       this.classMethodName = classMethodName;
+    }
+
+    public Environment env() {
+      return globals;
     }
 
     public void setScriptFilename(String filename) {
