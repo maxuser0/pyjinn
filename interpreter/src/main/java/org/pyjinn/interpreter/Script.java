@@ -45,7 +45,7 @@ public class Script {
 
   private final ClassLoader classLoader;
   private final SymbolCache symbolCache;
-  private final Context globals;
+  private final GlobalContext globals;
 
   public interface DebugLogger {
     void log(String str, Object... args);
@@ -78,7 +78,7 @@ public class Script {
       BiFunction<Class<?>, String, Set<String>> methodMapping) {
     this.classLoader = classLoader;
     this.symbolCache = new SymbolCache(classMapping, fieldMapping, methodMapping);
-    this.globals = Context.createGlobals(symbolCache);
+    this.globals = GlobalContext.create(symbolCache);
   }
 
   public Context globals() {
@@ -124,7 +124,7 @@ public class Script {
       this.symbolCache = symbolCache;
     }
 
-    public void parseGlobals(JsonElement element, Context globals) {
+    public void parseGlobals(JsonElement element, GlobalContext globals) {
       String type = getType(element);
       switch (type) {
         case "Module":
@@ -3560,61 +3560,34 @@ public class Script {
     }
   }
 
-  public static class Context {
-    private static final Object NOT_FOUND = new Object();
+  public interface Environment {
+    Object getVariable(String name);
 
-    // TODO(maxuser): Organize the global contextual state into a separate object shared by all the
-    // contexts.
-    private final Context globals;
-    private final Context enclosingContext;
-    private final ClassMethodName classMethodName;
-    private final List<Statement> globalStatements; // set only for global context
+    void setVariable(String name, Object value);
+
+    void deleteVariable(String name);
+  }
+
+  private static class GlobalContext extends Context implements Environment {
+    private String globalScriptFilename;
+    private final List<Statement> globalStatements;
+
     // NOTE: globalCallStack does not support multithreaded scripts.
-    private final Deque<CallSite> globalCallStack; // set only for global context
-    private String globalScriptFilename; // set only for global context
-    private Set<String> globalVarNames = null;
-    private final Map<String, Object> vars = new HashMap<>();
-    private Object returnValue;
-    private boolean returned = false;
-    private int loopDepth = 0;
-    private boolean breakingLoop = false;
+    private final Deque<CallSite> globalCallStack;
 
-    private record ClassMethodName(String type, String method) {}
-
-    private record CallSite(ClassMethodName classMethodName, int lineno) {}
-
-    private Context() {
+    private GlobalContext() {
       globals = this;
-      enclosingContext = null;
-      classMethodName = new ClassMethodName("<>", "<>");
       globalStatements = new ArrayList<>();
       globalScriptFilename = "<stdin>";
       globalCallStack = new ArrayDeque<>();
     }
 
-    private Context(Context globals, Context enclosingContext) {
-      this(globals, enclosingContext, enclosingContext.classMethodName);
-    }
-
-    private Context(Context globals, Context enclosingContext, ClassMethodName classMethodName) {
-      this.globals = globals;
-      this.enclosingContext = enclosingContext == globals ? null : enclosingContext;
-      this.classMethodName = classMethodName;
-      this.globalStatements = null; // Defined only for global context.
-      this.globalScriptFilename = null; // Defined only for global context.
-      this.globalCallStack = null; // Defined only for global context.
-    }
-
-    public void setScriptFilename(String filename) {
-      if (this != globals) {
-        throw new IllegalArgumentException("Cannot set script filename for non-global context");
-      }
-      globalScriptFilename = filename;
-    }
-
-    public static Context createGlobals(SymbolCache symbolCache) {
-      var context = new Context();
+    public static GlobalContext create(SymbolCache symbolCache) {
+      var context = new GlobalContext();
       context.setVariable("__stdout__", (Consumer<String>) System.out::println);
+
+      // TODO(maxuser): Most of these functions are stateless, so share their instances across
+      // scripts/contexts.
       context.setVariable("math", new JavaClassId(math.class, symbolCache));
       context.setVariable("int", new IntFunction());
       context.setVariable("float", new FloatFunction());
@@ -3634,6 +3607,66 @@ public class Script {
       context.setVariable("ord", new OrdFunction());
       context.setVariable("chr", new ChrFunction());
       return context;
+    }
+
+    public void addGlobalStatement(Statement statement) {
+      globalStatements.add(statement);
+    }
+
+    /**
+     * Executes statements added via {@code addGlobalStatement} since last call to {@code
+     * execGlobalStatements}.
+     */
+    public void execGlobalStatements() {
+      for (var statement : globalStatements) {
+        globals.exec(statement);
+      }
+      globalStatements.clear();
+    }
+  }
+
+  // TODO(maxuser): Split this into a script-global Environment object that's passed into
+  // Function::call so that globals can be accessed from script functions.
+  public static class Context {
+    private static final Object NOT_FOUND = new Object();
+
+    private final Context enclosingContext;
+    private final ClassMethodName classMethodName;
+    private Set<String> globalVarNames = null;
+    private Object returnValue;
+    private boolean returned = false;
+    private int loopDepth = 0;
+    private boolean breakingLoop = false;
+
+    protected GlobalContext globals;
+    protected final Map<String, Object> vars = new HashMap<>();
+
+    private record ClassMethodName(String type, String method) {}
+
+    protected record CallSite(ClassMethodName classMethodName, int lineno) {}
+
+    // Default constructor is used only for GlobalContext subclass.
+    private Context() {
+      enclosingContext = null;
+      classMethodName = new ClassMethodName("<>", "<>");
+    }
+
+    private Context(GlobalContext globals, Context enclosingContext) {
+      this(globals, enclosingContext, enclosingContext.classMethodName);
+    }
+
+    private Context(
+        GlobalContext globals, Context enclosingContext, ClassMethodName classMethodName) {
+      this.globals = globals;
+      this.enclosingContext = enclosingContext == globals ? null : enclosingContext;
+      this.classMethodName = classMethodName;
+    }
+
+    public void setScriptFilename(String filename) {
+      if (this != globals) {
+        throw new IllegalArgumentException("Cannot set script filename for non-global context");
+      }
+      globals.globalScriptFilename = filename;
     }
 
     public void enterFunction(int lineno) {
@@ -3658,27 +3691,6 @@ public class Script {
         globalVarNames = new HashSet<>();
       }
       globalVarNames.add(name);
-    }
-
-    public void addGlobalStatement(Statement statement) {
-      if (this != globals) {
-        throw new IllegalStateException("Cannot add global statements in local context");
-      }
-      globalStatements.add(statement);
-    }
-
-    /**
-     * Executes statements added via {@code addGlobalStatement} since last call to {@code
-     * execGlobalStatements}.
-     */
-    public void execGlobalStatements() {
-      if (this != globals) {
-        throw new IllegalStateException("Cannot execute global statements in local context");
-      }
-      for (var statement : globalStatements) {
-        globals.exec(statement);
-      }
-      globalStatements.clear();
     }
 
     /** Call this instead of Statement.exec directly for proper attribution with exceptions. */
@@ -3718,17 +3730,16 @@ public class Script {
       return (BoundFunction) getVariable(name);
     }
 
-    public Context setVariable(String name, Object value) {
+    public void setVariable(String name, Object value) {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
         globals.vars.put(name, value);
       } else {
         vars.put(name, value);
       }
-      return this;
     }
 
-    public Context setVariable(Identifier id, Object value) {
-      return setVariable(id.name(), value);
+    public void setVariable(Identifier id, Object value) {
+      setVariable(id.name(), value);
     }
 
     public Object getVariable(String name) {
