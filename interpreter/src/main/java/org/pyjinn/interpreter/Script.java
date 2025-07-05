@@ -5,6 +5,7 @@ package org.pyjinn.interpreter;
 
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toSet;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -106,12 +107,12 @@ public class Script {
     return this;
   }
 
-  public FunctionDef getFunction(String name) {
-    return globals.getBoundFunction(name).function();
+  public BoundFunction getFunction(String name) {
+    return globals.getBoundFunction(name);
   }
 
-  public Object invoke(FunctionDef function, Object... args) {
-    return function.invoke(globals, args);
+  public Object invoke(BoundFunction function, Object... args) {
+    return function.call(globals, args);
   }
 
   public static class JsonAstParser {
@@ -216,14 +217,21 @@ public class Script {
     private FunctionDef parseFunctionDef(String enclosingClassName, JsonElement element) {
       var identifier = new Identifier(getAttr(element, "name").getAsString());
       var decorators = getDecorators(element);
-      List<FunctionArg> args =
-          parseFunctionArgs(
-              getAttr(getAttr(element, "args").getAsJsonObject(), "args").getAsJsonArray());
+      var argsObject = getAttr(element, "args").getAsJsonObject();
+      List<FunctionArg> args = parseFunctionArgs(getAttr(argsObject, "args").getAsJsonArray());
+      List<Expression> defaults =
+          Optional.ofNullable(getAttr(argsObject, "defaults"))
+              .map(
+                  d ->
+                      StreamSupport.stream(d.getAsJsonArray().spliterator(), false)
+                          .map(this::parseExpression)
+                          .toList())
+              .orElse(List.of());
       Statement body = parseStatementBlock(getBody(element));
       // TODO(maxuser): Support default args and keyword args.
       var func =
           new FunctionDef(
-              getLineno(element), enclosingClassName, identifier, decorators, args, body);
+              getLineno(element), enclosingClassName, identifier, decorators, args, defaults, body);
       return func;
     }
 
@@ -471,6 +479,8 @@ public class Script {
           {
             var func = parseExpressionWithContext(getAttr(element, "func"), ParseContext.CALLER);
             var args = getAttr(element, "args").getAsJsonArray();
+            Optional<JsonArray> keywords =
+                Optional.ofNullable(getAttr(element, "keywords")).map(JsonElement::getAsJsonArray);
             if (func instanceof JavaClass) {
               if (args.size() != 1) {
                 throw new IllegalArgumentException(
@@ -497,7 +507,14 @@ public class Script {
                   func,
                   StreamSupport.stream(args.spliterator(), false)
                       .map(this::parseExpression)
-                      .toList());
+                      .toList(),
+                  keywords
+                      .map(
+                          k ->
+                              StreamSupport.stream(k.spliterator(), false)
+                                  .map(this::parseKeyword)
+                                  .toList())
+                      .orElse(List.of()));
             }
           }
 
@@ -583,6 +600,17 @@ public class Script {
       throw new IllegalArgumentException("Unknown expression type: " + element.toString());
     }
 
+    private KeywordArg parseKeyword(JsonElement element) {
+      String type = getType(element);
+      if (!"keyword".equals(type)) {
+        throw new IllegalArgumentException(
+            "Expected function call arg of type \"keyword\" but got: " + type);
+      }
+      var arg = getAttr(element, "arg");
+      var value = getAttr(element, "value");
+      return new KeywordArg(arg.getAsString(), parseExpression(value));
+    }
+
     private Expression parseSliceExpression(JsonElement element) {
       if ("Slice".equals(getType(element))) {
         var lower = getAttr(element, "lower");
@@ -657,36 +685,103 @@ public class Script {
 
   public record Decorator(String name, List<JsonElement> keywords) {}
 
-  public record BoundFunction(FunctionDef function, Context enclosingContext) implements Function {
+  public record BoundFunction(FunctionDef function, Context enclosingContext, List<Object> defaults)
+      implements Function {
+    public BoundFunction(FunctionDef function, Context enclosingContext) {
+      this(function, enclosingContext, function.evalArgDefaults(enclosingContext));
+    }
+
     @Override
     public Object call(Environment env, Object... params) {
-      if (params.length != function.args().size()) {
-        throw new IllegalArgumentException(
-            String.format(
-                "Expected %d params but got %d for function: %s",
-                function.args().size(), params.length, function.identifier().name()));
+      final List<FunctionArg> args = function.args;
+      int numParams = params.length;
+      var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
+      if (kwargs != null) {
+        --numParams; // Ignore the final arg when it's kwargs.
       }
-      return function.invoke(enclosingContext, params);
+
+      Set<String> assignedArgs = new HashSet<String>();
+      Set<String> unassignedArgs = args.stream().map(a -> a.identifier().name()).collect(toSet());
+
+      if (numParams > args.size()) {
+        throw new IllegalArgumentException(
+            "%s() takes %d positional argument%s but %d %s given"
+                .formatted(
+                    function.identifier,
+                    args.size(),
+                    args.size() == 1 ? "" : "s",
+                    params.length,
+                    params.length == 1 ? "was" : "were"));
+      }
+
+      var localContext =
+          enclosingContext.createLocalContext(
+              function.enclosingClassName, function.identifier.name());
+
+      // Assign positional args.
+      for (int i = 0; i < numParams; ++i) {
+        var arg = args.get(i);
+        var argValue = params[i];
+        String name = arg.identifier().name();
+        assignedArgs.add(name);
+        unassignedArgs.remove(name);
+        localContext.setVariable(name, argValue);
+      }
+
+      // Assign kwargs.
+      if (kwargs != null) {
+        for (var entry : kwargs.entrySet()) {
+          var name = entry.getKey();
+          if (assignedArgs.contains(name)) {
+            throw new IllegalArgumentException(
+                "%s() got multiple values for argument '%s'"
+                    .formatted(function.identifier.name(), name));
+          }
+          if (!unassignedArgs.contains(name)) {
+            throw new IllegalArgumentException(
+                "%s() got an unexpected keyword argument '%s'"
+                    .formatted(function.identifier.name(), name));
+          }
+          assignedArgs.add(name);
+          unassignedArgs.remove(name);
+          localContext.setVariable(name, entry.getValue());
+        }
+      }
+
+      // Assign default values to unassigned args.
+      int defaultsOffset = args.size() - defaults.size();
+      for (int i = 0; i < defaults.size(); ++i) {
+        String name = args.get(i + defaultsOffset).identifier().name();
+        if (unassignedArgs.contains(name)) {
+          assignedArgs.add(name);
+          unassignedArgs.remove(name);
+          localContext.setVariable(name, defaults.get(i));
+        }
+      }
+
+      // Verify that all args are assigned.
+      if (!unassignedArgs.isEmpty()) {
+        throw new IllegalArgumentException(
+            "%s() missing %d positional arguments: %s"
+                .formatted(function.identifier.name(), unassignedArgs.size(), unassignedArgs));
+      }
+
+      localContext.exec(function.body);
+      return localContext.returnValue();
     }
   }
 
   // `type` is an array of length 1 because CtorFunction needs to be instantiated before the
   // surrounding class is fully defined. (Alternatively, PyClass could be mutable so that it's
   // instantiated before CtorFunction.)
-  public record CtorFunction(PyClass[] type, FunctionDef function, Context enclosingContext)
-      implements Function {
+  public record CtorFunction(PyClass[] type, BoundFunction function) implements Function {
     @Override
     public Object call(Environment env, Object... params) {
       Object[] ctorParams = new Object[params.length + 1];
       var self = new PyObject(type[0]);
       ctorParams[0] = self;
       System.arraycopy(params, 0, ctorParams, 1, params.length);
-      if (ctorParams.length != function.args().size()) {
-        throw new IllegalArgumentException(
-            "Expected %d params but got %d for %s constructor: %s"
-                .formatted(function.args().size() - 1, params.length, type[0].name, function));
-      }
-      function.invoke(enclosingContext, ctorParams);
+      function.call(env, ctorParams);
       return self;
     }
   }
@@ -743,7 +838,7 @@ public class Script {
         String methodName = methodDef.identifier().name();
         // TODO(maxuser): Support __str__/__rep__ methods for custom string output.
         if ("__init__".equals(methodName)) {
-          ctor = new CtorFunction(type, methodDef, context);
+          ctor = new CtorFunction(type, new BoundFunction(methodDef, context));
           instanceMethods.put(methodName, ctor);
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("classmethod"))) {
           classLevelMethods.put(
@@ -1031,6 +1126,7 @@ public class Script {
       Identifier identifier,
       List<Decorator> decorators,
       List<FunctionArg> args,
+      List<Expression> defaults,
       Statement body)
       implements Statement {
     /** Adds this function to the specified {@code context}. */
@@ -1039,29 +1135,8 @@ public class Script {
       context.setBoundFunction(new BoundFunction(this, context));
     }
 
-    /**
-     * Invoke this function.
-     *
-     * @param enclosingContext Context enclosing the definition of this function.
-     * @param argValues Values to pass to this function's body.
-     * @return Return value from invoking this function.
-     */
-    public Object invoke(Context enclosingContext, Object... argValues) {
-      if (args.size() != argValues.length) {
-        throw new IllegalArgumentException(
-            String.format(
-                "Invoking function `%s` with %d args but %d required",
-                identifier, argValues.length, args.size()));
-      }
-
-      var localContext = enclosingContext.createLocalContext(enclosingClassName, identifier.name());
-      for (int i = 0; i < args.size(); ++i) {
-        var arg = args.get(i);
-        var argValue = argValues[i];
-        localContext.setVariable(arg.identifier().name(), argValue);
-      }
-      localContext.exec(body);
-      return localContext.returnValue();
+    public List<Object> evalArgDefaults(Context context) {
+      return defaults.stream().map(d -> d.eval(context)).toList();
     }
 
     @Override
@@ -3267,16 +3342,35 @@ public class Script {
     }
   }
 
-  public record FunctionCall(int lineno, Expression method, List<Expression> params)
+  private record KeywordArg(String name, Expression value) {}
+
+  /**
+   * Trivial subclass of HashMap for keyword args.
+   *
+   * <p>Implementations of Function::call can check the last param for whether its runtime type is
+   * {@code KeywordArgs}.
+   */
+  public static class KeywordArgs extends HashMap<String, Object> {}
+
+  public record FunctionCall(
+      int lineno, Expression method, List<Expression> params, List<KeywordArg> kwargs)
       implements Expression {
     @Override
     public Object eval(Context context) {
       var caller = method.eval(context);
-      Object[] paramValues = params.stream().map(p -> p.eval(context)).toArray(Object[]::new);
+      // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
+      List<Object> paramValues = params.stream().map(p -> p.eval(context)).collect(toList());
+      if (!kwargs.isEmpty()) {
+        var kwargsMap = new KeywordArgs();
+        for (var kwarg : kwargs) {
+          kwargsMap.put(kwarg.name(), kwarg.value().eval(context));
+        }
+        paramValues.add(kwargsMap);
+      }
       if (caller instanceof Function function) {
         try {
           context.enterFunction(lineno);
-          return function.call(context.env(), paramValues);
+          return function.call(context.env(), paramValues.toArray(Object[]::new));
         } finally {
           context.leaveFunction();
         }
