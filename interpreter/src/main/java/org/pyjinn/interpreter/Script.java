@@ -786,7 +786,7 @@ public class Script {
     }
   }
 
-  public record ClassFieldDef(Identifier identifier, Optional<Expression> value) {}
+  public record ClassFieldDef(Identifier identifier, Optional<Expression> defaultValue) {}
 
   public record ClassDef(
       int lineno,
@@ -803,27 +803,44 @@ public class Script {
       Optional<Decorator> dataclass =
           decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
       if (dataclass.isPresent()) {
-        var initializedFields = fields.stream().filter(f -> f.value().isPresent()).toList();
-        var uninitializedFieldNames =
-            fields.stream()
-                .filter(f -> f.value().isEmpty())
-                .map(ClassFieldDef::identifier)
-                .map(Identifier::name)
-                .toList();
+        // Validate that all fields with default values appear after all fields without defaults.
+        List<Expression> defaults = new ArrayList<>();
+        for (var field : fields) {
+          if (field.defaultValue().isPresent()) {
+            defaults.add(field.defaultValue().get());
+          } else if (!defaults.isEmpty()) {
+            throw new IllegalArgumentException(
+                "non-default argument '%s' follows default argument"
+                    .formatted(field.identifier().name()));
+          }
+        }
+
         ctor =
-            (env, params) -> {
-              Function.expectNumParams(
-                  params, uninitializedFieldNames.size(), identifier.name() + ".__init__");
-              var object = new PyObject(type[0]);
-              for (var field : initializedFields) {
-                object.__dict__.__setitem__(
-                    field.identifier().name(), field.value().get().eval(context));
-              }
-              for (int i = 0; i < params.length; ++i) {
-                object.__dict__.__setitem__(uninitializedFieldNames.get(i), params[i]);
-              }
-              return object;
-            };
+            new BoundFunction(
+                new FunctionDef(
+                    lineno,
+                    identifier.name(),
+                    new Identifier("__init__"),
+                    /* decorators= */ List.of(),
+                    /* args= */ fields.stream().map(f -> new FunctionArg(f.identifier)).toList(),
+                    defaults,
+                    new Statement() {
+                      @Override
+                      public void exec(Context context) {
+                        var object = new PyObject(type[0]);
+                        for (var field : fields) {
+                          String name = field.identifier().name();
+                          object.__dict__.__setitem__(name, context.getVariable(name));
+                        }
+                        context.returnWithValue(object);
+                      }
+
+                      @Override
+                      public int lineno() {
+                        return lineno;
+                      }
+                    }),
+                context);
       } else {
         ctor =
             (env, params) -> {
@@ -880,7 +897,7 @@ public class Script {
       if (!dataclass.isPresent()) {
         for (var field : fields) {
           field
-              .value()
+              .defaultValue()
               .ifPresent(
                   v -> type[0].__dict__.__setitem__(field.identifier().name(), v.eval(context)));
         }
@@ -939,7 +956,8 @@ public class Script {
                   f ->
                       "\n  %s: any%s"
                           .formatted(
-                              f.identifier(), f.value().map(v -> " = " + v.toString()).orElse("")))
+                              f.identifier(),
+                              f.defaultValue().map(v -> " = " + v.toString()).orElse("")))
               .collect(joining());
 
       var methodsString =
