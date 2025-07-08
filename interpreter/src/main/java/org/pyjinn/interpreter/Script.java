@@ -92,7 +92,7 @@ public class Script {
 
   public Script parse(JsonElement element, String scriptFilename) {
     globals.setScriptFilename(scriptFilename);
-    var parser = new JsonAstParser(classLoader, symbolCache);
+    var parser = new JsonAstParser(scriptFilename, classLoader, symbolCache);
     parser.parseGlobals(element, globals);
     return this;
   }
@@ -119,8 +119,10 @@ public class Script {
 
     private final ClassLoader classLoader;
     private final SymbolCache symbolCache;
+    private final String filename;
 
-    public JsonAstParser(ClassLoader classLoader, SymbolCache symbolCache) {
+    public JsonAstParser(String filename, ClassLoader classLoader, SymbolCache symbolCache) {
+      this.filename = filename;
       this.classLoader = classLoader;
       this.symbolCache = symbolCache;
     }
@@ -152,6 +154,10 @@ public class Script {
                 .map(elem -> parseStatements(elem))
                 .toList());
       }
+    }
+
+    private Import parseImport(JsonElement element) {
+      return new Import(getLineno(element));
     }
 
     private ClassDef parseClassDef(JsonElement element) {
@@ -219,6 +225,14 @@ public class Script {
       var decorators = getDecorators(element);
       var argsObject = getAttr(element, "args").getAsJsonObject();
       List<FunctionArg> args = parseFunctionArgs(getAttr(argsObject, "args").getAsJsonArray());
+      var star = getAttr(argsObject, "vararg");
+      Optional<FunctionArg> vararg =
+          star == null || star.isJsonNull()
+              ? Optional.empty()
+              : Optional.of(
+                  new FunctionArg(
+                      new Identifier(getAttr(star.getAsJsonObject(), "arg").getAsString())));
+
       List<Expression> defaults =
           Optional.ofNullable(getAttr(argsObject, "defaults"))
               .map(
@@ -228,10 +242,17 @@ public class Script {
                           .toList())
               .orElse(List.of());
       Statement body = parseStatementBlock(getBody(element));
-      // TODO(maxuser): Support default args and keyword args.
+      // TODO(maxuser): Support **kwargs.
       var func =
           new FunctionDef(
-              getLineno(element), enclosingClassName, identifier, decorators, args, defaults, body);
+              getLineno(element),
+              enclosingClassName,
+              identifier,
+              decorators,
+              args,
+              vararg,
+              defaults,
+              body);
       return func;
     }
 
@@ -239,6 +260,10 @@ public class Script {
       try {
         String type = getType(element);
         switch (type) {
+          case "Import":
+          case "ImportFrom":
+            return parseImport(element);
+
           case "ClassDef":
             return parseClassDef(element);
 
@@ -503,6 +528,7 @@ public class Script {
               }
             } else {
               return new FunctionCall(
+                  filename,
                   getLineno(element),
                   func,
                   StreamSupport.stream(args.spliterator(), false)
@@ -703,7 +729,20 @@ public class Script {
       Set<String> assignedArgs = new HashSet<String>();
       Set<String> unassignedArgs = args.stream().map(a -> a.identifier().name()).collect(toSet());
 
-      if (numParams > args.size()) {
+      var localContext =
+          enclosingContext.createLocalContext(
+              function.enclosingClassName, function.identifier.name());
+
+      // Assign additional args to vararg if there is one.
+      if (function.vararg().isPresent()) {
+        // TODO(maxuser): Check for negative length.
+        var vararg = new Object[numParams - args.size()];
+        for (int i = args.size(); i < numParams; ++i) {
+          vararg[i - args.size()] = params[i];
+        }
+        localContext.setVariable(function.vararg().get().identifier().name(), new PyTuple(vararg));
+        numParams = args.size();
+      } else if (numParams > args.size()) {
         throw new IllegalArgumentException(
             "%s() takes %d positional argument%s but %d %s given"
                 .formatted(
@@ -713,10 +752,6 @@ public class Script {
                     params.length,
                     params.length == 1 ? "was" : "were"));
       }
-
-      var localContext =
-          enclosingContext.createLocalContext(
-              function.enclosingClassName, function.identifier.name());
 
       // Assign positional args.
       for (int i = 0; i < numParams; ++i) {
@@ -786,6 +821,13 @@ public class Script {
     }
   }
 
+  public record Import(int lineno) implements Statement {
+    @Override
+    public void exec(Context context) {
+      // TODO(maxuser): implement import statements...
+    }
+  }
+
   public record ClassFieldDef(Identifier identifier, Optional<Expression> defaultValue) {}
 
   public record ClassDef(
@@ -823,6 +865,7 @@ public class Script {
                     new Identifier("__init__"),
                     /* decorators= */ List.of(),
                     /* args= */ fields.stream().map(f -> new FunctionArg(f.identifier)).toList(),
+                    /* vararg= */ Optional.empty(),
                     defaults,
                     new Statement() {
                       @Override
@@ -1144,6 +1187,7 @@ public class Script {
       Identifier identifier,
       List<Decorator> decorators,
       List<FunctionArg> args,
+      Optional<FunctionArg> vararg,
       List<Expression> defaults,
       Statement body)
       implements Statement {
@@ -2404,6 +2448,9 @@ public class Script {
       if (to == Float.class) {
         return from != Double.class;
       }
+      if (to == Long.class) {
+        return from == Integer.class || from == Long.class;
+      }
       if (to == Integer.class) {
         return from == Integer.class;
       }
@@ -3371,7 +3418,11 @@ public class Script {
   public static class KeywordArgs extends HashMap<String, Object> {}
 
   public record FunctionCall(
-      int lineno, Expression method, List<Expression> params, List<KeywordArg> kwargs)
+      String filename,
+      int lineno,
+      Expression method,
+      List<Expression> params,
+      List<KeywordArg> kwargs)
       implements Expression {
     @Override
     public Object eval(Context context) {
@@ -3387,7 +3438,7 @@ public class Script {
       }
       if (caller instanceof Function function) {
         try {
-          context.enterFunction(lineno);
+          context.enterFunction(filename, lineno);
           return function.call(context.env(), paramValues.toArray(Object[]::new));
         } finally {
           context.leaveFunction();
@@ -3547,6 +3598,13 @@ public class Script {
         } catch (IllegalAccessException | InvocationTargetException e) {
           throw new RuntimeException(e);
         }
+      } else if (object instanceof String delimiter
+          && !isStaticMethod
+          && methodName.equals("join")
+          && params.length == 1
+          && params[0] instanceof Iterable<?> sequence) {
+        // TODO(maxuser): Find a better way to support str methods.
+        return strJoin(delimiter, sequence);
       } else {
         throw new IllegalArgumentException(
             String.format(
@@ -3563,6 +3621,25 @@ public class Script {
                     .collect(joining(", "))));
       }
     }
+  }
+
+  private static String strJoin(String delimiter, Iterable<?> sequence) {
+    var out = new StringBuilder();
+    int i = 0;
+    for (var element : sequence) {
+      if (i > 0) {
+        out.append(delimiter);
+      }
+      if (element instanceof String str) {
+        out.append(str);
+      } else {
+        throw new IllegalArgumentException(
+            "sequence item %d: expected str instance, %s found"
+                .formatted(i, element.getClass().getName()));
+      }
+      ++i;
+    }
+    return out.toString();
   }
 
   private static Object[] mapMethodParams(
@@ -3713,18 +3790,18 @@ public class Script {
   }
 
   private static class GlobalContext extends Context implements Environment {
-    private String globalScriptFilename;
+    private String scriptFilename;
     private final SymbolCache symbolCache;
     private final List<Statement> globalStatements;
 
     // NOTE: globalCallStack does not support multithreaded scripts.
-    private final Deque<CallSite> globalCallStack;
+    private final Deque<CallSite> callStack;
 
     private GlobalContext(SymbolCache symbolCache) {
       globals = this;
       globalStatements = new ArrayList<>();
-      globalScriptFilename = "<stdin>";
-      globalCallStack = new ArrayDeque<>();
+      scriptFilename = "<stdin>";
+      callStack = new ArrayDeque<>();
       this.symbolCache = symbolCache;
     }
 
@@ -3755,6 +3832,10 @@ public class Script {
       context.setVariable("chr", ChrFunction.INSTANCE);
       context.setVariable("type", TypeFunction.INSTANCE);
       return context;
+    }
+
+    public void setScriptFilename(String filename) {
+      scriptFilename = filename;
     }
 
     public void addGlobalStatement(Statement statement) {
@@ -3804,7 +3885,7 @@ public class Script {
 
     private record ClassMethodName(String type, String method) {}
 
-    protected record CallSite(ClassMethodName classMethodName, int lineno) {}
+    protected record CallSite(ClassMethodName classMethodName, String filename, int lineno) {}
 
     // Default constructor is used only for GlobalContext subclass.
     private Context() {
@@ -3827,19 +3908,12 @@ public class Script {
       return globals;
     }
 
-    public void setScriptFilename(String filename) {
-      if (this != globals) {
-        throw new IllegalArgumentException("Cannot set script filename for non-global context");
-      }
-      globals.globalScriptFilename = filename;
-    }
-
-    public void enterFunction(int lineno) {
-      globals.globalCallStack.push(new CallSite(classMethodName, lineno));
+    public void enterFunction(String filename, int lineno) {
+      globals.callStack.push(new CallSite(classMethodName, filename, lineno));
     }
 
     public void leaveFunction() {
-      globals.globalCallStack.pop();
+      globals.callStack.pop();
     }
 
     public Context createLocalContext(String enclosingClassName, String enclosingMethodName) {
@@ -3864,11 +3938,16 @@ public class Script {
         statement.exec(this);
       } catch (Exception e) {
         var stackTrace = e.getStackTrace();
-        if (stackTrace.length > 0
-            && !stackTrace[0].getFileName().equals(globals.globalScriptFilename)) {
+        if (stackTrace.length > 0 && !stackTrace[0].getFileName().toLowerCase().endsWith(".pyj")) {
           var scriptStack = new ArrayList<CallSite>();
-          scriptStack.add(new CallSite(classMethodName, statement.lineno()));
-          scriptStack.addAll(globals.globalCallStack);
+          scriptStack.add(
+              new CallSite(
+                  classMethodName,
+                  globals.callStack.isEmpty()
+                      ? globals.scriptFilename
+                      : globals.callStack.peek().filename(),
+                  statement.lineno()));
+          scriptStack.addAll(globals.callStack);
 
           var newStackTrace = new StackTraceElement[stackTrace.length + scriptStack.size()];
           for (int i = 0; i < scriptStack.size(); ++i) {
@@ -3877,7 +3956,7 @@ public class Script {
                 new StackTraceElement(
                     scriptFrame == null ? "<null>" : scriptFrame.classMethodName().type,
                     scriptFrame == null ? "<null>" : scriptFrame.classMethodName().method,
-                    globals.globalScriptFilename,
+                    scriptFrame == null ? "<null>" : scriptFrame.filename,
                     scriptFrame == null ? -1 : scriptFrame.lineno());
           }
           System.arraycopy(stackTrace, 0, newStackTrace, scriptStack.size(), stackTrace.length);

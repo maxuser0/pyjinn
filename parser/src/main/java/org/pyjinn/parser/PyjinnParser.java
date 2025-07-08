@@ -186,6 +186,32 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   }
 
   @Override
+  public JsonElement visitImport_stmt(PythonParser.Import_stmtContext ctx) {
+    if (ctx.import_name() != null) {
+      var node = createNode(ctx, "Import");
+      var names = new JsonArray();
+      var alias = createNode("alias");
+      alias.addProperty("name", ctx.import_name().getChild(1).getText());
+      // TODO(maxuser): "asname" => ctx.import_name().dotted_as_names().getText())
+      alias.add("asname", JsonNull.INSTANCE);
+      names.add(alias);
+      node.add("names", names);
+      return node;
+    } else if (ctx.import_from() != null) {
+      var node = createNode(ctx, "ImportFrom");
+      node.addProperty("module", ctx.import_from().dotted_name().getText());
+      var names = new JsonArray();
+      var alias = createNode("alias");
+      alias.addProperty("name", ctx.import_from().import_from_targets().getText());
+      alias.add("asname", JsonNull.INSTANCE);
+      names.add(alias);
+      node.add("names", names);
+      return node;
+    }
+    return defaultResult(ctx);
+  }
+
+  @Override
   public JsonElement visitFor_stmt(PythonParser.For_stmtContext ctx) {
     var node = createNode(ctx, "For");
     node.add("target", singletonOrTuple(visitStar_targets(ctx.star_targets())));
@@ -260,6 +286,16 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
             args.add(argNode);
           }
         }
+
+        var star = parameters.star_etc();
+        if (star == null) {
+          arguments.add("vararg", JsonNull.INSTANCE);
+        } else if (star.getChild(0).getText().equals("*")) {
+          var vararg = createNode(star, "arg");
+          vararg.addProperty("arg", star.getChild(1).getText());
+          arguments.add("vararg", vararg);
+        }
+
         var defaultParamList = parameters.param_with_default();
         if (defaultParamList != null && !defaultParamList.isEmpty()) {
           for (var defaultParam : defaultParamList) {
@@ -339,6 +375,9 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
     if (ctx.global_stmt() != null) {
       return visitGlobal_stmt(ctx.global_stmt());
+    }
+    if (ctx.import_stmt() != null) {
+      return visitImport_stmt(ctx.import_stmt());
     }
     if (ctx.star_expressions() != null) {
       var node = createNode(ctx, "Expr");
