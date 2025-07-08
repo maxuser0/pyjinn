@@ -48,6 +48,10 @@ public class Script {
   private final SymbolCache symbolCache;
   private final GlobalContext globals;
 
+  // If enabled, allow field access of attributes in JsonObject, array index into JsonArray, and
+  // automatic unboxing of JsonPrimitive.
+  private static boolean enableSimplifiedJsonSyntax = true;
+
   public interface DebugLogger {
     void log(String str, Object... args);
   }
@@ -2299,6 +2303,15 @@ public class Script {
           return String.valueOf(
               string.charAt(SliceValue.resolveIndex((Integer) indexValue, string.length())));
         }
+      } else if (enableSimplifiedJsonSyntax && arrayValue instanceof JsonArray jsonArray) {
+        if (indexValue instanceof SliceValue sliceValue) {
+          var list = jsonArray.asList();
+          var slice = sliceValue.resolveIndices(list.size());
+          return list.subList(slice.lower(), slice.upper());
+        } else {
+          int intKey = SliceValue.resolveIndex(((Number) indexValue).intValue(), jsonArray.size());
+          return unboxJsonPrimitive(jsonArray.get(intKey));
+        }
       }
 
       throw new IllegalArgumentException(
@@ -3179,6 +3192,8 @@ public class Script {
         return map.size();
       } else if (value instanceof String str) {
         return str.length();
+      } else if (value instanceof JsonArray arr) {
+        return arr.size();
       }
       throw new IllegalArgumentException(
           String.format("Object of type '%s' has no len(): %s", value.getClass().getName(), this));
@@ -3749,6 +3764,10 @@ public class Script {
         }
       }
 
+      if (enableSimplifiedJsonSyntax && objectValue instanceof JsonObject json) {
+        return unboxJsonPrimitive(json.get(field.name()));
+      }
+
       final boolean isClass;
       final Class<?> objectClass;
       if (objectValue instanceof JavaClassId javaClassId) {
@@ -3777,6 +3796,22 @@ public class Script {
     public String toString() {
       return String.format("%s.%s", object, field);
     }
+  }
+
+  private static Object unboxJsonPrimitive(JsonElement json) {
+    if (json.isJsonNull()) {
+      return null;
+    } else if (json.isJsonPrimitive()) {
+      var primitive = json.getAsJsonPrimitive();
+      if (primitive.isString()) {
+        return primitive.getAsString();
+      } else if (primitive.isBoolean()) {
+        return primitive.getAsBoolean();
+      } else if (primitive.isNumber()) {
+        return primitive.getAsNumber();
+      }
+    }
+    return json;
   }
 
   public interface Environment {
