@@ -1616,6 +1616,44 @@ class PyjinnParserTest {
   }
 
   @Test
+  void functionCallWithStarredArg() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            foo(first_arg, *starred_arg, last_arg)
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var call = expr.get("value").getAsJsonObject();
+    assertEquals("Call", call.get("type").getAsString());
+
+    var func = call.get("func").getAsJsonObject();
+    assertName("foo", func);
+
+    var args = call.get("args").getAsJsonArray();
+    assertEquals(3, args.size());
+
+    // first_arg
+    assertName("first_arg", args.get(0).getAsJsonObject());
+
+    // *starred_arg
+    var starred = args.get(1).getAsJsonObject();
+    assertEquals("Starred", starred.get("type").getAsString());
+    var starredValue = starred.get("value").getAsJsonObject();
+    assertName("starred_arg", starredValue);
+
+    // last_arg
+    assertName("last_arg", args.get(2).getAsJsonObject());
+
+    // keywords should be empty
+    var keywords = call.get("keywords").getAsJsonArray();
+    assertEquals(0, keywords.size());
+  }
+
+  @Test
   void subscriptIndexExpression() throws Exception {
     var parserOutput =
         PyjinnParser.parseTrees(

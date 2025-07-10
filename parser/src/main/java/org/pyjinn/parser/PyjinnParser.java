@@ -848,9 +848,16 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   @Override
   public JsonObject visitArgs(PythonParser.ArgsContext ctx) {
     var args = new JsonArray();
-    // Ignoring: starred_expression, assignment_expression.
-    for (var expr : ctx.expression()) {
-      args.add(visitExpression(expr));
+    // Ignoring: assignment_expression.
+    for (int i = 0; i < ctx.getChildCount(); i++) {
+      ParseTree child = ctx.getChild(i);
+      if (child instanceof PythonParser.ExpressionContext expr) {
+        args.add(visitExpression(expr));
+      } else if (child instanceof PythonParser.Starred_expressionContext expr) {
+        var starred = createNode(expr, "Starred");
+        starred.add("value", visitStarred_expression(expr));
+        args.add(starred);
+      }
     }
     var keywords = new JsonArray();
     if (ctx.kwargs() != null) {

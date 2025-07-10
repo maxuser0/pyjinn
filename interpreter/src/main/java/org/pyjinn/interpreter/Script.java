@@ -500,6 +500,9 @@ public class Script {
             }
           }
 
+        case "Starred":
+          return new StarredExpression(parseExpression(getAttr(element, "value")));
+
         case "Constant":
           return ConstantExpression.parse(
               getAttr(element, "typename").getAsString(), getAttr(element, "value"));
@@ -1839,6 +1842,8 @@ public class Script {
       return PyObjects.toRepr(value);
     }
   }
+
+  public record StarredExpression(Expression value) implements Expression {}
 
   public record Comparison(Expression lhs, Op op, Expression rhs) implements Expression {
     public enum Op {
@@ -3443,7 +3448,26 @@ public class Script {
     public Object eval(Context context) {
       var caller = method.eval(context);
       // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
-      List<Object> paramValues = params.stream().map(p -> p.eval(context)).collect(toList());
+      List<Object> paramValues = new ArrayList<>();
+      for (Expression param : params) {
+        if (param instanceof StarredExpression starred) {
+          Object value = starred.value().eval(context);
+          if (value == null) {
+            throw new IllegalArgumentException("argument after * must be an iterable, not null");
+          }
+          value = promoteArrayToTuple(value);
+          if (value instanceof Iterable<?> iterable) {
+            for (Object element : iterable) {
+              paramValues.add(element);
+            }
+          } else {
+            throw new IllegalArgumentException(
+                "argument after * must be an iterable, not " + value.getClass().getName());
+          }
+        } else {
+          paramValues.add(param.eval(context));
+        }
+      }
       if (!kwargs.isEmpty()) {
         var kwargsMap = new KeywordArgs();
         for (var kwarg : kwargs) {
