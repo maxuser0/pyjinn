@@ -186,6 +186,17 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   }
 
   @Override
+  public JsonElement visitNonlocal_stmt(PythonParser.Nonlocal_stmtContext ctx) {
+    var node = createNode(ctx, "Nonlocal");
+    var names = new JsonArray();
+    for (var name : ctx.NAME()) {
+      names.add(name.getText());
+    }
+    node.add("names", names);
+    return node;
+  }
+
+  @Override
   public JsonElement visitImport_stmt(PythonParser.Import_stmtContext ctx) {
     if (ctx.import_name() != null) {
       var node = createNode(ctx, "Import");
@@ -375,6 +386,9 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
     if (ctx.global_stmt() != null) {
       return visitGlobal_stmt(ctx.global_stmt());
+    }
+    if (ctx.nonlocal_stmt() != null) {
+      return visitNonlocal_stmt(ctx.nonlocal_stmt());
     }
     if (ctx.import_stmt() != null) {
       return visitImport_stmt(ctx.import_stmt());

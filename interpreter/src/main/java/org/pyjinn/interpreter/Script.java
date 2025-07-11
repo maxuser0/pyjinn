@@ -41,6 +41,38 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import javax.naming.Context;
+import org.pyjinn.interpreter.Script.ArrayIndex;
+import org.pyjinn.interpreter.Script.BinaryOp;
+import org.pyjinn.interpreter.Script.BoolOp;
+import org.pyjinn.interpreter.Script.BoundMethodExpression;
+import org.pyjinn.interpreter.Script.Comparison;
+import org.pyjinn.interpreter.Script.ConstantExpression;
+import org.pyjinn.interpreter.Script.DictLiteral;
+import org.pyjinn.interpreter.Script.Environment;
+import org.pyjinn.interpreter.Script.FieldAccess;
+import org.pyjinn.interpreter.Script.FormattedString;
+import org.pyjinn.interpreter.Script.FunctionCall;
+import org.pyjinn.interpreter.Script.IfExpression;
+import org.pyjinn.interpreter.Script.ItemDeleter;
+import org.pyjinn.interpreter.Script.ItemGetter;
+import org.pyjinn.interpreter.Script.ItemSetter;
+import org.pyjinn.interpreter.Script.JavaClass;
+import org.pyjinn.interpreter.Script.JavaClassId;
+import org.pyjinn.interpreter.Script.KeywordArgs;
+import org.pyjinn.interpreter.Script.Lambda;
+import org.pyjinn.interpreter.Script.Lengthable;
+import org.pyjinn.interpreter.Script.ListComprehension;
+import org.pyjinn.interpreter.Script.ListLiteral;
+import org.pyjinn.interpreter.Script.PyDict;
+import org.pyjinn.interpreter.Script.PyList;
+import org.pyjinn.interpreter.Script.PyObject;
+import org.pyjinn.interpreter.Script.PyTuple;
+import org.pyjinn.interpreter.Script.ReturnStatement;
+import org.pyjinn.interpreter.Script.SliceExpression;
+import org.pyjinn.interpreter.Script.StarredExpression;
+import org.pyjinn.interpreter.Script.TupleLiteral;
+import org.pyjinn.interpreter.Script.UnaryOp;
 
 public class Script {
 
@@ -336,6 +368,16 @@ public class Script {
           case "Global":
             {
               return new GlobalVarDecl(
+                  getLineno(element),
+                  StreamSupport.stream(
+                          getAttr(element, "names").getAsJsonArray().spliterator(), false)
+                      .map(name -> new Identifier(name.getAsString()))
+                      .toList());
+            }
+
+          case "Nonlocal":
+            {
+              return new NonlocalVarDecl(
                   getLineno(element),
                   StreamSupport.stream(
                           getAttr(element, "names").getAsJsonArray().spliterator(), false)
@@ -1785,6 +1827,21 @@ public class Script {
     public String toString() {
       return String.format(
           "global %s", globalVars.stream().map(Object::toString).collect(joining(", ")));
+    }
+  }
+
+  public record NonlocalVarDecl(int lineno, List<Identifier> nonlocalVars) implements Statement {
+    @Override
+    public void exec(Context context) {
+      for (var identifier : nonlocalVars) {
+        context.declareNonlocalVar(identifier.name());
+      }
+    }
+
+    @Override
+    public String toString() {
+      return String.format(
+          "nonlocal %s", nonlocalVars.stream().map(Object::toString).collect(joining(", ")));
     }
   }
 
@@ -3947,6 +4004,7 @@ public class Script {
     private final Context enclosingContext;
     private final ClassMethodName classMethodName;
     private Set<String> globalVarNames = null;
+    private Set<String> nonlocalVarNames = null;
     private Object returnValue;
     private boolean returned = false;
     private int loopDepth = 0;
@@ -4004,6 +4062,13 @@ public class Script {
       globalVarNames.add(name);
     }
 
+    public void declareNonlocalVar(String name) {
+      if (nonlocalVarNames == null) {
+        nonlocalVarNames = new HashSet<>();
+      }
+      nonlocalVarNames.add(name);
+    }
+
     /** Call this instead of Statement.exec directly for proper attribution with exceptions. */
     public void exec(Statement statement) {
       try {
@@ -4049,6 +4114,10 @@ public class Script {
     public void setVariable(String name, Object value) {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
         globals.vars.put(name, value);
+      } else if (enclosingContext != null
+          && nonlocalVarNames != null
+          && nonlocalVarNames.contains(name)) {
+        enclosingContext.vars.put(name, value);
       } else {
         vars.put(name, value);
       }
