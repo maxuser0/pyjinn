@@ -742,7 +742,14 @@ public class Script {
 
       // Assign additional args to vararg if there is one.
       if (function.vararg().isPresent()) {
-        // TODO(maxuser): Check for negative length.
+        if (numParams < args.size()) {
+          throw new IllegalArgumentException(
+              "%s() missing %d required positional argument%s"
+                  .formatted(
+                      function.identifier,
+                      args.size() - numParams,
+                      (args.size() - numParams) == 1 ? "" : "s"));
+        }
         var vararg = new Object[numParams - args.size()];
         for (int i = args.size(); i < numParams; ++i) {
           vararg[i - args.size()] = params[i];
@@ -1038,14 +1045,20 @@ public class Script {
      * @return return value wrapped in an array of 1 element, or empty array if no matching method
      */
     public Object[] callMethod(Environment env, String methodName, Object... params) {
-      Object[] methodParams = new Object[params.length + 1];
-      methodParams[0] = this;
-      System.arraycopy(params, 0, methodParams, 1, params.length);
-      var method = type.instanceMethods.get(methodName);
-      if (method == null) {
-        return new Object[] {};
+      var field = __dict__.get(methodName);
+      if (field != null && field instanceof Function function) {
+        return new Object[] {function.call(env, params)};
       }
-      return new Object[] {method.call(env, methodParams)};
+
+      var method = type.instanceMethods.get(methodName);
+      if (method != null) {
+        Object[] methodParams = new Object[params.length + 1];
+        methodParams[0] = this;
+        System.arraycopy(params, 0, methodParams, 1, params.length);
+        return new Object[] {method.call(env, methodParams)};
+      }
+
+      return new Object[] {};
     }
 
     @Override
