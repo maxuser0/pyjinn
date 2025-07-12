@@ -13,6 +13,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+import java.io.PrintStream;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -41,38 +42,6 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
-import javax.naming.Context;
-import org.pyjinn.interpreter.Script.ArrayIndex;
-import org.pyjinn.interpreter.Script.BinaryOp;
-import org.pyjinn.interpreter.Script.BoolOp;
-import org.pyjinn.interpreter.Script.BoundMethodExpression;
-import org.pyjinn.interpreter.Script.Comparison;
-import org.pyjinn.interpreter.Script.ConstantExpression;
-import org.pyjinn.interpreter.Script.DictLiteral;
-import org.pyjinn.interpreter.Script.Environment;
-import org.pyjinn.interpreter.Script.FieldAccess;
-import org.pyjinn.interpreter.Script.FormattedString;
-import org.pyjinn.interpreter.Script.FunctionCall;
-import org.pyjinn.interpreter.Script.IfExpression;
-import org.pyjinn.interpreter.Script.ItemDeleter;
-import org.pyjinn.interpreter.Script.ItemGetter;
-import org.pyjinn.interpreter.Script.ItemSetter;
-import org.pyjinn.interpreter.Script.JavaClass;
-import org.pyjinn.interpreter.Script.JavaClassId;
-import org.pyjinn.interpreter.Script.KeywordArgs;
-import org.pyjinn.interpreter.Script.Lambda;
-import org.pyjinn.interpreter.Script.Lengthable;
-import org.pyjinn.interpreter.Script.ListComprehension;
-import org.pyjinn.interpreter.Script.ListLiteral;
-import org.pyjinn.interpreter.Script.PyDict;
-import org.pyjinn.interpreter.Script.PyList;
-import org.pyjinn.interpreter.Script.PyObject;
-import org.pyjinn.interpreter.Script.PyTuple;
-import org.pyjinn.interpreter.Script.ReturnStatement;
-import org.pyjinn.interpreter.Script.SliceExpression;
-import org.pyjinn.interpreter.Script.StarredExpression;
-import org.pyjinn.interpreter.Script.TupleLiteral;
-import org.pyjinn.interpreter.Script.UnaryOp;
 
 public class Script {
 
@@ -140,6 +109,11 @@ public class Script {
 
   public Script redirectStdout(Consumer<String> out) {
     globals.setVariable("__stdout__", out);
+    return this;
+  }
+
+  public Script redirectStderr(Consumer<String> err) {
+    globals.setVariable("__stderr__", err);
     return this;
   }
 
@@ -3314,8 +3288,35 @@ public class Script {
     @Override
     public Object call(Environment env, Object... params) {
       @SuppressWarnings("unchecked")
-      var out = (Consumer<String>) env.getVariable("__stdout__");
-      out.accept(Arrays.stream(params).map(PyObjects::toString).collect(joining(" ")));
+      int numParams = params.length;
+      var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
+      final Consumer<String> out;
+      if (kwargs == null) {
+        out = (Consumer<String>) env.getVariable("__stdout__");
+      } else {
+        --numParams; // Ignore the final arg when it's kwargs.
+        var file = kwargs.get("file");
+        if (file == null) {
+          out = (Consumer<String>) env.getVariable("__stdout__");
+        } else if (file instanceof PrintStream printer) {
+          if (printer == System.out) {
+            out = (Consumer<String>) env.getVariable("__stdout__");
+          } else if (printer == System.err) {
+            out = (Consumer<String>) env.getVariable("__stderr__");
+          } else {
+            out = (Consumer<String>) printer::println;
+          }
+        } else {
+          throw new IllegalArgumentException(
+              "'%s' object passed as 'file' keyword arg to 'print()' does not implement java.io.PrintStream"
+                  .formatted(file.getClass().getName()));
+        }
+      }
+
+      if (out != null) {
+        out.accept(
+            Arrays.stream(params, 0, numParams).map(PyObjects::toString).collect(joining(" ")));
+      }
       return null;
     }
   }
@@ -3939,6 +3940,7 @@ public class Script {
     public static GlobalContext create(SymbolCache symbolCache) {
       var context = new GlobalContext(symbolCache);
       context.setVariable("__stdout__", (Consumer<String>) System.out::println);
+      context.setVariable("__stderr__", (Consumer<String>) System.err::println);
 
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
