@@ -201,21 +201,41 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.import_name() != null) {
       var node = createNode(ctx, "Import");
       var names = new JsonArray();
-      var alias = createNode("alias");
-      alias.addProperty("name", ctx.import_name().getChild(1).getText());
-      // TODO(maxuser): "asname" => ctx.import_name().dotted_as_names().getText())
-      alias.add("asname", JsonNull.INSTANCE);
-      names.add(alias);
+      for (var name : ctx.import_name().dotted_as_names().dotted_as_name()) {
+        var alias = createNode("alias");
+        alias.addProperty("name", name.getChild(0).getText());
+        if (name.NAME() == null) {
+          alias.add("asname", JsonNull.INSTANCE);
+        } else {
+          alias.addProperty("asname", name.NAME().getText());
+        }
+        names.add(alias);
+      }
       node.add("names", names);
       return node;
     } else if (ctx.import_from() != null) {
       var node = createNode(ctx, "ImportFrom");
       node.addProperty("module", ctx.import_from().dotted_name().getText());
       var names = new JsonArray();
-      var alias = createNode("alias");
-      alias.addProperty("name", ctx.import_from().import_from_targets().getText());
-      alias.add("asname", JsonNull.INSTANCE);
-      names.add(alias);
+      var import_from_as_names = ctx.import_from().import_from_targets().import_from_as_names();
+      if (import_from_as_names == null) {
+        var alias = createNode("alias");
+        alias.addProperty("name", "*");
+        alias.add("asname", JsonNull.INSTANCE);
+        names.add(alias);
+      } else {
+        for (var name : import_from_as_names.import_from_as_name()) {
+          var alias = createNode("alias");
+          alias.addProperty("name", name.getChild(0).getText());
+          if (name.getChildCount() < 3) {
+            alias.add("asname", JsonNull.INSTANCE);
+          } else {
+            // The literal token "as" is child[1].
+            alias.addProperty("asname", name.getChild(2).getText());
+          }
+          names.add(alias);
+        }
+      }
       node.add("names", names);
       return node;
     }

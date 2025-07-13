@@ -167,7 +167,30 @@ public class Script {
     }
 
     private Import parseImport(JsonElement element) {
-      return new Import(getLineno(element));
+      return new Import(
+          getLineno(element),
+          StreamSupport.stream(getAttr(element, "names").getAsJsonArray().spliterator(), false)
+              .map(
+                  e ->
+                      new ImportName(
+                          getAttr(e, "name").getAsString(),
+                          Optional.ofNullable(getAttrOrJavaNull(e, "asname"))
+                              .map(a -> a.getAsString())))
+              .toList());
+    }
+
+    private ImportFrom parseImportFrom(JsonElement element) {
+      return new ImportFrom(
+          getLineno(element),
+          getAttr(element, "module").getAsString(),
+          StreamSupport.stream(getAttr(element, "names").getAsJsonArray().spliterator(), false)
+              .map(
+                  e ->
+                      new ImportName(
+                          getAttr(e, "name").getAsString(),
+                          Optional.ofNullable(getAttrOrJavaNull(e, "asname"))
+                              .map(a -> a.getAsString())))
+              .toList());
     }
 
     private ClassDef parseClassDef(JsonElement element) {
@@ -271,8 +294,10 @@ public class Script {
         String type = getType(element);
         switch (type) {
           case "Import":
-          case "ImportFrom":
             return parseImport(element);
+
+          case "ImportFrom":
+            return parseImportFrom(element);
 
           case "ClassDef":
             return parseClassDef(element);
@@ -690,6 +715,11 @@ public class Script {
       return element.getAsJsonObject().get(attr);
     }
 
+    private static JsonElement getAttrOrJavaNull(JsonElement element, String attr) {
+      var result = element.getAsJsonObject().get(attr);
+      return result.isJsonNull() ? null : result;
+    }
+
     private static Identifier getId(JsonElement element) {
       return new Identifier(element.getAsJsonObject().get("id").getAsString());
     }
@@ -851,10 +881,21 @@ public class Script {
     }
   }
 
-  public record Import(int lineno) implements Statement {
+  public record ImportName(String name, Optional<String> alias) {}
+
+  public record Import(int lineno, List<ImportName> modules) implements Statement {
     @Override
     public void exec(Context context) {
       // TODO(maxuser): implement import statements...
+      System.err.printf("TODO(maxuser): implement import: %s%n", toString());
+    }
+  }
+
+  public record ImportFrom(int lineno, String module, List<ImportName> names) implements Statement {
+    @Override
+    public void exec(Context context) {
+      // TODO(maxuser): implement import statements...
+      System.err.printf("TODO(maxuser): implement import: %s%n", toString());
     }
   }
 
