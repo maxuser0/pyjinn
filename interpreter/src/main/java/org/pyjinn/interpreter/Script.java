@@ -3014,6 +3014,10 @@ public class Script {
       return map.get(key);
     }
 
+    public Object get(Object key, Object defaultValue) {
+      return map.getOrDefault(key, defaultValue);
+    }
+
     public Object setdefault(Object key) {
       return setdefault(key, null);
     }
@@ -3171,6 +3175,16 @@ public class Script {
             String.format(
                 "Expected %d params but got %d for function: %s", n, params.length, this));
       }
+    }
+  }
+
+  public static class GlobalsFunction implements Function {
+    public static final GlobalsFunction INSTANCE = new GlobalsFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 0);
+      return env.vars();
     }
   }
 
@@ -3916,6 +3930,8 @@ public class Script {
 
     void deleteVariable(String name);
 
+    PyDict vars();
+
     Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params);
   }
 
@@ -3945,6 +3961,7 @@ public class Script {
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
       context.setVariable("math", MATH_CLASS);
+      context.setVariable("globals", GlobalsFunction.INSTANCE);
       context.setVariable("int", IntFunction.INSTANCE);
       context.setVariable("float", FloatFunction.INSTANCE);
       context.setVariable("str", StrFunction.INSTANCE);
@@ -3971,6 +3988,11 @@ public class Script {
 
     public void addGlobalStatement(Statement statement) {
       globalStatements.add(statement);
+    }
+
+    @Override
+    public PyDict vars() {
+      return vars;
     }
 
     /**
@@ -4013,7 +4035,7 @@ public class Script {
     private boolean breakingLoop = false;
 
     protected GlobalContext globals;
-    protected final Map<String, Object> vars = new HashMap<>();
+    protected final PyDict vars = new PyDict();
 
     private record ClassMethodName(String type, String method) {}
 
@@ -4115,13 +4137,13 @@ public class Script {
 
     public void setVariable(String name, Object value) {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
-        globals.vars.put(name, value);
+        globals.vars.__setitem__(name, value);
       } else if (enclosingContext != null
           && nonlocalVarNames != null
           && nonlocalVarNames.contains(name)) {
-        enclosingContext.vars.put(name, value);
+        enclosingContext.vars.__setitem__(name, value);
       } else {
-        vars.put(name, value);
+        vars.__setitem__(name, value);
       }
     }
 
@@ -4133,7 +4155,7 @@ public class Script {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
         return globals.getVariable(name);
       }
-      var value = vars.getOrDefault(name, NOT_FOUND);
+      var value = vars.get(name, NOT_FOUND);
       if (value != NOT_FOUND) {
         return value;
       } else if (enclosingContext != null) {
@@ -4150,10 +4172,10 @@ public class Script {
         globals.deleteVariable(name);
         return;
       }
-      if (!vars.containsKey(name)) {
+      if (!vars.__contains__(name)) {
         throw new IllegalArgumentException(String.format("Name '%s' is not defined", name));
       }
-      vars.remove(name);
+      vars.__delitem__(name);
     }
 
     public void enterLoop() {
