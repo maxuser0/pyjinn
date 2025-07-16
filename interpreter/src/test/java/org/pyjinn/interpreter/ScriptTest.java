@@ -5568,7 +5568,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("times_two");
     System.out.println(func);
 
-    var output = script.invoke(func, x);
+    var output = func.call(script.mainModule().globals(), x);
     assertEquals(2 * Math.PI, ((Number) output).doubleValue(), 0.000000001);
   }
 
@@ -5581,7 +5581,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("distance_scalar2");
     System.out.println(func);
 
-    var output = script.invoke(func, x1, y1, x2, y2);
+    var output = func.call(script.mainModule().globals(), x1, y1, x2, y2);
     assertEquals(5., ((Number) output).doubleValue(), 0.00000001);
   }
 
@@ -5595,7 +5595,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("distance_vec3");
     System.out.println(func);
 
-    var output = script.invoke(func, p1, p2);
+    var output = func.call(script.mainModule().globals(), p1, p2);
     assertEquals(2 * Math.sqrt(2), ((Number) output).doubleValue(), 0.000000001);
   }
 
@@ -5610,7 +5610,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("populate_array");
     System.out.println(func);
 
-    var output = script.invoke(func, array, index, value);
+    var output = func.call(script.mainModule().globals(), array, index, value);
     assertArrayEquals(new String[] {"first", null, null}, (String[]) output);
   }
 
@@ -5621,7 +5621,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("type_conversions");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals("False2.3", (String) output);
   }
 
@@ -5635,7 +5635,7 @@ public class ScriptTest {
     // Execute global statement to define global var: `x = 0`
     script.exec();
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(Integer.valueOf(2), (Integer) output);
   }
 
@@ -5646,7 +5646,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("factorial");
     System.out.println(func);
 
-    var output = script.invoke(func, 5);
+    var output = func.call(script.mainModule().globals(), 5);
     assertEquals(Integer.valueOf(120), (Integer) output);
   }
 
@@ -5657,7 +5657,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("sqrt9");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(3., ((Number) output).doubleValue(), 0.000000001);
   }
 
@@ -5668,7 +5668,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("nested_func_vars");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals("baz(xyz), bar(xy), foo(x)", (String) output);
   }
 
@@ -5679,7 +5679,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("call_sibling_nested_func");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals("bar", (String) output);
   }
 
@@ -5690,7 +5690,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("list_ops");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(101, 2, 3, "bar")), output);
   }
 
@@ -5701,7 +5701,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("ctor_and_method_overloads");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals("This is 1 test.", (String) output);
   }
 
@@ -5712,7 +5712,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("range_stop");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(0, 1, 2)), output);
   }
 
@@ -5723,7 +5723,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("range_start_stop_step");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(4, 6, 8)), output);
   }
 
@@ -5734,7 +5734,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("break_for_loop");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(0, 1)), output);
   }
 
@@ -5745,7 +5745,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("numeric_types");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of("Integer", "Long", "Float", "Double")), output);
   }
 
@@ -5756,7 +5756,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("while_loop");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(0, 1, 2)), output);
   }
 
@@ -5767,7 +5767,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("break_while_loop");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(1)), output);
   }
 
@@ -5778,7 +5778,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("in_operator");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(true, true, false)), output);
   }
 
@@ -5789,7 +5789,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("bool_operators");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of("hello", "world", "!")), output);
   }
 
@@ -5800,7 +5800,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("iterate_dict");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyDict(Map.of(1, "one", 2, "two")), output);
   }
 
@@ -5811,7 +5811,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("delete_items");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyTuple(new Object[] {2, 1}), output);
   }
 
@@ -5822,7 +5822,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("assign_tuple");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyTuple(new Object[] {1, 2}), output);
   }
 
@@ -5833,7 +5833,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("list_comprehension");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(new Script.PyList(List.of(10, 20)), output);
   }
 
@@ -5844,7 +5844,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("if_else_expr");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals("foobar", output);
   }
 
@@ -5855,7 +5855,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("lambda_test");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(90, output);
   }
 
@@ -5866,7 +5866,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("binary_ops");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertTrue(output instanceof Script.PyList);
     var list = ((Script.PyList) output).getJavaList();
     assertEquals(5, list.size());
@@ -5884,7 +5884,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("formatted_string");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals("start100end", output);
   }
 
@@ -5895,7 +5895,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("exceptions");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(
         new Script.PyList(
             List.of(
@@ -5910,6 +5910,7 @@ public class ScriptTest {
     var script =
         new Script(
             ClassLoader.getSystemClassLoader(),
+            new Script.ModuleHandler() {},
             className -> className.equals("mapped.M") ? "java.lang.Math" : className,
             (clazz, fieldName) -> clazz == Math.class && fieldName.equals("p") ? "PI" : fieldName,
             (clazz, methodName) ->
@@ -5917,7 +5918,7 @@ public class ScriptTest {
     var func = script.parse(jsonAst).exec().getFunction("calc");
     System.out.println(func);
 
-    var output = script.invoke(func);
+    var output = func.call(script.mainModule().globals());
     assertEquals(6.141592653589793, ((Number) output).doubleValue(), 0.000000001);
   }
 

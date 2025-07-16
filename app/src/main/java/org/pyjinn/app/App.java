@@ -64,7 +64,7 @@ public class App {
     if (args.length == 1) {
       var func = script.getFunction(args[0]);
       System.out.println(func);
-      var returnValue = script.invoke(func);
+      var returnValue = func.call(script.mainModule().globals());
       System.out.println(returnValue);
     }
   }

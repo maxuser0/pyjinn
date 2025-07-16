@@ -22,6 +22,9 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,12 +45,56 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import org.pyjinn.parser.PyjinnParser;
 
 public class Script {
 
-  private final ClassLoader classLoader;
-  private final SymbolCache symbolCache;
-  private final GlobalContext globals;
+  public static class Module {
+    private final String name;
+    private final GlobalContext globals;
+
+    public Module(Script script, String name) {
+      this.name = name;
+      this.globals = GlobalContext.create(script.symbolCache);
+      globals.setVariable("__script__", script);
+    }
+
+    public String name() {
+      return name;
+    }
+
+    public Environment globals() {
+      return globals;
+    }
+
+    public void parse(JsonElement element, String scriptFilename) {
+      globals.setScriptFilename(scriptFilename);
+      if (globals.getVariable("__script__") instanceof Script script) {
+        var parser =
+            new JsonAstParser(
+                this,
+                scriptFilename,
+                script.moduleHandler,
+                script.classLoader,
+                globals.symbolCache);
+        parser.parseGlobals(element, globals);
+      } else {
+        throw new IllegalStateException(
+            "Expected module %s to have global __script__ of type %s but got %s"
+                .formatted(
+                    name,
+                    Script.class.getSimpleName(),
+                    globals.getVariable("__script__").getClass().getSimpleName()));
+      }
+    }
+
+    public void exec() {
+      if (globals.getVariable("__script__") instanceof Script script) {
+        script.moduleHandler.onExecModule(this);
+      }
+      globals.execGlobalStatements();
+    }
+  }
 
   // If enabled, allow field access of attributes in JsonObject, array index into JsonArray, and
   // automatic unboxing of JsonPrimitive.
@@ -65,77 +112,98 @@ public class Script {
     logger = newLogger;
   }
 
-  public Script() {
-    this(ClassLoader.getSystemClassLoader());
+  public interface ModuleHandler {
+    default void onParseImport(Module module, Import importStatement) {}
+
+    default void onParseImport(Module module, ImportFrom importFromStatement) {}
+
+    default Path getModulePath(String name) {
+      String platformSeparator = System.getProperty("file.separator");
+
+      // First try to read the file with a ".py" extension, then fall back to ".pyj";
+      String filename = name.replace(".", platformSeparator) + ".py";
+      Path path = Paths.get(filename);
+      if (!Files.exists(path)) {
+        filename = name.replace(".", platformSeparator) + ".pyj";
+        path = Paths.get(filename);
+      }
+      return path;
+    }
+
+    default void onExecModule(Module module) {}
   }
 
-  public Script(ClassLoader classLoader) {
+  private final ClassLoader classLoader;
+  private final ModuleHandler moduleHandler;
+  private final SymbolCache symbolCache;
+  private final Map<String, Module> modules = new HashMap<>();
+
+  public Consumer<String> stdout = System.out::println;
+  public Consumer<String> stderr = System.err::println;
+
+  // For use by apps that need to share custom data across modules.
+  public final PyDict vars = new PyDict();
+
+  public Script() {
     this(
-        classLoader,
+        ClassLoader.getSystemClassLoader(),
+        new ModuleHandler() {},
         className -> className,
         (clazz, fieldName) -> fieldName,
         (clazz, methodName) -> Set.of(methodName));
   }
 
+  private static final String MAIN_MODULE_NAME = "__main__";
+
   public Script(
       ClassLoader classLoader,
+      ModuleHandler moduleHandler,
       java.util.function.Function<String, String> classMapping,
       BiFunction<Class<?>, String, String> fieldMapping,
       BiFunction<Class<?>, String, Set<String>> methodMapping) {
     this.classLoader = classLoader;
+    this.moduleHandler = moduleHandler;
     this.symbolCache = new SymbolCache(classMapping, fieldMapping, methodMapping);
-    this.globals = GlobalContext.create(symbolCache);
+    this.modules.put(MAIN_MODULE_NAME, new Module(this, MAIN_MODULE_NAME));
   }
 
-  public Environment globals() {
-    return globals;
+  public Module mainModule() {
+    return modules.get(MAIN_MODULE_NAME);
+  }
+
+  public void redirectStdout(Consumer<String> out) {
+    this.stdout = out;
+  }
+
+  public void redirectStderr(Consumer<String> err) {
+    this.stderr = err;
   }
 
   public Script parse(JsonElement element) {
-    return parse(element, "<stdin>");
+    parse(element, "<stdin>");
+    return this;
   }
 
   public Script parse(JsonElement element, String scriptFilename) {
-    globals.setScriptFilename(scriptFilename);
-    var parser = new JsonAstParser(scriptFilename, classLoader, symbolCache);
-    parser.parseGlobals(element, globals);
+    mainModule().parse(element, scriptFilename);
     return this;
   }
 
   public Script exec() {
-    globals.execGlobalStatements();
-    return this;
-  }
-
-  public Script redirectStdout(Consumer<String> out) {
-    globals.setVariable("__stdout__", out);
-    return this;
-  }
-
-  public Script redirectStderr(Consumer<String> err) {
-    globals.setVariable("__stderr__", err);
+    mainModule().exec();
     return this;
   }
 
   public BoundFunction getFunction(String name) {
-    return globals.getBoundFunction(name);
+    return (BoundFunction) mainModule().globals.getVariable(name);
   }
 
-  public Object invoke(BoundFunction function, Object... args) {
-    return function.call(globals, args);
-  }
-
-  public static class JsonAstParser {
-
-    private final ClassLoader classLoader;
-    private final SymbolCache symbolCache;
-    private final String filename;
-
-    public JsonAstParser(String filename, ClassLoader classLoader, SymbolCache symbolCache) {
-      this.filename = filename;
-      this.classLoader = classLoader;
-      this.symbolCache = symbolCache;
-    }
+  public record JsonAstParser(
+      Module module,
+      String filename,
+      ModuleHandler moduleHandler,
+      ClassLoader classLoader,
+      SymbolCache symbolCache) {
 
     public void parseGlobals(JsonElement element, GlobalContext globals) {
       String type = getType(element);
@@ -167,30 +235,36 @@ public class Script {
     }
 
     private Import parseImport(JsonElement element) {
-      return new Import(
-          getLineno(element),
-          StreamSupport.stream(getAttr(element, "names").getAsJsonArray().spliterator(), false)
-              .map(
-                  e ->
-                      new ImportName(
-                          getAttr(e, "name").getAsString(),
-                          Optional.ofNullable(getAttrOrJavaNull(e, "asname"))
-                              .map(a -> a.getAsString())))
-              .toList());
+      var importStatement =
+          new Import(
+              getLineno(element),
+              StreamSupport.stream(getAttr(element, "names").getAsJsonArray().spliterator(), false)
+                  .map(
+                      e ->
+                          new ImportName(
+                              getAttr(e, "name").getAsString(),
+                              Optional.ofNullable(getAttrOrJavaNull(e, "asname"))
+                                  .map(a -> a.getAsString())))
+                  .toList());
+      moduleHandler.onParseImport(module, importStatement);
+      return importStatement;
     }
 
     private ImportFrom parseImportFrom(JsonElement element) {
-      return new ImportFrom(
-          getLineno(element),
-          getAttr(element, "module").getAsString(),
-          StreamSupport.stream(getAttr(element, "names").getAsJsonArray().spliterator(), false)
-              .map(
-                  e ->
-                      new ImportName(
-                          getAttr(e, "name").getAsString(),
-                          Optional.ofNullable(getAttrOrJavaNull(e, "asname"))
-                              .map(a -> a.getAsString())))
-              .toList());
+      var importStatement =
+          new ImportFrom(
+              getLineno(element),
+              getAttr(element, "module").getAsString(),
+              StreamSupport.stream(getAttr(element, "names").getAsJsonArray().spliterator(), false)
+                  .map(
+                      e ->
+                          new ImportName(
+                              getAttr(e, "name").getAsString(),
+                              Optional.ofNullable(getAttrOrJavaNull(e, "asname"))
+                                  .map(a -> a.getAsString())))
+                  .toList());
+      moduleHandler.onParseImport(module, importStatement);
+      return importStatement;
     }
 
     private ClassDef parseClassDef(JsonElement element) {
@@ -881,21 +955,71 @@ public class Script {
     }
   }
 
-  public record ImportName(String name, Optional<String> alias) {}
+  private Module importModule(String name) throws Exception {
+    var module = modules.get(name);
+    if (module != null) {
+      return module;
+    }
+
+    Path modulePath = moduleHandler.getModulePath(name);
+    if (!Files.exists(modulePath)) {
+      throw new IllegalArgumentException("No module named '%s' at %s".formatted(name, modulePath));
+    }
+    String scriptCode = Files.readString(modulePath);
+    JsonElement scriptAst = PyjinnParser.parse(scriptCode);
+    module = new Module(this, name);
+    module.parse(scriptAst, modulePath.toString());
+    modules.put(name, module);
+    module.exec();
+    return module;
+  }
+
+  public record ImportName(String name, Optional<String> alias) {
+    public String importedName() {
+      return alias.orElse(name);
+    }
+  }
 
   public record Import(int lineno, List<ImportName> modules) implements Statement {
     @Override
     public void exec(Context context) {
-      // TODO(maxuser): implement import statements...
-      System.err.printf("TODO(maxuser): implement import: %s%n", toString());
+      try {
+        if (context.globals.getVariable("__script__") instanceof Script script) {
+          for (var importModule : modules) {
+            var module = script.importModule(importModule.name());
+            context.setVariable(
+                importModule.importedName(),
+                new PyObject(PyClass.MODULE_TYPE, module.globals().vars()));
+          }
+        }
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
     }
   }
 
   public record ImportFrom(int lineno, String module, List<ImportName> names) implements Statement {
     @Override
     public void exec(Context context) {
-      // TODO(maxuser): implement import statements...
-      System.err.printf("TODO(maxuser): implement import: %s%n", toString());
+      try {
+        if (context.globals.getVariable("__script__") instanceof Script script) {
+          var module = script.importModule(module());
+          if (names().size() == 1 && names().get(0).name().equals("*")) {
+            for (var entry : module.globals().vars().getJavaMap().entrySet()) {
+              var name = entry.getKey();
+              var value = entry.getValue();
+              context.setVariable((String) name, value);
+            }
+          } else {
+            for (var importName : names()) {
+              var importedEntity = module.globals().getVariable(importName.name());
+              context.setVariable(importName.importedName(), importedEntity);
+            }
+          }
+        }
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
     }
   }
 
@@ -1086,10 +1210,15 @@ public class Script {
 
   public static class PyObject {
     public final PyClass type;
-    public PyDict __dict__ = new PyDict();
+    public PyDict __dict__;
 
     public PyObject(PyClass type) {
+      this(type, new PyDict());
+    }
+
+    public PyObject(PyClass type, PyDict dict) {
       this.type = type;
+      this.__dict__ = dict;
     }
 
     /**
@@ -1205,6 +1334,16 @@ public class Script {
     private static PyClass CLASS_TYPE =
         new PyClass(
             "type",
+            (env, params) -> null,
+            false,
+            Map.of(),
+            Map.of(),
+            Optional.empty(),
+            Optional.empty());
+
+    private static PyClass MODULE_TYPE =
+        new PyClass(
+            "module",
             (env, params) -> null,
             false,
             Map.of(),
@@ -3342,24 +3481,24 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
-      @SuppressWarnings("unchecked")
       int numParams = params.length;
       var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
+      var script = (Script) env.getVariable("__script__");
       final Consumer<String> out;
       if (kwargs == null) {
-        out = (Consumer<String>) env.getVariable("__stdout__");
+        out = script.stdout;
       } else {
         --numParams; // Ignore the final arg when it's kwargs.
         var file = kwargs.get("file");
         if (file == null) {
-          out = (Consumer<String>) env.getVariable("__stdout__");
+          out = script.stdout;
         } else if (file instanceof PrintStream printer) {
           if (printer == System.out) {
-            out = (Consumer<String>) env.getVariable("__stdout__");
+            out = script.stdout;
           } else if (printer == System.err) {
-            out = (Consumer<String>) env.getVariable("__stderr__");
+            out = script.stderr;
           } else {
-            out = (Consumer<String>) printer::println;
+            out = printer::println;
           }
         } else {
           throw new IllegalArgumentException(
@@ -3973,6 +4112,8 @@ public class Script {
 
     PyDict vars();
 
+    List<Statement> globalStatements();
+
     Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params);
   }
 
@@ -3996,8 +4137,6 @@ public class Script {
 
     public static GlobalContext create(SymbolCache symbolCache) {
       var context = new GlobalContext(symbolCache);
-      context.setVariable("__stdout__", (Consumer<String>) System.out::println);
-      context.setVariable("__stderr__", (Consumer<String>) System.err::println);
 
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
@@ -4034,6 +4173,11 @@ public class Script {
     @Override
     public PyDict vars() {
       return vars;
+    }
+
+    @Override
+    public List<Statement> globalStatements() {
+      return globalStatements;
     }
 
     /**
@@ -4170,10 +4314,6 @@ public class Script {
 
     public void setBoundFunction(BoundFunction boundFunction) {
       setVariable(boundFunction.function().identifier().name(), boundFunction);
-    }
-
-    public BoundFunction getBoundFunction(String name) {
-      return (BoundFunction) getVariable(name);
     }
 
     public void setVariable(String name, Object value) {
