@@ -57,6 +57,7 @@ public class Script {
       this.name = name;
       this.globals = GlobalContext.create(script.symbolCache);
       globals.setVariable("__script__", script);
+      globals.setVariable("__name__", name);
     }
 
     public String name() {
@@ -119,14 +120,8 @@ public class Script {
 
     default Path getModulePath(String name) {
       String platformSeparator = System.getProperty("file.separator");
-
-      // First try to read the file with a ".py" extension, then fall back to ".pyj";
       String filename = name.replace(".", platformSeparator) + ".py";
       Path path = Paths.get(filename);
-      if (!Files.exists(path)) {
-        filename = name.replace(".", platformSeparator) + ".pyj";
-        path = Paths.get(filename);
-      }
       return path;
     }
 
@@ -956,6 +951,10 @@ public class Script {
   }
 
   private Module importModule(String name) throws Exception {
+    // TODO(maxuser): Currently modules are cached by their symbolic name. But multiple different
+    // symbolic names can map to the same script file which can get loaded multiple times into
+    // different module instances with distinct globals. Instead, cache modules by their canonical
+    // name or file location.
     var module = modules.get(name);
     if (module != null) {
       return module;
@@ -965,6 +964,7 @@ public class Script {
     if (!Files.exists(modulePath)) {
       throw new IllegalArgumentException("No module named '%s' at %s".formatted(name, modulePath));
     }
+
     String scriptCode = Files.readString(modulePath);
     JsonElement scriptAst = PyjinnParser.parse(scriptCode);
     module = new Module(this, name);
@@ -1210,7 +1210,7 @@ public class Script {
 
   public static class PyObject {
     public final PyClass type;
-    public PyDict __dict__;
+    public final PyDict __dict__;
 
     public PyObject(PyClass type) {
       this(type, new PyDict());
@@ -1331,7 +1331,7 @@ public class Script {
     public final Optional<java.util.function.Function<PyObject, Integer>> hashMethod;
     public final Optional<java.util.function.Function<PyObject, String>> strMethod;
 
-    private static PyClass CLASS_TYPE =
+    private static final PyClass CLASS_TYPE =
         new PyClass(
             "type",
             (env, params) -> null,
@@ -1341,7 +1341,7 @@ public class Script {
             Optional.empty(),
             Optional.empty());
 
-    private static PyClass MODULE_TYPE =
+    private static final PyClass MODULE_TYPE =
         new PyClass(
             "module",
             (env, params) -> null,
@@ -2827,6 +2827,10 @@ public class Script {
       return list.iterator();
     }
 
+    public Stream<Object> stream() {
+      return list.stream();
+    }
+
     @Override
     public String toString() {
       return list.stream().map(PyObjects::toString).collect(joining(", ", "[", "]"));
@@ -4041,7 +4045,9 @@ public class Script {
       // TODO(maxuser): Support references to static inner classes and enum values.
       var objectValue = object.eval(context);
       if (objectValue instanceof PyObject pyObject) {
-        if (pyObject.__dict__.__contains__(field.name())) {
+        if (field.name().equals("__dict__")) {
+          return pyObject.__dict__;
+        } else if (pyObject.__dict__.__contains__(field.name())) {
           return pyObject.__dict__.__getitem__(field.name());
         } else if (pyObject.type.__dict__.__contains__(field.name())) {
           return pyObject.type.__dict__.__getitem__(field.name());
