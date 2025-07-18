@@ -131,7 +131,14 @@ public class Script {
   private final ClassLoader classLoader;
   private final ModuleHandler moduleHandler;
   private final SymbolCache symbolCache;
-  private final Map<String, Module> modules = new HashMap<>();
+
+  // Map from module filensame ("foo/bar/baz.py") to Module instance.
+  // Every value in this map is unique.
+  private final Map<String, Module> modulesByFilename = new HashMap<>();
+
+  // Map from module (e.g. "foo.bar.baz") to Module instance.
+  // Values in this map may be duplicates if the same module is referenced by distinct names.
+  private final Map<String, Module> modulesByName = new HashMap<>();
 
   public Consumer<String> stdout = System.out::println;
   public Consumer<String> stderr = System.err::println;
@@ -159,11 +166,11 @@ public class Script {
     this.classLoader = classLoader;
     this.moduleHandler = moduleHandler;
     this.symbolCache = new SymbolCache(classMapping, fieldMapping, methodMapping);
-    this.modules.put(MAIN_MODULE_NAME, new Module(this, MAIN_MODULE_NAME));
+    this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, MAIN_MODULE_NAME));
   }
 
   public Module mainModule() {
-    return modules.get(MAIN_MODULE_NAME);
+    return modulesByName.get(MAIN_MODULE_NAME);
   }
 
   public void redirectStdout(Consumer<String> out) {
@@ -951,27 +958,50 @@ public class Script {
   }
 
   private Module importModule(String name) throws Exception {
-    // TODO(maxuser): Currently modules are cached by their symbolic name. But multiple different
-    // symbolic names can map to the same script file which can get loaded multiple times into
-    // different module instances with distinct globals. Instead, cache modules by their canonical
-    // name or file location.
-    var module = modules.get(name);
+    Module module;
+
+    // First try to find the module by the name in the import statement.
+    module = modulesByName.get(name);
     if (module != null) {
       return module;
     }
 
+    // Get the file location of the requested modile.
     Path modulePath = moduleHandler.getModulePath(name);
     if (!Files.exists(modulePath)) {
       throw new IllegalArgumentException("No module named '%s' at %s".formatted(name, modulePath));
     }
 
+    // Next try to find the module by its filename.
+    String moduleFilename = modulePath.toString();
+    module = modulesByFilename.get(moduleFilename);
+    if (module != null) {
+      return module;
+    }
+
+    // Couldn't find the cached module, so create it.
     String scriptCode = Files.readString(modulePath);
     JsonElement scriptAst = PyjinnParser.parse(scriptCode);
-    module = new Module(this, name);
-    module.parse(scriptAst, modulePath.toString());
-    modules.put(name, module);
+    module = new Module(this, filenameToModuleName(moduleFilename));
+    module.parse(scriptAst, moduleFilename);
+    modulesByName.put(name, module);
+    modulesByFilename.put(moduleFilename, module);
     module.exec();
     return module;
+  }
+
+  public static String filenameToModuleName(String filename) {
+    // Remove the ".py" extension
+    String moduleName = filename;
+    if (moduleName.endsWith(".py")) {
+      moduleName = moduleName.substring(0, moduleName.length() - 3); // -3 for ".py"
+    }
+
+    // Replace file separators ('/' or '\') with dots
+    String platformSeparator = System.getProperty("file.separator");
+    moduleName = moduleName.replace(platformSeparator, ".");
+
+    return moduleName;
   }
 
   public record ImportName(String name, Optional<String> alias) {
