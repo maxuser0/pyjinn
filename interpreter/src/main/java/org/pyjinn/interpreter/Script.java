@@ -34,6 +34,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -143,6 +144,9 @@ public class Script {
   public Consumer<String> stdout = System.out::println;
   public Consumer<String> stderr = System.err::println;
 
+  // Set to null once the script has exited.
+  private LinkedList<Consumer<Integer>> atExitListeners = new LinkedList<>();
+
   // For use by apps that need to share custom data across modules.
   public final PyDict vars = new PyDict();
 
@@ -167,6 +171,33 @@ public class Script {
     this.moduleHandler = moduleHandler;
     this.symbolCache = new SymbolCache(classMapping, fieldMapping, methodMapping);
     this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, MAIN_MODULE_NAME));
+  }
+
+  public void atExit(Consumer<Integer> atExit) {
+    if (atExitListeners == null) {
+      // Script has already exited.
+      return;
+    }
+    atExitListeners.add(atExit);
+  }
+
+  public void exit(int status) {
+    if (atExitListeners == null) {
+      // Script has already exited.
+      return;
+    }
+    var atExitListenersReversed = atExitListeners.reversed();
+    atExitListeners = null; // null indicates that the script has exited.
+    try {
+      // Don't iterate over modulesByFilename because it doesn't include __main__.
+      for (var module : modulesByName.values()) {
+        module.globals().halt();
+      }
+    } finally {
+      for (var listener : atExitListenersReversed) {
+        listener.accept(status);
+      }
+    }
   }
 
   public Module mainModule() {
@@ -3587,6 +3618,23 @@ public class Script {
     }
   }
 
+  public static class ExitFunction implements Function {
+    public static final ExitFunction INSTANCE = new ExitFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectMinParams(params, 0);
+      expectMaxParams(params, 1);
+      if (env.getVariable("__script__") instanceof Script script) {
+        int status =
+            (params.length == 1 && params[0] != null) ? ((Number) params[0]).intValue() : 0;
+        logger.log("Calling __exit__({}) -> script.exit({}))", Arrays.toString(params), status);
+        script.exit(status);
+      }
+      return null;
+    }
+  }
+
   public static Iterable<?> getIterable(Object object) {
     object = promoteArrayToTuple(object);
     if (object instanceof String string) {
@@ -4150,6 +4198,9 @@ public class Script {
 
     List<Statement> globalStatements();
 
+    /** Prepare for exit initiated by {@code Script.exit(int)}. */
+    void halt();
+
     Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params);
   }
 
@@ -4157,6 +4208,7 @@ public class Script {
     private String scriptFilename;
     private final SymbolCache symbolCache;
     private final List<Statement> globalStatements;
+    private boolean halted = false; // If true, the script is exiting and this module must halt.
 
     // NOTE: globalCallStack does not support multithreaded scripts.
     private final Deque<CallSite> callStack;
@@ -4195,6 +4247,7 @@ public class Script {
       context.setVariable("ord", OrdFunction.INSTANCE);
       context.setVariable("chr", ChrFunction.INSTANCE);
       context.setVariable("type", TypeFunction.INSTANCE);
+      context.setVariable("__exit__", ExitFunction.INSTANCE);
       return context;
     }
 
@@ -4225,6 +4278,15 @@ public class Script {
         globals.exec(statement);
       }
       globalStatements.clear();
+    }
+
+    @Override
+    public void halt() {
+      halted = true;
+    }
+
+    public boolean halted() {
+      return halted;
     }
 
     public Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params) {
@@ -4423,7 +4485,7 @@ public class Script {
     }
 
     public boolean skipStatement() {
-      return returned || breakingLoop;
+      return returned || breakingLoop || globals.halted();
     }
 
     public boolean shouldBreak() {
