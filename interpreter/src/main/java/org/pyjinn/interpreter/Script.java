@@ -114,6 +114,15 @@ public class Script {
     logger = newLogger;
   }
 
+  private static VersionInfo versionInfo = null;
+
+  public static VersionInfo versionInfo() throws Exception {
+    if (versionInfo == null) {
+      versionInfo = VersionInfo.load();
+    }
+    return versionInfo;
+  }
+
   public interface ModuleHandler {
     default void onParseImport(Module module, Import importStatement) {}
 

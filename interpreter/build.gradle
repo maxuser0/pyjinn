@@ -1,3 +1,5 @@
+import java.text.SimpleDateFormat
+
 plugins {
     id 'java-library'
     id 'com.gradleup.shadow' version '8.3.5'
@@ -6,6 +8,19 @@ plugins {
 
 group = 'org.pyjinn'
 version = '0.4'
+
+processResources {
+    def expandProps = [
+        pyjinnVersion: version,
+        javaVersion: System.getProperty('java.version'),
+        javaVendor: System.getProperty('java.vendor'),
+        buildTimestamp: new SimpleDateFormat("MMM dd yyyy, HH:mm:ss").format(new Date())
+    ]
+    filesMatching('build.properties') {
+        expand expandProps
+    }
+    inputs.properties(expandProps)
+}
 
 repositories {
     mavenCentral()
