@@ -389,6 +389,9 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitSimple_stmt(PythonParser.Simple_stmtContext ctx) {
+    if (ctx.PASS() != null) {
+      return createNode(ctx, "Pass");
+    }
     if (ctx.BREAK() != null) {
       return createNode(ctx, "Break");
     }

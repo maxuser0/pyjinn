@@ -519,6 +519,9 @@ public class Script {
                 parseExpression(getAttr(element, "test")),
                 parseStatementBlock(getBody(element)));
 
+          case "Pass":
+            return new Pass();
+
           case "Break":
             return new Break();
 
@@ -1584,6 +1587,13 @@ public class Script {
       } finally {
         context.exitLoop();
       }
+    }
+  }
+
+  public record Pass() implements Statement {
+    @Override
+    public void exec(Context context) {
+      // Do nothing.
     }
   }
 
