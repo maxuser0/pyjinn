@@ -395,6 +395,9 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.BREAK() != null) {
       return createNode(ctx, "Break");
     }
+    if (ctx.CONTINUE() != null) {
+      return createNode(ctx, "Continue");
+    }
     if (ctx.del_stmt() != null) {
       return visitDel_stmt(ctx.del_stmt());
     }

@@ -534,6 +534,9 @@ public class Script {
           case "Break":
             return new Break();
 
+          case "Continue":
+            return new Continue();
+
           case "Try":
             {
               JsonArray finalBody = getAttr(element, "finalbody").getAsJsonArray();
@@ -1566,6 +1569,10 @@ public class Script {
           if (context.shouldBreak()) {
             break;
           }
+          if (context.shouldContinue()) {
+            context.resetContinueBit();
+            continue;
+          }
         }
       } finally {
         context.exitLoop();
@@ -1592,6 +1599,10 @@ public class Script {
           if (context.shouldBreak()) {
             break;
           }
+          if (context.shouldContinue()) {
+            context.resetContinueBit();
+            continue;
+          }
         }
       } finally {
         context.exitLoop();
@@ -1610,6 +1621,13 @@ public class Script {
     @Override
     public void exec(Context context) {
       context.breakLoop();
+    }
+  }
+
+  public record Continue() implements Statement {
+    @Override
+    public void exec(Context context) {
+      context.continueLoop();
     }
   }
 
@@ -4335,6 +4353,7 @@ public class Script {
     private boolean returned = false;
     private int loopDepth = 0;
     private boolean breakingLoop = false;
+    private boolean continuingLoop = false;
 
     protected GlobalContext globals;
     protected final PyDict vars = new PyDict();
@@ -4486,6 +4505,7 @@ public class Script {
         throw new IllegalStateException("Exited more loops than were entered");
       }
       breakingLoop = false;
+      continuingLoop = false;
     }
 
     public void breakLoop() {
@@ -4493,6 +4513,13 @@ public class Script {
         throw new IllegalStateException("'break' outside loop");
       }
       breakingLoop = true;
+    }
+
+    public void continueLoop() {
+      if (loopDepth <= 0) {
+        throw new IllegalStateException("'continue' outside loop");
+      }
+      continuingLoop = true;
     }
 
     public void returnWithValue(Object returnValue) {
@@ -4504,11 +4531,19 @@ public class Script {
     }
 
     public boolean skipStatement() {
-      return returned || breakingLoop || globals.halted();
+      return returned || breakingLoop || continuingLoop || globals.halted();
     }
 
     public boolean shouldBreak() {
       return breakingLoop;
+    }
+
+    public boolean shouldContinue() {
+      return continuingLoop;
+    }
+
+    public boolean resetContinueBit() {
+      return continuingLoop = false;
     }
 
     public Object returnValue() {
