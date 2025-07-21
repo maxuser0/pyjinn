@@ -930,48 +930,31 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
       return visitNamed_expression(ctx.named_expression());
     }
     if (ctx.expression() != null) {
+      // Expressions provided for slots of the slice expression. Does not contain colons/delimiters.
       var indices = ctx.expression();
-      var node = createNode(ctx, "Slice");
 
-      // Tracks the number of explicit expressions appearing in slice slots.
-      int numSliceExpressions = 0;
-      int numSlots = 0;
-      boolean prevWasColon = true; // Pretend to have started from a colon delimiter.
+      // Counter to get the next expression from 'indices'.
+      int expressionIndex = 0;
+
+      // Counter for the current slice part (0=lower, 1=upper, 2=step).
+      int slotIndex = 0;
+
+      // Array containing expressions for { lower, upper, step }. Omitted values are left null.
+      var slots = new JsonElement[3];
+
       for (var child : ctx.children) {
-        boolean isColon = ":".equals(child.getText());
-        boolean isBlank = isColon && prevWasColon;
-        if (isBlank || !isColon) {
-          switch (numSlots++) {
-            case 0:
-              node.add("lower", isBlank ? null : visitExpression(indices.get(numSliceExpressions)));
-              break;
-            case 1:
-              node.add("upper", isBlank ? null : visitExpression(indices.get(numSliceExpressions)));
-              break;
-            case 2:
-              node.add("step", isBlank ? null : visitExpression(indices.get(numSliceExpressions)));
-              break;
-          }
-        }
-        if (!isColon) {
-          ++numSliceExpressions;
-        }
-        prevWasColon = isColon;
-      }
-      // Fill the remaining slice slots with nulls.
-      for (int i = numSlots; i < 3; ++i) {
-        switch (i) {
-          case 0:
-            node.add("lower", null);
-            break;
-          case 1:
-            node.add("upper", null);
-            break;
-          case 2:
-            node.add("step", null);
-            break;
+        if (":".equals(child.getText())) {
+          slotIndex++;
+        } else {
+          slots[slotIndex] = visitExpression(indices.get(expressionIndex++));
         }
       }
+
+      var node = createNode(ctx, "Slice");
+      node.add("lower", slots[0]);
+      node.add("upper", slots[1]);
+      node.add("step", slots[2]);
+
       return node;
     }
     return defaultResult(ctx);

@@ -2572,7 +2572,12 @@ public class Script {
     public ResolvedSliceIndices resolveIndices(int sequenceLength) {
       int normLower = lower.map(n -> n < 0 ? sequenceLength + n : n).orElse(0);
       int normUpper = upper.map(n -> n < 0 ? sequenceLength + n : n).orElse(sequenceLength);
-      return new ResolvedSliceIndices(normLower, normUpper, step.orElse(1));
+      var indices = new ResolvedSliceIndices(normLower, normUpper, step.orElse(1));
+      if (indices.step() != 1) {
+        throw new IllegalArgumentException(
+            "Slice steps other than 1 are not supported (got step=%d)".formatted(indices.step()));
+      }
+      return indices;
     }
 
     public static int resolveIndex(int i, int length) {
