@@ -932,9 +932,46 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     if (ctx.expression() != null) {
       var indices = ctx.expression();
       var node = createNode(ctx, "Slice");
-      node.add("lower", indices.size() >= 1 ? visitExpression(indices.get(0)) : null);
-      node.add("upper", indices.size() >= 2 ? visitExpression(indices.get(1)) : null);
-      node.add("step", indices.size() >= 3 ? visitExpression(indices.get(2)) : null);
+
+      // Tracks the number of explicit expressions appearing in slice slots.
+      int numSliceExpressions = 0;
+      int numSlots = 0;
+      boolean prevWasColon = true; // Pretend to have started from a colon delimiter.
+      for (var child : ctx.children) {
+        boolean isColon = ":".equals(child.getText());
+        boolean isBlank = isColon && prevWasColon;
+        if (isBlank || !isColon) {
+          switch (numSlots++) {
+            case 0:
+              node.add("lower", isBlank ? null : visitExpression(indices.get(numSliceExpressions)));
+              break;
+            case 1:
+              node.add("upper", isBlank ? null : visitExpression(indices.get(numSliceExpressions)));
+              break;
+            case 2:
+              node.add("step", isBlank ? null : visitExpression(indices.get(numSliceExpressions)));
+              break;
+          }
+        }
+        if (!isColon) {
+          ++numSliceExpressions;
+        }
+        prevWasColon = isColon;
+      }
+      // Fill the remaining slice slots with nulls.
+      for (int i = numSlots; i < 3; ++i) {
+        switch (i) {
+          case 0:
+            node.add("lower", null);
+            break;
+          case 1:
+            node.add("upper", null);
+            break;
+          case 2:
+            node.add("step", null);
+            break;
+        }
+      }
       return node;
     }
     return defaultResult(ctx);

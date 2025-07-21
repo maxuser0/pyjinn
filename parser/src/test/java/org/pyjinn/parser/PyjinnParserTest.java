@@ -1654,7 +1654,33 @@ class PyjinnParserTest {
   }
 
   @Test
-  void subscriptIndexExpression() throws Exception {
+  void subscriptEmptyRange() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            x[:]
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var subscript = expr.get("value").getAsJsonObject();
+    assertEquals("Subscript", subscript.get("type").getAsString());
+
+    var value = subscript.get("value").getAsJsonObject();
+    assertName("x", value);
+
+    var slice = subscript.get("slice").getAsJsonObject();
+    assertEquals("Slice", slice.get("type").getAsString());
+
+    assertEquals(JsonNull.INSTANCE, slice.get("lower"));
+    assertEquals(JsonNull.INSTANCE, slice.get("upper"));
+    assertEquals(JsonNull.INSTANCE, slice.get("step"));
+  }
+
+  @Test
+  void subscriptValue() throws Exception {
     var parserOutput =
         PyjinnParser.parseTrees(
             """
@@ -1678,7 +1704,121 @@ class PyjinnParserTest {
   }
 
   @Test
-  void subscriptRangeExpression() throws Exception {
+  void subscriptColon() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            x[:]
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var subscript = expr.get("value").getAsJsonObject();
+    assertEquals("Subscript", subscript.get("type").getAsString());
+
+    var value = subscript.get("value").getAsJsonObject();
+    assertName("x", value);
+
+    var slice = subscript.get("slice").getAsJsonObject();
+    assertEquals("Slice", slice.get("type").getAsString());
+
+    assertEquals(JsonNull.INSTANCE, slice.get("lower"));
+    assertEquals(JsonNull.INSTANCE, slice.get("upper"));
+    assertEquals(JsonNull.INSTANCE, slice.get("step"));
+  }
+
+  @Test
+  void subscriptColonColon() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            x[::]
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var subscript = expr.get("value").getAsJsonObject();
+    assertEquals("Subscript", subscript.get("type").getAsString());
+
+    var value = subscript.get("value").getAsJsonObject();
+    assertName("x", value);
+
+    var slice = subscript.get("slice").getAsJsonObject();
+    assertEquals("Slice", slice.get("type").getAsString());
+
+    assertEquals(JsonNull.INSTANCE, slice.get("lower"));
+    assertEquals(JsonNull.INSTANCE, slice.get("upper"));
+    assertEquals(JsonNull.INSTANCE, slice.get("step"));
+  }
+
+  @Test
+  void subscriptColonValue() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            x[:99]
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var subscript = expr.get("value").getAsJsonObject();
+    assertEquals("Subscript", subscript.get("type").getAsString());
+
+    var value = subscript.get("value").getAsJsonObject();
+    assertName("x", value);
+
+    var slice = subscript.get("slice").getAsJsonObject();
+    assertEquals("Slice", slice.get("type").getAsString());
+
+    assertEquals(JsonNull.INSTANCE, slice.get("lower"));
+
+    var upper = slice.get("upper").getAsJsonObject();
+    assertEquals("Constant", upper.get("type").getAsString());
+    assertEquals(99, upper.get("value").getAsInt());
+
+    assertEquals(JsonNull.INSTANCE, slice.get("step"));
+  }
+
+  @Test
+  void subscriptColonValueColonValue() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            x[:99:77]
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var subscript = expr.get("value").getAsJsonObject();
+    assertEquals("Subscript", subscript.get("type").getAsString());
+
+    var value = subscript.get("value").getAsJsonObject();
+    assertName("x", value);
+
+    var slice = subscript.get("slice").getAsJsonObject();
+    assertEquals("Slice", slice.get("type").getAsString());
+
+    assertEquals(JsonNull.INSTANCE, slice.get("lower"));
+
+    var upper = slice.get("upper").getAsJsonObject();
+    assertEquals("Constant", upper.get("type").getAsString());
+    assertEquals(99, upper.get("value").getAsInt());
+
+    var step = slice.get("step").getAsJsonObject();
+    assertEquals("Constant", step.get("type").getAsString());
+    assertEquals(77, step.get("value").getAsInt());
+  }
+
+  @Test
+  void subscriptValueColonValue() throws Exception {
     var parserOutput =
         PyjinnParser.parseTrees(
             """
@@ -1707,6 +1847,35 @@ class PyjinnParserTest {
     assertEquals(99, upper.get("value").getAsInt());
 
     assertEquals(JsonNull.INSTANCE, slice.get("step"));
+  }
+
+  @Test
+  void subscriptColonColonValue() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            x[::3]
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var subscript = expr.get("value").getAsJsonObject();
+    assertEquals("Subscript", subscript.get("type").getAsString());
+
+    var value = subscript.get("value").getAsJsonObject();
+    assertName("x", value);
+
+    var slice = subscript.get("slice").getAsJsonObject();
+    assertEquals("Slice", slice.get("type").getAsString());
+
+    assertEquals(JsonNull.INSTANCE, slice.get("lower"));
+    assertEquals(JsonNull.INSTANCE, slice.get("upper"));
+
+    var step = slice.get("step").getAsJsonObject();
+    assertEquals("Constant", step.get("type").getAsString());
+    assertEquals(3, step.get("value").getAsInt());
   }
 
   @Test
