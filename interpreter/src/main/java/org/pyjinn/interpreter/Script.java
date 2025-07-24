@@ -41,6 +41,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -50,13 +51,26 @@ import org.pyjinn.parser.PyjinnParser;
 
 public class Script {
 
+  private record ClassMethodName(String type, String method) {}
+
+  private record CallSite(ClassMethodName classMethodName, String filename, int lineno) {
+    @Override
+    public String toString() {
+      return "%s.%s(%s:%d)"
+          .formatted(classMethodName.type(), classMethodName.method(), filename, lineno);
+    }
+  }
+
+  private final ThreadLocal<Deque<CallSite>> callStack =
+      ThreadLocal.withInitial(ArrayDeque<CallSite>::new);
+
   public static class Module {
     private final String name;
     private final GlobalContext globals;
 
-    public Module(Script script, String name) {
+    public Module(Script script, String filename, String name) {
       this.name = name;
-      this.globals = GlobalContext.create(script.symbolCache);
+      this.globals = GlobalContext.create(filename, script.symbolCache);
       globals.setVariable("__script__", script);
       globals.setVariable("__name__", name);
     }
@@ -70,7 +84,6 @@ public class Script {
     }
 
     public void parse(JsonElement element, String scriptFilename) {
-      globals.setScriptFilename(scriptFilename);
       if (globals.getVariable("__script__") instanceof Script script) {
         var parser =
             new JsonAstParser(
@@ -144,11 +157,11 @@ public class Script {
 
   // Map from module filensame ("foo/bar/baz.py") to Module instance.
   // Every value in this map is unique.
-  private final Map<String, Module> modulesByFilename = new HashMap<>();
+  private final Map<String, Module> modulesByFilename = new ConcurrentHashMap<>();
 
   // Map from module (e.g. "foo.bar.baz") to Module instance.
   // Values in this map may be duplicates if the same module is referenced by distinct names.
-  private final Map<String, Module> modulesByName = new HashMap<>();
+  private final Map<String, Module> modulesByName = new ConcurrentHashMap<>();
 
   public Consumer<String> stdout = System.out::println;
   public Consumer<String> stderr = System.err::println;
@@ -161,6 +174,7 @@ public class Script {
 
   public Script() {
     this(
+        "<stdin>",
         ClassLoader.getSystemClassLoader(),
         new ModuleHandler() {},
         className -> className,
@@ -171,6 +185,7 @@ public class Script {
   private static final String MAIN_MODULE_NAME = "__main__";
 
   public Script(
+      String scriptFilename,
       ClassLoader classLoader,
       ModuleHandler moduleHandler,
       java.util.function.Function<String, String> classMapping,
@@ -179,7 +194,7 @@ public class Script {
     this.classLoader = classLoader;
     this.moduleHandler = moduleHandler;
     this.symbolCache = new SymbolCache(classMapping, fieldMapping, methodMapping);
-    this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, MAIN_MODULE_NAME));
+    this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, scriptFilename, MAIN_MODULE_NAME));
   }
 
   public void atExit(Consumer<Integer> atExit) {
@@ -1028,7 +1043,7 @@ public class Script {
     // Couldn't find the cached module, so create it.
     String scriptCode = Files.readString(modulePath);
     JsonElement scriptAst = PyjinnParser.parse(scriptCode);
-    module = new Module(this, filenameToModuleName(moduleFilename));
+    module = new Module(this, moduleFilename, filenameToModuleName(moduleFilename));
     module.parse(scriptAst, moduleFilename);
     modulesByName.put(name, module);
     modulesByFilename.put(moduleFilename, module);
@@ -1063,9 +1078,25 @@ public class Script {
         if (context.globals.getVariable("__script__") instanceof Script script) {
           for (var importModule : modules) {
             var module = script.importModule(importModule.name());
-            context.setVariable(
-                importModule.importedName(),
-                new PyObject(PyClass.MODULE_TYPE, module.globals().vars()));
+
+            // To support modules with dots in their name, e.g. `import foo.bar.baz`,
+            // iterate the name parts in reverse order. For the last part (`baz`),
+            // create a PyObject whose __dict__ is the imported module's global vars
+            // and wrap each previous name part in a PyObject's __dict__. It's equivalent to:
+            //
+            // baz = imported_module.globals()
+            // _bar = object()
+            // _bar.__dict__["baz"] = _baz  # Note that Python doesn't create __dict__ for object().
+            // foo = object()
+            // foo.__dict__["bar"] = _bar
+            String[] nameParts = importModule.importedName().split("\\.");
+            var object = new PyObject(PyClass.MODULE_TYPE, module.globals().vars());
+            for (int i = nameParts.length - 1; i > 0; --i) {
+              var prevObject = object;
+              object = new PyObject(PyClass.MODULE_TYPE);
+              object.__dict__.__setitem__(nameParts[i], prevObject);
+            }
+            context.setVariable(nameParts[0], object);
           }
         }
       } catch (Exception e) {
@@ -3583,6 +3614,17 @@ public class Script {
     }
   }
 
+  public static class TracebackFormatStackFunction implements Function {
+    public static final TracebackFormatStackFunction INSTANCE = new TracebackFormatStackFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 0);
+      var globals = (GlobalContext) env;
+      return new PyList(globals.getCallStack().stream().map(c -> (Object) c.toString()).toList());
+    }
+  }
+
   public static class PrintFunction implements Function {
     public static final PrintFunction INSTANCE = new PrintFunction();
 
@@ -4247,26 +4289,26 @@ public class Script {
   }
 
   private static class GlobalContext extends Context implements Environment {
-    private String scriptFilename;
+    private final String moduleFilename;
     private final SymbolCache symbolCache;
-    private final List<Statement> globalStatements;
+    private final List<Statement> globalStatements = new ArrayList<>();
     private boolean halted = false; // If true, the script is exiting and this module must halt.
 
-    // NOTE: globalCallStack does not support multithreaded scripts.
-    private final Deque<CallSite> callStack;
-
-    private GlobalContext(SymbolCache symbolCache) {
+    private GlobalContext(String moduleFilename, SymbolCache symbolCache) {
       globals = this;
-      globalStatements = new ArrayList<>();
-      scriptFilename = "<stdin>";
-      callStack = new ArrayDeque<>();
+      this.moduleFilename = moduleFilename;
       this.symbolCache = symbolCache;
+    }
+
+    public Deque<CallSite> getCallStack() {
+      var script = (Script) getVariable("__script__");
+      return script.callStack.get();
     }
 
     private static JavaClassId MATH_CLASS = new JavaClassId(math.class);
 
-    public static GlobalContext create(SymbolCache symbolCache) {
-      var context = new GlobalContext(symbolCache);
+    public static GlobalContext create(String moduleFilename, SymbolCache symbolCache) {
+      var context = new GlobalContext(moduleFilename, symbolCache);
 
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
@@ -4289,12 +4331,9 @@ public class Script {
       context.setVariable("ord", OrdFunction.INSTANCE);
       context.setVariable("chr", ChrFunction.INSTANCE);
       context.setVariable("type", TypeFunction.INSTANCE);
+      context.setVariable("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
       context.setVariable("__exit__", ExitFunction.INSTANCE);
       return context;
-    }
-
-    public void setScriptFilename(String filename) {
-      scriptFilename = filename;
     }
 
     public void addGlobalStatement(Statement statement) {
@@ -4363,10 +4402,6 @@ public class Script {
     protected GlobalContext globals;
     protected final PyDict vars = new PyDict();
 
-    private record ClassMethodName(String type, String method) {}
-
-    protected record CallSite(ClassMethodName classMethodName, String filename, int lineno) {}
-
     // Default constructor is used only for GlobalContext subclass.
     private Context() {
       enclosingContext = null;
@@ -4389,11 +4424,11 @@ public class Script {
     }
 
     public void enterFunction(String filename, int lineno) {
-      globals.callStack.push(new CallSite(classMethodName, filename, lineno));
+      globals.getCallStack().push(new CallSite(classMethodName, filename, lineno));
     }
 
     public void leaveFunction() {
-      globals.callStack.pop();
+      globals.getCallStack().pop();
     }
 
     public Context createLocalContext(String enclosingClassName, String enclosingMethodName) {
@@ -4419,22 +4454,23 @@ public class Script {
       nonlocalVarNames.add(name);
     }
 
+    private static boolean isPyjinnSource(String filename) {
+      filename = filename.toLowerCase();
+      return filename.endsWith(".pyj") || filename.endsWith(".py") || filename.equals("<stdin>");
+    }
+
     /** Call this instead of Statement.exec directly for proper attribution with exceptions. */
     public void exec(Statement statement) {
       try {
         statement.exec(this);
       } catch (Exception e) {
+        var callStack = globals.getCallStack();
         var stackTrace = e.getStackTrace();
-        if (stackTrace.length > 0 && !stackTrace[0].getFileName().toLowerCase().endsWith(".pyj")) {
+        if (stackTrace.length > 0 && !isPyjinnSource(stackTrace[0].getFileName())) {
           var scriptStack = new ArrayList<CallSite>();
           scriptStack.add(
-              new CallSite(
-                  classMethodName,
-                  globals.callStack.isEmpty()
-                      ? globals.scriptFilename
-                      : globals.callStack.peek().filename(),
-                  statement.lineno()));
-          scriptStack.addAll(globals.callStack);
+              new CallSite(classMethodName, globals.moduleFilename, statement.lineno()));
+          scriptStack.addAll(callStack);
 
           var newStackTrace = new StackTraceElement[stackTrace.length + scriptStack.size()];
           for (int i = 0; i < scriptStack.size(); ++i) {

@@ -9,6 +9,11 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 
 public class ScriptTest {
@@ -5559,6 +5564,132 @@ public class ScriptTest {
       }
       """;
 
+  /* Generated from Python code:
+
+      Thread = JavaClass("java.lang.Thread")
+
+      def sleep_func(x):
+        Thread.sleep(5000)
+        return x
+  */
+  private static final String threadsJsonAst =
+      """
+      {
+        "type": "Module",
+        "body": [
+          {
+            "type": "Assign",
+            "targets": [
+              {
+                "type": "Name",
+                "id": "Thread",
+                "lineno": 1,
+                "col_offset": 0
+              }
+            ],
+            "value": {
+              "type": "Call",
+              "func": {
+                "type": "Name",
+                "id": "JavaClass",
+                "lineno": 1,
+                "col_offset": 9
+              },
+              "args": [
+                {
+                  "type": "Constant",
+                  "value": "java.lang.Thread",
+                  "lineno": 1,
+                  "col_offset": 19,
+                  "typename": "str"
+                }
+              ],
+              "keywords": [],
+              "lineno": 1,
+              "col_offset": 9
+            },
+            "type_comment": null,
+            "lineno": 1,
+            "col_offset": 0
+          },
+          {
+            "type": "FunctionDef",
+            "name": "sleep_func",
+            "args": {
+              "type": "arguments",
+              "posonlyargs": [],
+              "args": [
+                {
+                  "type": "arg",
+                  "arg": "x",
+                  "annotation": null,
+                  "type_comment": null,
+                  "lineno": 3,
+                  "col_offset": 15
+                }
+              ],
+              "vararg": null,
+              "kwonlyargs": [],
+              "kw_defaults": [],
+              "kwarg": null,
+              "defaults": []
+            },
+            "body": [
+              {
+                "type": "Expr",
+                "value": {
+                  "type": "Call",
+                  "func": {
+                    "type": "Attribute",
+                    "value": {
+                      "type": "Name",
+                      "id": "Thread",
+                      "lineno": 4,
+                      "col_offset": 2
+                    },
+                    "attr": "sleep",
+                    "lineno": 4,
+                    "col_offset": 2
+                  },
+                  "args": [
+                    {
+                      "type": "Constant",
+                      "value": 5000,
+                      "lineno": 4,
+                      "col_offset": 15,
+                      "typename": "int"
+                    }
+                  ],
+                  "keywords": [],
+                  "lineno": 4,
+                  "col_offset": 2
+                },
+                "lineno": 4,
+                "col_offset": 2
+              },
+              {
+                "type": "Return",
+                "value": {
+                  "type": "Name",
+                  "id": "x",
+                  "lineno": 5,
+                  "col_offset": 9
+                },
+                "lineno": 5,
+                "col_offset": 2
+              }
+            ],
+            "decorator_list": [],
+            "returns": null,
+            "type_comment": null,
+            "lineno": 3,
+            "col_offset": 0
+          }
+        ],
+        "type_ignores": []
+      }
+      """;
+
   @Test
   public void timesTwo() {
     double x = Math.PI;
@@ -5909,6 +6040,7 @@ public class ScriptTest {
     var jsonAst = JsonParser.parseString(mappedSymbolsJsonAst);
     var script =
         new Script(
+            "script_test.pyj",
             ClassLoader.getSystemClassLoader(),
             new Script.ModuleHandler() {},
             className -> className.equals("mapped.M") ? "java.lang.Math" : className,
@@ -5920,6 +6052,27 @@ public class ScriptTest {
 
     var output = func.call(script.mainModule().globals());
     assertEquals(6.141592653589793, ((Number) output).doubleValue(), 0.000000001);
+  }
+
+  @Test
+  public void threads() throws InterruptedException, ExecutionException {
+    var jsonAst = JsonParser.parseString(threadsJsonAst);
+    var script = new Script();
+    var func = script.parse(jsonAst).exec().getFunction("sleep_func");
+    System.out.println(func);
+
+    Callable<Integer> task1 = () -> (Integer) func.call(script.mainModule().globals(), 3);
+    Callable<Integer> task2 = () -> (Integer) func.call(script.mainModule().globals(), 4);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    Future<Integer> future1 = executor.submit(task1);
+    Future<Integer> future2 = executor.submit(task2);
+    Integer result1 = future1.get();
+    Integer result2 = future2.get();
+    int totalSum = result1 + result2;
+    executor.shutdown();
+
+    assertEquals(7, totalSum);
   }
 
   // TODO(maxuser): Add tests for:
