@@ -3437,6 +3437,7 @@ public class Script {
       Optional<Constructor<?>> matchedCtor = env.findConstructor(clss, params);
       if (matchedCtor.isPresent()) {
         try {
+          InterfaceProxy.promoteFunctionalParams(env, matchedCtor.get(), params);
           return matchedCtor.get().newInstance(params);
         } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
           throw new RuntimeException(e);

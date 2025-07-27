@@ -5043,6 +5043,290 @@ public class ScriptTest {
 
   /* Generated from Python code:
 
+      Thread = JavaClass("java.lang.Thread")
+
+      def run_thread():
+        output = "unassigned"
+        def set_output(s):
+          nonlocal output
+          output = s
+
+        # Implicitly promote lambda to Runnable.
+        thread = Thread(lambda: set_output("hello from thread"))
+        thread.start()
+        thread.join()
+        return output
+  */
+  private static final String ctorParamInterfaceProxyJsonAst =
+      """
+        {
+        "type": "Module",
+        "body": [
+          {
+            "type": "Assign",
+            "targets": [
+              {
+                "type": "Name",
+                "id": "Thread",
+                "lineno": 1,
+                "col_offset": 0
+              }
+            ],
+            "value": {
+              "type": "Call",
+              "func": {
+                "type": "Name",
+                "id": "JavaClass",
+                "lineno": 1,
+                "col_offset": 9
+              },
+              "args": [
+                {
+                  "type": "Constant",
+                  "value": "java.lang.Thread",
+                  "lineno": 1,
+                  "col_offset": 19,
+                  "typename": "str"
+                }
+              ],
+              "keywords": [],
+              "lineno": 1,
+              "col_offset": 9
+            },
+            "type_comment": null,
+            "lineno": 1,
+            "col_offset": 0
+          },
+          {
+            "type": "FunctionDef",
+            "name": "run_thread",
+            "args": {
+              "type": "arguments",
+              "posonlyargs": [],
+              "args": [],
+              "vararg": null,
+              "kwonlyargs": [],
+              "kw_defaults": [],
+              "kwarg": null,
+              "defaults": []
+            },
+            "body": [
+              {
+                "type": "Assign",
+                "targets": [
+                  {
+                    "type": "Name",
+                    "id": "output",
+                    "lineno": 4,
+                    "col_offset": 2
+                  }
+                ],
+                "value": {
+                  "type": "Constant",
+                  "value": "unassigned",
+                  "lineno": 4,
+                  "col_offset": 11,
+                  "typename": "str"
+                },
+                "type_comment": null,
+                "lineno": 4,
+                "col_offset": 2
+              },
+              {
+                "type": "FunctionDef",
+                "name": "set_output",
+                "args": {
+                  "type": "arguments",
+                  "posonlyargs": [],
+                  "args": [
+                    {
+                      "type": "arg",
+                      "arg": "s",
+                      "annotation": null,
+                      "type_comment": null,
+                      "lineno": 5,
+                      "col_offset": 17
+                    }
+                  ],
+                  "vararg": null,
+                  "kwonlyargs": [],
+                  "kw_defaults": [],
+                  "kwarg": null,
+                  "defaults": []
+                },
+                "body": [
+                  {
+                    "type": "Nonlocal",
+                    "names": [
+                      "output"
+                    ],
+                    "lineno": 6,
+                    "col_offset": 4
+                  },
+                  {
+                    "type": "Assign",
+                    "targets": [
+                      {
+                        "type": "Name",
+                        "id": "output",
+                        "lineno": 7,
+                        "col_offset": 4
+                      }
+                    ],
+                    "value": {
+                      "type": "Name",
+                      "id": "s",
+                      "lineno": 7,
+                      "col_offset": 13
+                    },
+                    "type_comment": null,
+                    "lineno": 7,
+                    "col_offset": 4
+                  }
+                ],
+                "decorator_list": [],
+                "returns": null,
+                "type_comment": null,
+                "lineno": 5,
+                "col_offset": 2
+              },
+              {
+                "type": "Assign",
+                "targets": [
+                  {
+                    "type": "Name",
+                    "id": "thread",
+                    "lineno": 10,
+                    "col_offset": 2
+                  }
+                ],
+                "value": {
+                  "type": "Call",
+                  "func": {
+                    "type": "Name",
+                    "id": "Thread",
+                    "lineno": 10,
+                    "col_offset": 11
+                  },
+                  "args": [
+                    {
+                      "type": "Lambda",
+                      "args": {
+                        "type": "arguments",
+                        "posonlyargs": [],
+                        "args": [],
+                        "vararg": null,
+                        "kwonlyargs": [],
+                        "kw_defaults": [],
+                        "kwarg": null,
+                        "defaults": []
+                      },
+                      "body": {
+                        "type": "Call",
+                        "func": {
+                          "type": "Name",
+                          "id": "set_output",
+                          "lineno": 10,
+                          "col_offset": 26
+                        },
+                        "args": [
+                          {
+                            "type": "Constant",
+                            "value": "hello from thread",
+                            "lineno": 10,
+                            "col_offset": 37,
+                            "typename": "str"
+                          }
+                        ],
+                        "keywords": [],
+                        "lineno": 10,
+                        "col_offset": 26
+                      },
+                      "lineno": 10,
+                      "col_offset": 18
+                    }
+                  ],
+                  "keywords": [],
+                  "lineno": 10,
+                  "col_offset": 11
+                },
+                "type_comment": null,
+                "lineno": 10,
+                "col_offset": 2
+              },
+              {
+                "type": "Expr",
+                "value": {
+                  "type": "Call",
+                  "func": {
+                    "type": "Attribute",
+                    "value": {
+                      "type": "Name",
+                      "id": "thread",
+                      "lineno": 11,
+                      "col_offset": 2
+                    },
+                    "attr": "start",
+                    "lineno": 11,
+                    "col_offset": 2
+                  },
+                  "args": [],
+                  "keywords": [],
+                  "lineno": 11,
+                  "col_offset": 2
+                },
+                "lineno": 11,
+                "col_offset": 2
+              },
+              {
+                "type": "Expr",
+                "value": {
+                  "type": "Call",
+                  "func": {
+                    "type": "Attribute",
+                    "value": {
+                      "type": "Name",
+                      "id": "thread",
+                      "lineno": 12,
+                      "col_offset": 2
+                    },
+                    "attr": "join",
+                    "lineno": 12,
+                    "col_offset": 2
+                  },
+                  "args": [],
+                  "keywords": [],
+                  "lineno": 12,
+                  "col_offset": 2
+                },
+                "lineno": 12,
+                "col_offset": 2
+              },
+              {
+                "type": "Return",
+                "value": {
+                  "type": "Name",
+                  "id": "output",
+                  "lineno": 13,
+                  "col_offset": 9
+                },
+                "lineno": 13,
+                "col_offset": 2
+              }
+            ],
+            "decorator_list": [],
+            "returns": null,
+            "type_comment": null,
+            "lineno": 3,
+            "col_offset": 0
+          }
+        ],
+        "type_ignores": []
+      }
+      """;
+
+  /* Generated from Python code:
+
       def exceptions():
         Exception = JavaClass("java.lang.Exception")
         IllegalStateException = JavaClass("java.lang.IllegalStateException")
@@ -6017,6 +6301,17 @@ public class ScriptTest {
 
     var output = func.call(script.mainModule().globals());
     assertEquals("start100end", output);
+  }
+
+  @Test
+  public void ctorParamInterfacyProxy() {
+    var jsonAst = JsonParser.parseString(ctorParamInterfaceProxyJsonAst);
+    var script = new Script();
+    var func = script.parse(jsonAst).exec().getFunction("run_thread");
+    System.out.println(func);
+
+    var output = func.call(script.mainModule().globals());
+    assertEquals("hello from thread", output);
   }
 
   @Test
