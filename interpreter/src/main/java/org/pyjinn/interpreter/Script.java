@@ -2704,7 +2704,32 @@ public class Script {
   }
 
   public static class TypeChecker {
-    public static <T extends Executable> Optional<T> findBestMatchingExecutable(
+    public static Optional<Method> findBestMatchingMethod(
+        Class<?> clss,
+        boolean isStaticMethod,
+        Set<String> matchingMethodNames,
+        Object[] paramValues) {
+      return findBestMatchingExecutable(
+          clss,
+          Class<?>::getMethods,
+          m ->
+              Modifier.isStatic(m.getModifiers()) == isStaticMethod
+                  && matchingMethodNames.contains(m.getName()),
+          paramValues,
+          /* traverseSuperclasses= */ true);
+    }
+
+    public static Optional<Constructor<?>> findBestMatchingConstructor(
+        Class<?> clss, Object[] paramValues) {
+      return findBestMatchingExecutable(
+          clss,
+          Class<?>::getConstructors,
+          c -> true,
+          paramValues,
+          /* traverseSuperclasses= */ false);
+    }
+
+    private static <T extends Executable> Optional<T> findBestMatchingExecutable(
         Class<?> clss,
         java.util.function.Function<Class<?>, T[]> executableGetter,
         Predicate<T> filter,
@@ -4051,16 +4076,12 @@ public class Script {
               .computeIfAbsent(
                   cacheKey,
                   ignoreKey ->
-                      TypeChecker.findBestMatchingExecutable(
-                          clss,
-                          Class<?>::getMethods,
-                          m ->
-                              Modifier.isStatic(m.getModifiers()) == isStaticMethod
-                                  && symbolCache
-                                      .getRuntimeMethodNames(clss, mappedMethodName)
-                                      .contains(m.getName()),
-                          mappedParams,
-                          /* traverseSuperclasses= */ true))
+                      TypeChecker.findBestMatchingMethod(
+                              clss,
+                              isStaticMethod,
+                              symbolCache.getRuntimeMethodNames(clss, mappedMethodName),
+                              mappedParams)
+                          .map(Executable.class::cast))
               .map(Method.class::cast);
       if (matchedMethod.isPresent()) {
         InterfaceProxy.promoteFunctionalParams(env, matchedMethod.get(), mappedParams);
@@ -4377,12 +4398,7 @@ public class Script {
           .computeIfAbsent(
               cacheKey,
               ignoreKey ->
-                  TypeChecker.findBestMatchingExecutable(
-                      clss,
-                      Class<?>::getConstructors,
-                      c -> true,
-                      params,
-                      /* traverseSuperclasses= */ false))
+                  TypeChecker.findBestMatchingConstructor(clss, params).map(Executable.class::cast))
           .map(Constructor.class::cast);
     }
   }
