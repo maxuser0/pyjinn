@@ -60,6 +60,39 @@ class PyjinnParserTest {
   }
 
   @Test
+  void hexIntConstant() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            0x123abc
+            """);
+    var ast = parserOutput.jsonAst();
+    assertConstantValue("int", v -> v.getAsInt() == 0x123abc, ast);
+  }
+
+  @Test
+  void maxHexIntConstant() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            0xffffffff
+            """);
+    var ast = parserOutput.jsonAst();
+    assertConstantValue("int", v -> v.getAsInt() == 0xffffffff, ast);
+  }
+
+  @Test
+  void minHexLongConstant() throws Exception {
+    var parserOutput =
+        PyjinnParser.parseTrees(
+            """
+            0x100000000
+            """);
+    var ast = parserOutput.jsonAst();
+    assertConstantValue("int", v -> v.getAsLong() == 0x100000000L, ast);
+  }
+
+  @Test
   void floatConstant() throws Exception {
     var parserOutput =
         PyjinnParser.parseTrees(

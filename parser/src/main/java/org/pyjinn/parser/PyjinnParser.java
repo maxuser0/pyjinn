@@ -1080,22 +1080,34 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
   }
 
+  private static final long MAX_UNSIGNED_32_BIT_INTEGER = 0xFFFFFFFFL;
+
   @Override
   public JsonElement visitAtom(PythonParser.AtomContext ctx) {
-    JsonObject atomNode = new JsonObject();
-
     if (ctx.NAME() != null) {
       var name = createNode(ctx, "Name");
       name.addProperty("id", ctx.NAME().getText());
       return name;
     } else if (ctx.NUMBER() != null) {
       var number = createNode(ctx, "Constant");
-      try {
-        number.addProperty("value", Integer.parseInt(ctx.NUMBER().getText()));
+      String numberText = ctx.NUMBER().getText();
+      if (numberText.startsWith("0x")) {
+        String hexDigits = numberText.substring(2);
+        Long longValue = Long.parseLong(hexDigits, 16);
+        if (longValue > MAX_UNSIGNED_32_BIT_INTEGER) {
+          number.addProperty("value", longValue);
+        } else {
+          number.addProperty("value", longValue.intValue());
+        }
         number.addProperty("typename", "int");
-      } catch (NumberFormatException e) {
-        number.addProperty("value", Double.parseDouble(ctx.NUMBER().getText()));
-        number.addProperty("typename", "float");
+      } else {
+        try {
+          number.addProperty("value", Integer.parseInt(numberText));
+          number.addProperty("typename", "int");
+        } catch (NumberFormatException e) {
+          number.addProperty("value", Double.parseDouble(numberText));
+          number.addProperty("typename", "float");
+        }
       }
       return number;
     } else if (ctx.strings() != null) {
