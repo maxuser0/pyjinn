@@ -178,6 +178,7 @@ public class Script {
         ClassLoader.getSystemClassLoader(),
         new ModuleHandler() {},
         className -> className,
+        className -> className,
         (clazz, fieldName) -> fieldName,
         (clazz, methodName) -> Set.of(methodName));
   }
@@ -188,12 +189,15 @@ public class Script {
       String scriptFilename,
       ClassLoader classLoader,
       ModuleHandler moduleHandler,
-      java.util.function.Function<String, String> classMapping,
-      BiFunction<Class<?>, String, String> fieldMapping,
-      BiFunction<Class<?>, String, Set<String>> methodMapping) {
+      java.util.function.Function<String, String> toRuntimeClassName,
+      java.util.function.Function<String, String> toPrettyClassName,
+      BiFunction<Class<?>, String, String> toRuntimeFieldName,
+      BiFunction<Class<?>, String, Set<String>> toRuntimeMethodNames) {
     this.classLoader = classLoader;
     this.moduleHandler = moduleHandler;
-    this.symbolCache = new SymbolCache(classMapping, fieldMapping, methodMapping);
+    this.symbolCache =
+        new SymbolCache(
+            toRuntimeClassName, toPrettyClassName, toRuntimeFieldName, toRuntimeMethodNames);
     this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, scriptFilename, MAIN_MODULE_NAME));
   }
 
@@ -1708,7 +1712,7 @@ public class Script {
                   && exception instanceof PyObject thrownObject
                   && thrownObject.type == declaredType)
               || (exceptionType.get() instanceof JavaClassId javaClassId
-                  && javaClassId.clss().isAssignableFrom(exception.getClass()))) {
+                  && javaClassId.type().isAssignableFrom(exception.getClass()))) {
             handler
                 .exceptionVariable()
                 .ifPresent(
@@ -3428,7 +3432,7 @@ public class Script {
     }
   }
 
-  public record JavaClassId(Class<?> clss) implements Expression, Function {
+  public record JavaClassId(Class<?> type) implements Expression, Function {
     @Override
     public Object eval(Context context) {
       return this;
@@ -3436,30 +3440,30 @@ public class Script {
 
     @Override
     public String toString() {
-      return String.format("JavaClass(\"%s\")", clss.getName());
+      return String.format("JavaClass(\"%s\")", type.getName());
     }
 
     @Override
     public Object call(Environment env, Object... params) {
       // Treat calls on an interface as a "cast" that attempts to promote params[0] from a
       // Script.Function to a proxy for this interface.
-      if (clss.isInterface()) {
+      if (type.isInterface()) {
         if (params.length != 1) {
           throw new IllegalArgumentException(
               "Calling interface %s with %d params but expected 1"
-                  .formatted(clss.getName(), params.length));
+                  .formatted(type.getName(), params.length));
         }
         var param = params[0];
         if (param instanceof Function function) {
-          return InterfaceProxy.promoteFunctionToJavaInterface(env, clss, function);
+          return InterfaceProxy.promoteFunctionToJavaInterface(env, type, function);
         } else {
           throw new IllegalArgumentException(
               "Calling interface %s with non-function param of type %s"
-                  .formatted(clss.getName(), param.getClass().getName()));
+                  .formatted(type.getName(), param.getClass().getName()));
         }
       }
 
-      Optional<Constructor<?>> matchedCtor = env.findConstructor(clss, params);
+      Optional<Constructor<?>> matchedCtor = env.findConstructor(type, params);
       if (matchedCtor.isPresent()) {
         try {
           InterfaceProxy.promoteFunctionalParams(env, matchedCtor.get(), params);
@@ -3471,7 +3475,7 @@ public class Script {
         throw new IllegalArgumentException(
             String.format(
                 "No matching constructor: %s(%s)",
-                clss.getName(),
+                type.getName(),
                 Arrays.stream(params)
                     .map(
                         v ->
@@ -3698,7 +3702,7 @@ public class Script {
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof JavaClassId classId) {
-        return classId.clss();
+        return classId.type();
       } else {
         return new JavaClassId(value.getClass());
       }
@@ -3738,7 +3742,6 @@ public class Script {
       if (env.getVariable("__script__") instanceof Script script) {
         int status =
             (params.length == 1 && params[0] != null) ? ((Number) params[0]).intValue() : 0;
-        logger.log("Calling __exit__({}) -> script.exit({}))", Arrays.toString(params), status);
         script.exit(status);
       }
       return null;
@@ -4057,7 +4060,7 @@ public class Script {
       final Class<?> clss;
       if (object instanceof JavaClassId classId) {
         isStaticMethod = true;
-        clss = classId.clss();
+        clss = classId.type();
       } else {
         if (object == null) {
           throw new NullPointerException(
@@ -4073,7 +4076,7 @@ public class Script {
       var cacheKey = ExecutableCacheKey.forMethod(clss, isStaticMethod, methodName, mappedParams);
       Optional<Method> matchedMethod =
           symbolCache
-              .computeIfAbsent(
+              .getExecutable(
                   cacheKey,
                   ignoreKey ->
                       TypeChecker.findBestMatchingMethod(
@@ -4226,7 +4229,6 @@ public class Script {
       implements Expression {
     @Override
     public Object eval(Context context) {
-      // TODO(maxuser): Support references to static inner classes and enum values.
       var objectValue = object.eval(context);
       if (objectValue instanceof PyObject pyObject) {
         if (field.name().equals("__dict__")) {
@@ -4247,27 +4249,90 @@ public class Script {
         return unboxJsonPrimitive(json.get(field.name()));
       }
 
+      if (objectValue == null) {
+        throw new NullPointerException(
+            "Cannot get field \"%s.%s\" because \"%s\" is null".formatted(object, field, object));
+      }
+
       final boolean isClass;
       final Class<?> objectClass;
       if (objectValue instanceof JavaClassId javaClassId) {
         isClass = true;
-        objectClass = javaClassId.clss();
+        objectClass = javaClassId.type();
       } else {
-        if (objectValue == null) {
-          throw new NullPointerException(
-              "Cannot get field \"%s.%s\" because \"%s\" is null".formatted(object, field, object));
-        }
         isClass = false;
         objectClass = objectValue.getClass();
       }
 
-      String fieldName = symbolCache.getRuntimeFieldName(objectClass, field.name());
+      var memberAccessor =
+          symbolCache.getMember(
+              new SymbolCache.MemberKey(isClass, objectClass, field.name()), this::getMember);
+
+      if (memberAccessor == null) {
+        throw new IllegalArgumentException(
+            "Object '%s' with value '%s' has no member named '%s'"
+                .formatted(object, objectValue, field.name()));
+      }
       try {
-        // TODO(maxuser): Cache the selected Field from key [objectClass, field.name()].
-        var fieldAccess = objectClass.getField(fieldName);
-        return fieldAccess.get(isClass ? null : objectValue);
-      } catch (NoSuchFieldException | IllegalAccessException e) {
-        throw new IllegalArgumentException(e);
+        return memberAccessor.from(objectValue);
+      } catch (ReflectiveOperationException e) {
+        throw new RuntimeException(e);
+      }
+    }
+
+    private SymbolCache.MemberAccessor getMember(SymbolCache.MemberKey key) {
+      if (key.isClass()) {
+        SymbolCache.MemberAccessor accessor;
+        boolean isFieldCapitalized = Character.isUpperCase(field.name().charAt(0));
+        if (isFieldCapitalized) {
+          // Check for nested class first because member is capitalized.
+          accessor = getNestedClass(key.type());
+          if (accessor != null) {
+            return accessor;
+          }
+          return getClassField(key.type());
+        } else {
+          // Check for class-level field first because member is not capitalized.
+          accessor = getClassField(key.type());
+          if (accessor != null) {
+            return accessor;
+          }
+          return getNestedClass(key.type());
+        }
+      } else {
+        return getInstanceField(key.type());
+      }
+    }
+
+    private SymbolCache.NestedClassAccessor getNestedClass(Class<?> type) {
+      for (var nestedClass : type.getClasses()) {
+        String prettyNestedClassName = symbolCache.getPrettyClassName(nestedClass.getName());
+        int lastDollarIndex = prettyNestedClassName.lastIndexOf('$');
+        if (lastDollarIndex != -1 && lastDollarIndex != prettyNestedClassName.length() - 1) {
+          String nestedClassName = prettyNestedClassName.substring(lastDollarIndex + 1);
+          if (nestedClassName.equals(field.name())) {
+            return new SymbolCache.NestedClassAccessor(nestedClass);
+          }
+        }
+      }
+      return null; // No matching nested class found.
+    }
+
+    private SymbolCache.ClassFieldAccessor getClassField(Class<?> type) {
+      String fieldName = symbolCache.getRuntimeFieldName(type, field.name());
+      try {
+        return new SymbolCache.ClassFieldAccessor(type.getField(fieldName));
+      } catch (NoSuchFieldException e) {
+        return null;
+      }
+    }
+
+    private SymbolCache.MemberAccessor getInstanceField(Class<?> type) {
+      String fieldName = symbolCache.getRuntimeFieldName(type, field.name());
+      try {
+        return new SymbolCache.InstanceFieldAccessor(type.getField(fieldName));
+      } catch (NoSuchFieldException e) {
+        return null;
       }
     }
 
@@ -4395,7 +4460,7 @@ public class Script {
     public Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params) {
       var cacheKey = ExecutableCacheKey.forConstructor(clss, params);
       return symbolCache
-          .computeIfAbsent(
+          .getExecutable(
               cacheKey,
               ignoreKey ->
                   TypeChecker.findBestMatchingConstructor(clss, params).map(Executable.class::cast))
