@@ -2329,14 +2329,27 @@ public class Script {
     private static final Optional<Boolean> isIn(Object lhsValue, Object rhsValue) {
       if (rhsValue instanceof Collection<?> collection) {
         return Optional.of(collection.contains(lhsValue));
-      } else if (rhsValue instanceof ItemContainer container) {
+      }
+      if (rhsValue instanceof ItemContainer container) {
         return Optional.of(container.__contains__(lhsValue));
-      } else if (rhsValue instanceof List list) {
+      }
+      if (rhsValue instanceof List list) {
         return Optional.of(list.contains(lhsValue));
-      } else if (rhsValue instanceof Map map) {
+      }
+      if (rhsValue instanceof Map map) {
         return Optional.of(map.containsKey(lhsValue));
-      } else if (lhsValue instanceof String lhsStr && rhsValue instanceof String rhsStr) {
+      }
+      if (lhsValue instanceof String lhsStr && rhsValue instanceof String rhsStr) {
         return Optional.of(rhsStr.contains(lhsStr));
+      }
+      var promotedRhs = promoteArrayToTuple(rhsValue);
+      if (promotedRhs instanceof Iterable<?> iter) {
+        for (var item : iter) {
+          if (item.equals(lhsValue)) {
+            return Optional.of(true);
+          }
+        }
+        return Optional.of(false);
       }
       return Optional.empty();
     }
