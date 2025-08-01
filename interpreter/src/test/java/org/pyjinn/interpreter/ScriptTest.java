@@ -6339,6 +6339,7 @@ public class ScriptTest {
             ClassLoader.getSystemClassLoader(),
             new Script.ModuleHandler() {},
             className -> className.equals("mapped.M") ? "java.lang.Math" : className,
+            /* toPrettyClassName= */ name -> name,
             (clazz, fieldName) -> clazz == Math.class && fieldName.equals("p") ? "PI" : fieldName,
             (clazz, methodName) ->
                 Set.of(clazz == Math.class && methodName.equals("s") ? "sqrt" : methodName));

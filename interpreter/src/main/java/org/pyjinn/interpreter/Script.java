@@ -43,8 +43,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import org.pyjinn.parser.PyjinnParser;
@@ -119,6 +119,7 @@ public class Script {
     void log(String str, Object... args);
   }
 
+  // TODO(maxuser): Clarify whether the format string takes "%s" or "{}" params.
   private static DebugLogger logger = (str, args) -> {};
 
   // To enable debug logging to stderr:
@@ -2724,14 +2725,16 @@ public class Script {
     public static Optional<Method> findBestMatchingMethod(
         Class<?> clss,
         boolean isStaticMethod,
-        Set<String> matchingMethodNames,
+        BiFunction<Class<?>, String, Set<String>> toRuntimeMethodNames,
+        String methodName,
         Object[] paramValues) {
       return findBestMatchingExecutable(
           clss,
+          c -> toRuntimeMethodNames.apply(c, methodName),
           Class<?>::getMethods,
-          m ->
-              Modifier.isStatic(m.getModifiers()) == isStaticMethod
-                  && matchingMethodNames.contains(m.getName()),
+          (method, runtimeMethodNames) ->
+              Modifier.isStatic(method.getModifiers()) == isStaticMethod
+                  && runtimeMethodNames.contains(method.getName()),
           paramValues,
           /* traverseSuperclasses= */ true);
     }
@@ -2740,44 +2743,58 @@ public class Script {
         Class<?> clss, Object[] paramValues) {
       return findBestMatchingExecutable(
           clss,
+          c -> null,
           Class<?>::getConstructors,
-          c -> true,
+          (c, p) -> true,
           paramValues,
           /* traverseSuperclasses= */ false);
     }
 
-    private static <T extends Executable> Optional<T> findBestMatchingExecutable(
+    private static <T extends Executable, U> Optional<T> findBestMatchingExecutable(
         Class<?> clss,
+        java.util.function.Function<Class<?>, U> perClassDataFactory,
         java.util.function.Function<Class<?>, T[]> executableGetter,
-        Predicate<T> filter,
+        BiPredicate<T, U> filter,
         Object[] paramValues,
         boolean traverseSuperclasses) {
       // TODO(maxuser): Generalize the restriction on class names and make it user-configurable.
-      if (traverseSuperclasses && (!isPublic(clss) || clss.getName().startsWith("sun."))) {
+      boolean isAccessibleClass = isPublic(clss) && !clss.getName().startsWith("sun.");
+
+      if (isAccessibleClass) {
+        U perClassData = perClassDataFactory.apply(clss);
+        int bestScore = 0; // Zero means that no viable executable has been found.
+        Optional<T> bestExecutable = Optional.empty();
+        for (T executable : executableGetter.apply(clss)) {
+          if (filter.test(executable, perClassData)) {
+            int score = getTypeCheckScore(executable.getParameterTypes(), paramValues);
+            if (score > bestScore) {
+              bestScore = score;
+              bestExecutable = Optional.of(executable);
+            }
+          }
+        }
+        if (bestScore > 0) {
+          return bestExecutable;
+        }
+      }
+
+      if (traverseSuperclasses) {
         for (var iface : clss.getInterfaces()) {
           var viableExecutable =
-              findBestMatchingExecutable(iface, executableGetter, filter, paramValues, true);
+              findBestMatchingExecutable(
+                  iface, perClassDataFactory, executableGetter, filter, paramValues, true);
           if (viableExecutable.isPresent()) {
             return viableExecutable;
           }
         }
-        return findBestMatchingExecutable(
-            clss.getSuperclass(), executableGetter, filter, paramValues, true);
-      }
-
-      Optional<T> bestExecutable = Optional.empty();
-      int bestScore = 0; // Zero means that no viable executable has been found.
-      for (T executable : executableGetter.apply(clss)) {
-        if (filter.test(executable)) {
-          int score = getTypeCheckScore(executable.getParameterTypes(), paramValues);
-          if (score > bestScore) {
-            bestScore = score;
-            bestExecutable = Optional.of(executable);
-          }
+        var superclass = clss.getSuperclass();
+        if (superclass != null) {
+          return findBestMatchingExecutable(
+              superclass, perClassDataFactory, executableGetter, filter, paramValues, true);
         }
       }
-      if (bestScore == 0) {}
-      return bestExecutable;
+
+      return Optional.empty();
     }
 
     private static final int PUBLIC_MODIFIER = 0x1;
@@ -4095,7 +4112,8 @@ public class Script {
                       TypeChecker.findBestMatchingMethod(
                               clss,
                               isStaticMethod,
-                              symbolCache.getRuntimeMethodNames(clss, mappedMethodName),
+                              symbolCache::getRuntimeMethodNames,
+                              mappedMethodName,
                               mappedParams)
                           .map(Executable.class::cast))
               .map(Method.class::cast);
@@ -4115,19 +4133,51 @@ public class Script {
         return strJoin(delimiter, sequence);
       } else {
         throw new IllegalArgumentException(
-            String.format(
-                "No matching method on %s: %s.%s(%s)",
-                object,
-                clss.getName(),
-                methodName,
-                Arrays.stream(params)
-                    .map(
-                        v ->
-                            v == null
-                                ? "null"
-                                : "(%s) %s".formatted(v.getClass().getName(), PyObjects.toRepr(v)))
-                    .collect(joining(", "))));
+            getMissingMethodMessage(object, clss, methodName, params));
       }
+    }
+
+    private String getMissingMethodMessage(
+        Object object, Class<?> type, String methodName, Object[] params) {
+      String message = "No matching method on %s: ".formatted(object);
+
+      String method =
+          String.format(
+              "%s.%s(%s)",
+              type.getName(),
+              methodName,
+              Arrays.stream(params)
+                  .map(
+                      v ->
+                          v == null
+                              ? "null"
+                              : "(%s) %s".formatted(v.getClass().getName(), PyObjects.toRepr(v)))
+                  .collect(joining(", ")));
+      message += method;
+
+      String methodWithPrettyNames =
+          String.format(
+              "%s.%s(%s)",
+              symbolCache().getPrettyClassName(type.getName()),
+              methodName,
+              Arrays.stream(params)
+                  .map(
+                      v ->
+                          v == null
+                              ? "null"
+                              : "(%s) %s"
+                                  .formatted(
+                                      symbolCache().getPrettyClassName(v.getClass().getName()),
+                                      PyObjects.toRepr(v)))
+                  .collect(joining(", ")));
+      if (!method.equals(methodWithPrettyNames)) {
+        message += "; Mapped names: " + methodWithPrettyNames;
+      }
+      var candidates = symbolCache.getRuntimeMethodNames(type, methodName);
+      if (!(candidates.size() == 1 && candidates.contains(methodName))) {
+        message += "; Mapped method candidates: " + candidates;
+      }
+      return message;
     }
   }
 
