@@ -12,9 +12,7 @@ version = '0.5'
 processResources {
     def expandProps = [
         pyjinnVersion: version,
-        javaVersion: System.getProperty('java.version'),
-        javaVendor: System.getProperty('java.vendor'),
-        buildTimestamp: new SimpleDateFormat("MMM dd yyyy, HH:mm:ss").format(new Date())
+        javaVersion: System.getProperty('java.version')
     ]
     filesMatching('build.properties') {
         expand expandProps
