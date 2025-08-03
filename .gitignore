@@ -6,6 +6,7 @@ build
 
 .vscode
 
+app/bin
 grammar/bin
 parser/bin
 interpreter/bin
