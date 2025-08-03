@@ -116,11 +116,11 @@ public class Script {
   private static boolean enableSimplifiedJsonSyntax = true;
 
   public interface DebugLogger {
-    void log(String str, Object... args);
+    /** Formats `message` containing printf-style "%s", "%d", etc with values from `args`. */
+    void log(String message, Object... args);
   }
 
-  // TODO(maxuser): Clarify whether the format string takes "%s" or "{}" params.
-  private static DebugLogger logger = (str, args) -> {};
+  private static DebugLogger logger = (message, args) -> {};
 
   // To enable debug logging to stderr:
   // Script.setDebugLogger((str, args) -> System.err.printf(str + "%n", args));
@@ -2728,9 +2728,16 @@ public class Script {
         BiFunction<Class<?>, String, Set<String>> toRuntimeMethodNames,
         String methodName,
         Object[] paramValues) {
+      logger.log(
+          "Searching '%s' for method named '%s' with param length %d",
+          clss, methodName, paramValues.length);
       return findBestMatchingExecutable(
           clss,
-          c -> toRuntimeMethodNames.apply(c, methodName),
+          c -> {
+            var names = toRuntimeMethodNames.apply(c, methodName);
+            logger.log("  mapped '%s' method '%s' to: %s", c, methodName, names);
+            return names;
+          },
           Class<?>::getMethods,
           (method, runtimeMethodNames) ->
               Modifier.isStatic(method.getModifiers()) == isStaticMethod
@@ -2741,6 +2748,7 @@ public class Script {
 
     public static Optional<Constructor<?>> findBestMatchingConstructor(
         Class<?> clss, Object[] paramValues) {
+      logger.log("Searching '%s' for ctor with param length %d", clss, paramValues.length);
       return findBestMatchingExecutable(
           clss,
           c -> null,
@@ -2764,13 +2772,17 @@ public class Script {
         U perClassData = perClassDataFactory.apply(clss);
         int bestScore = 0; // Zero means that no viable executable has been found.
         Optional<T> bestExecutable = Optional.empty();
-        for (T executable : executableGetter.apply(clss)) {
+        T[] executables = executableGetter.apply(clss);
+        for (T executable : executables) {
           if (filter.test(executable, perClassData)) {
             int score = getTypeCheckScore(executable.getParameterTypes(), paramValues);
             if (score > bestScore) {
               bestScore = score;
               bestExecutable = Optional.of(executable);
             }
+            logger.log("    callable member of '%s' with score %d: %s", clss, score, executable);
+          } else {
+            logger.log("    callable member of '%s' rejected: %s", clss, executable);
           }
         }
         if (bestScore > 0) {
@@ -2780,6 +2792,7 @@ public class Script {
 
       if (traverseSuperclasses) {
         for (var iface : clss.getInterfaces()) {
+          logger.log("  searching interface '%s'", iface);
           var viableExecutable =
               findBestMatchingExecutable(
                   iface, perClassDataFactory, executableGetter, filter, paramValues, true);
@@ -2789,6 +2802,7 @@ public class Script {
         }
         var superclass = clss.getSuperclass();
         if (superclass != null) {
+          logger.log("  searching superclass '%s'", superclass);
           return findBestMatchingExecutable(
               superclass, perClassDataFactory, executableGetter, filter, paramValues, true);
         }
