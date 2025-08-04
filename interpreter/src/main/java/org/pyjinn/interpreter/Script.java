@@ -2721,41 +2721,180 @@ public class Script {
     }
   }
 
+  public static class InterpreterException extends RuntimeException {
+    private final String shortMessage;
+
+    public InterpreterException(String shortMessage, String fullMessage) {
+      super(fullMessage);
+      this.shortMessage = shortMessage;
+    }
+
+    /** Gets a short version of the error message suitable for space-constrained output. */
+    public String getShortMessage() {
+      return shortMessage;
+    }
+  }
+
   public static class TypeChecker {
+    public static class Diagnostics {
+      private final java.util.function.Function<String, String> toPrettyClassName;
+      private final StringBuilder shortOutput = new StringBuilder();
+      private final StringBuilder fullOutput = new StringBuilder();
+      private int superclassTraversalDepth = 0;
+
+      public Diagnostics(java.util.function.Function<String, String> toPrettyClassName) {
+        this.toPrettyClassName = toPrettyClassName;
+      }
+
+      public void append(String message) {
+        fullOutput.append(message);
+        if (superclassTraversalDepth == 0) {
+          shortOutput.append(message);
+        }
+      }
+
+      public void startTraversingSuperclasses() {
+        ++superclassTraversalDepth;
+      }
+
+      public void stopTraversingSuperclasses() {
+        --superclassTraversalDepth;
+      }
+
+      public InterpreterException createTruncatedException() {
+        String shortened = shortOutput.toString();
+        return new InterpreterException(shortened, shortened);
+      }
+
+      public InterpreterException createException() {
+        return new InterpreterException(shortOutput.toString(), fullOutput.toString());
+      }
+
+      /**
+       * Generates a debug string representation of a method or constructor call.
+       *
+       * <p>Generates a string suitable for a constructor call if {@code methodName} is empty.
+       * Otherwise generates a string for a method call.
+       */
+      public String getDebugInvocationString(
+          String className, Optional<String> methodName, Object[] params) {
+        String invocation =
+            String.format(
+                "%s%s(%s)",
+                className,
+                methodName.map(s -> "." + s).orElse(""),
+                Arrays.stream(params)
+                    .map(
+                        v ->
+                            v == null
+                                ? "null"
+                                : "(%s) %s".formatted(v.getClass().getName(), PyObjects.toRepr(v)))
+                    .collect(joining(", ")));
+
+        String invocationWithPrettyNames =
+            String.format(
+                "%s%s(%s)",
+                toPrettyClassName.apply(className),
+                methodName.map(s -> "." + s).orElse(""),
+                Arrays.stream(params)
+                    .map(
+                        v ->
+                            v == null
+                                ? "null"
+                                : "(%s) %s"
+                                    .formatted(
+                                        toPrettyClassName.apply(v.getClass().getName()),
+                                        PyObjects.toRepr(v)))
+                    .collect(joining(", ")));
+
+        if (!invocation.equals(invocationWithPrettyNames)) {
+          invocation += " [Mapped names: " + invocationWithPrettyNames + "]";
+        }
+        return invocation;
+      }
+    }
+
     public static Optional<Method> findBestMatchingMethod(
         Class<?> clss,
         boolean isStaticMethod,
         BiFunction<Class<?>, String, Set<String>> toRuntimeMethodNames,
         String methodName,
-        Object[] paramValues) {
+        Object[] paramValues,
+        Diagnostics diagnostics) {
+      if (diagnostics != null) {
+        diagnostics.append("Resolving method call:\n  ");
+        diagnostics.append(
+            diagnostics.getDebugInvocationString(
+                clss.getName(), Optional.of(methodName), paramValues));
+        diagnostics.append("\n");
+      }
       logger.log(
           "Searching '%s' for method named '%s' with param length %d",
           clss, methodName, paramValues.length);
-      return findBestMatchingExecutable(
-          clss,
-          c -> {
-            var names = toRuntimeMethodNames.apply(c, methodName);
-            logger.log("  mapped '%s' method '%s' to: %s", c, methodName, names);
-            return names;
-          },
-          Class<?>::getMethods,
-          (method, runtimeMethodNames) ->
-              Modifier.isStatic(method.getModifiers()) == isStaticMethod
-                  && runtimeMethodNames.contains(method.getName()),
-          paramValues,
-          /* traverseSuperclasses= */ true);
+      var bestMethod =
+          findBestMatchingExecutable(
+              clss,
+              c -> {
+                var names = toRuntimeMethodNames.apply(c, methodName);
+                logger.log("  mapped '%s' method '%s' to: %s", c, methodName, names);
+                if (diagnostics != null) {
+                  if (names.size() != 1 || !names.contains(methodName)) {
+                    diagnostics.append(
+                        "- mapped '%s' method '%s' to %s\n".formatted(c, methodName, names));
+                  }
+                }
+                return names;
+              },
+              Class<?>::getMethods,
+              (method, runtimeMethodNames) ->
+                  Modifier.isStatic(method.getModifiers()) == isStaticMethod
+                      && runtimeMethodNames.contains(method.getName()),
+              paramValues,
+              /* traverseSuperclasses= */ true,
+              diagnostics);
+      if (diagnostics != null) {
+        if (bestMethod.isEmpty()) {
+          diagnostics.append("No matching method found in class, superclass, or interfaces:\n  ");
+          diagnostics.append(
+              diagnostics.getDebugInvocationString(
+                  clss.getName(), Optional.of(methodName), paramValues));
+        } else {
+          diagnostics.append("Found matching method:\n  ");
+          diagnostics.append(bestMethod.get().toString());
+        }
+      }
+      return bestMethod;
     }
 
     public static Optional<Constructor<?>> findBestMatchingConstructor(
-        Class<?> clss, Object[] paramValues) {
+        Class<?> clss, Object[] paramValues, Diagnostics diagnostics) {
+      if (diagnostics != null) {
+        diagnostics.append("Resolving constructor call:\n  ");
+        diagnostics.append(
+            diagnostics.getDebugInvocationString(clss.getName(), Optional.empty(), paramValues));
+        diagnostics.append("\n");
+      }
       logger.log("Searching '%s' for ctor with param length %d", clss, paramValues.length);
-      return findBestMatchingExecutable(
-          clss,
-          c -> null,
-          Class<?>::getConstructors,
-          (c, p) -> true,
-          paramValues,
-          /* traverseSuperclasses= */ false);
+      var bestCtor =
+          findBestMatchingExecutable(
+              clss,
+              c -> null,
+              Class<?>::getConstructors,
+              (c, p) -> true,
+              paramValues,
+              /* traverseSuperclasses= */ false,
+              diagnostics);
+      if (diagnostics != null) {
+        if (bestCtor.isEmpty()) {
+          diagnostics.append("No matching constructor found:\n  ");
+          diagnostics.append(
+              diagnostics.getDebugInvocationString(clss.getName(), Optional.empty(), paramValues));
+        } else {
+          diagnostics.append("Found matching constructor:\n  ");
+          diagnostics.append(bestCtor.get().toString());
+        }
+      }
+      return bestCtor;
     }
 
     private static <T extends Executable, U> Optional<T> findBestMatchingExecutable(
@@ -2764,7 +2903,8 @@ public class Script {
         java.util.function.Function<Class<?>, T[]> executableGetter,
         BiPredicate<T, U> filter,
         Object[] paramValues,
-        boolean traverseSuperclasses) {
+        boolean traverseSuperclasses,
+        Diagnostics diagnostics) {
       // TODO(maxuser): Generalize the restriction on class names and make it user-configurable.
       boolean isAccessibleClass = isPublic(clss) && !clss.getName().startsWith("sun.");
 
@@ -2773,6 +2913,11 @@ public class Script {
         int bestScore = 0; // Zero means that no viable executable has been found.
         Optional<T> bestExecutable = Optional.empty();
         T[] executables = executableGetter.apply(clss);
+        if (diagnostics != null) {
+          diagnostics.append(
+              "Options considered in '%s': %d\n".formatted(clss, executables.length));
+        }
+        int numAttributeMismatches = 0;
         for (T executable : executables) {
           if (filter.test(executable, perClassData)) {
             int score = getTypeCheckScore(executable.getParameterTypes(), paramValues);
@@ -2781,30 +2926,74 @@ public class Script {
               bestExecutable = Optional.of(executable);
             }
             logger.log("    callable member of '%s' with score %d: %s", clss, score, executable);
+            if (diagnostics != null) {
+              if (score == 0) {
+                diagnostics.append("- param mismatch: %s\n".formatted(executable));
+              } else {
+                diagnostics.append("- param match (score=%d): %s\n".formatted(score, executable));
+              }
+            }
           } else {
-            logger.log("    callable member of '%s' rejected: %s", clss, executable);
+            ++numAttributeMismatches;
+            if (diagnostics != null && executables.length < 5) {
+              diagnostics.append("- name/static mismatch: %s\n".formatted(executable));
+            }
+            logger.log("    callable member of '%s' not viable: %s", clss, executable);
           }
         }
-        if (bestScore > 0) {
+        if (diagnostics != null) {
+          if (numAttributeMismatches > 0 && executables.length >= 5) {
+            diagnostics.append(
+                "- options with name/static mismatch: %d\n".formatted(numAttributeMismatches));
+          }
+          if (bestExecutable.isPresent()) {
+            diagnostics.append("Best match: %s\n".formatted(bestExecutable.get()));
+          }
+        }
+        if (bestExecutable.isPresent()) {
           return bestExecutable;
         }
       }
 
       if (traverseSuperclasses) {
-        for (var iface : clss.getInterfaces()) {
-          logger.log("  searching interface '%s'", iface);
-          var viableExecutable =
-              findBestMatchingExecutable(
-                  iface, perClassDataFactory, executableGetter, filter, paramValues, true);
-          if (viableExecutable.isPresent()) {
-            return viableExecutable;
+        if (diagnostics != null) {
+          diagnostics.startTraversingSuperclasses();
+          if (clss.getInterfaces().length > 0 || clss.getSuperclass() != null) {
+            diagnostics.append("Traversed superclasses of '%s'...\n".formatted(clss.getName()));
           }
         }
-        var superclass = clss.getSuperclass();
-        if (superclass != null) {
-          logger.log("  searching superclass '%s'", superclass);
-          return findBestMatchingExecutable(
-              superclass, perClassDataFactory, executableGetter, filter, paramValues, true);
+        try {
+          for (var iface : clss.getInterfaces()) {
+            logger.log("  searching interface '%s'", iface);
+            var viableExecutable =
+                findBestMatchingExecutable(
+                    iface,
+                    perClassDataFactory,
+                    executableGetter,
+                    filter,
+                    paramValues,
+                    true,
+                    diagnostics);
+            if (viableExecutable.isPresent()) {
+              return viableExecutable;
+            }
+          }
+          var superclass = clss.getSuperclass();
+          if (superclass != null) {
+            logger.log("  searching superclass '%s'", superclass);
+            return findBestMatchingExecutable(
+                superclass,
+                perClassDataFactory,
+                executableGetter,
+                filter,
+                paramValues,
+                true,
+                diagnostics);
+          }
+        } finally {
+          if (diagnostics != null) {
+            diagnostics.stopTraversingSuperclasses();
+          }
         }
       }
 
@@ -2904,6 +3093,43 @@ public class Script {
         return from == Integer.class;
       }
       return false;
+    }
+
+    public String getDebugMethodCallString(
+        SymbolCache symbolCache, Class<?> type, String methodName, Object[] params) {
+      String method =
+          String.format(
+              "%s.%s(%s)",
+              type.getName(),
+              methodName,
+              Arrays.stream(params)
+                  .map(
+                      v ->
+                          v == null
+                              ? "null"
+                              : "(%s) %s".formatted(v.getClass().getName(), PyObjects.toRepr(v)))
+                  .collect(joining(", ")));
+
+      String methodWithPrettyNames =
+          String.format(
+              "%s.%s(%s)",
+              symbolCache.getPrettyClassName(type.getName()),
+              methodName,
+              Arrays.stream(params)
+                  .map(
+                      v ->
+                          v == null
+                              ? "null"
+                              : "(%s) %s"
+                                  .formatted(
+                                      symbolCache.getPrettyClassName(v.getClass().getName()),
+                                      PyObjects.toRepr(v)))
+                  .collect(joining(", ")));
+
+      if (!method.equals(methodWithPrettyNames)) {
+        method += " [Mapped names: " + methodWithPrettyNames + "]";
+      }
+      return method;
     }
   }
 
@@ -3507,27 +3733,12 @@ public class Script {
         }
       }
 
-      Optional<Constructor<?>> matchedCtor = env.findConstructor(type, params);
-      if (matchedCtor.isPresent()) {
-        try {
-          InterfaceProxy.promoteFunctionalParams(env, matchedCtor.get(), params);
-          return matchedCtor.get().newInstance(params);
-        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-          throw new RuntimeException(e);
-        }
-      } else {
-        throw new IllegalArgumentException(
-            String.format(
-                "No matching constructor: %s(%s)",
-                type.getName(),
-                Arrays.stream(params)
-                    .map(
-                        v ->
-                            v == null
-                                ? "null"
-                                : String.format(
-                                    "(%s) %s", v.getClass().getName(), PyObjects.toRepr(v)))
-                    .collect(joining(", "))));
+      Constructor<?> ctor = env.findConstructor(type, params);
+      try {
+        InterfaceProxy.promoteFunctionalParams(env, ctor, params);
+        return ctor.newInstance(params);
+      } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+        throw new RuntimeException(e);
       }
     }
   }
@@ -4128,7 +4339,8 @@ public class Script {
                               isStaticMethod,
                               symbolCache::getRuntimeMethodNames,
                               mappedMethodName,
-                              mappedParams)
+                              mappedParams,
+                              /* diagnostics= */ null)
                           .map(Executable.class::cast))
               .map(Method.class::cast);
       if (matchedMethod.isPresent()) {
@@ -4146,52 +4358,17 @@ public class Script {
         // TODO(maxuser): Find a better way to support str methods.
         return strJoin(delimiter, sequence);
       } else {
-        throw new IllegalArgumentException(
-            getMissingMethodMessage(object, clss, methodName, params));
+        // Re-run type checker with the same args but with error diagnostics for creating exception.
+        var diagnostics = new TypeChecker.Diagnostics(symbolCache::getPrettyClassName);
+        TypeChecker.findBestMatchingMethod(
+            clss,
+            isStaticMethod,
+            symbolCache::getRuntimeMethodNames,
+            mappedMethodName,
+            mappedParams,
+            diagnostics);
+        throw diagnostics.createException();
       }
-    }
-
-    private String getMissingMethodMessage(
-        Object object, Class<?> type, String methodName, Object[] params) {
-      String message = "No matching method on %s: ".formatted(object);
-
-      String method =
-          String.format(
-              "%s.%s(%s)",
-              type.getName(),
-              methodName,
-              Arrays.stream(params)
-                  .map(
-                      v ->
-                          v == null
-                              ? "null"
-                              : "(%s) %s".formatted(v.getClass().getName(), PyObjects.toRepr(v)))
-                  .collect(joining(", ")));
-      message += method;
-
-      String methodWithPrettyNames =
-          String.format(
-              "%s.%s(%s)",
-              symbolCache().getPrettyClassName(type.getName()),
-              methodName,
-              Arrays.stream(params)
-                  .map(
-                      v ->
-                          v == null
-                              ? "null"
-                              : "(%s) %s"
-                                  .formatted(
-                                      symbolCache().getPrettyClassName(v.getClass().getName()),
-                                      PyObjects.toRepr(v)))
-                  .collect(joining(", ")));
-      if (!method.equals(methodWithPrettyNames)) {
-        message += "; Mapped names: " + methodWithPrettyNames;
-      }
-      var candidates = symbolCache.getRuntimeMethodNames(type, methodName);
-      if (!(candidates.size() == 1 && candidates.contains(methodName))) {
-        message += "; Mapped method candidates: " + candidates;
-      }
-      return message;
     }
   }
 
@@ -4449,7 +4626,7 @@ public class Script {
     /** Prepare for exit initiated by {@code Script.exit(int)}. */
     void halt();
 
-    Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params);
+    Constructor<?> findConstructor(Class<?> clss, Object... params);
   }
 
   private static class GlobalContext extends Context implements Environment {
@@ -4534,14 +4711,24 @@ public class Script {
       return halted;
     }
 
-    public Optional<Constructor<?>> findConstructor(Class<?> clss, Object... params) {
+    public Constructor<?> findConstructor(Class<?> clss, Object... params) {
       var cacheKey = ExecutableCacheKey.forConstructor(clss, params);
-      return symbolCache
-          .getExecutable(
-              cacheKey,
-              ignoreKey ->
-                  TypeChecker.findBestMatchingConstructor(clss, params).map(Executable.class::cast))
-          .map(Constructor.class::cast);
+      var ctor =
+          symbolCache
+              .getExecutable(
+                  cacheKey,
+                  ignoreKey ->
+                      TypeChecker.findBestMatchingConstructor(clss, params, /* diagnostics= */ null)
+                          .map(Executable.class::cast))
+              .map(Constructor.class::cast);
+      if (ctor.isPresent()) {
+        return ctor.get();
+      }
+
+      // Re-run type checker with the same args but with error diagnostics for creating exception.
+      var diagnostics = new TypeChecker.Diagnostics(symbolCache::getPrettyClassName);
+      TypeChecker.findBestMatchingConstructor(clss, params, diagnostics);
+      throw diagnostics.createException();
     }
   }
 
