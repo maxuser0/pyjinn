@@ -2483,7 +2483,9 @@ public class Script {
       MUL("*"),
       DIV("/"),
       POW("**"),
-      MOD("%");
+      MOD("%"),
+      LSHIFT("<<"),
+      RSHIFT(">>");
 
       private final String symbol;
 
@@ -2510,6 +2512,10 @@ public class Script {
           return Op.POW;
         case "Mod":
           return Op.MOD;
+        case "LShift":
+          return Op.LSHIFT;
+        case "RShift":
+          return Op.RSHIFT;
         default:
           throw new UnsupportedOperationException("Unsupported binary op: " + opName);
       }
@@ -2580,6 +2586,11 @@ public class Script {
               return Numbers.subtract(lhsNum, mult);
             }
           }
+        case LSHIFT:
+          return convertLongToIntIfFits(checkNumberAsLong(lhsValue) << checkNumberAsLong(rhsValue));
+        case RSHIFT:
+          return convertLongToIntIfFits(
+              checkNumberAsLong(lhsValue) >>> checkNumberAsLong(rhsValue));
       }
       throw new UnsupportedOperationException(
           String.format(
@@ -2590,11 +2601,30 @@ public class Script {
               this));
     }
 
+    private static long checkNumberAsLong(Object value) {
+      if (value instanceof Number number && (number instanceof Long || number instanceof Integer)) {
+        return number.longValue();
+      } else {
+        throw new IllegalArgumentException(
+            "Unexpected operand type for bit-shift operation: " + value.getClass());
+      }
+    }
+
+    private static Number convertLongToIntIfFits(Long longValue) {
+      if (longValue > MAX_UNSIGNED_32_BIT_INTEGER || longValue < Integer.MIN_VALUE) {
+        return longValue;
+      } else {
+        return longValue.intValue();
+      }
+    }
+
     @Override
     public String toString() {
       return String.format("(%s %s %s)", lhs, op.symbol(), rhs);
     }
   }
+
+  private static final long MAX_UNSIGNED_32_BIT_INTEGER = 0xFFFFFFFFL;
 
   public record SliceExpression(
       Optional<Expression> lower, Optional<Expression> upper, Optional<Expression> step)
@@ -3791,6 +3821,36 @@ public class Script {
     }
   }
 
+  public static class HexFunction implements Function {
+    public static final HexFunction INSTANCE = new HexFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+
+      if (value instanceof Byte b) {
+        return String.format("0x%02x", b);
+      }
+      if (value instanceof Short s) {
+        return String.format("0x%04x", s);
+      }
+      if (value instanceof Integer i) {
+        return "0x" + Integer.toHexString(i);
+      }
+      if (value instanceof Long l) {
+        if (l > MAX_UNSIGNED_32_BIT_INTEGER || l < Integer.MIN_VALUE) {
+          return "0x" + Long.toHexString(l);
+        } else {
+          return "0x" + Integer.toHexString(l.intValue());
+        }
+      }
+      throw new IllegalArgumentException(
+          "'%s' of type '%s' cannot be interpreted as integer for hex()"
+              .formatted(value, value.getClass().getName()));
+    }
+  }
+
   public static class IntFunction implements Function {
     public static final IntFunction INSTANCE = new IntFunction();
 
@@ -4655,6 +4715,7 @@ public class Script {
       // globals.
       context.setVariable("math", MATH_CLASS);
       context.setVariable("globals", GlobalsFunction.INSTANCE);
+      context.setVariable("hex", HexFunction.INSTANCE);
       context.setVariable("int", IntFunction.INSTANCE);
       context.setVariable("float", FloatFunction.INSTANCE);
       context.setVariable("str", StrFunction.INSTANCE);

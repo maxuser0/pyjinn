@@ -753,6 +753,28 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   }
 
   @Override
+  public JsonElement visitShift_expr(PythonParser.Shift_exprContext ctx) {
+    if (ctx.getChildCount() == 3) { // binary op: left op right
+      var node = createNode(ctx, "BinOp");
+      node.add("left", visit(ctx.getChild(0))); // Visit the left operand
+      final JsonObject op;
+      if (ctx.LEFTSHIFT() != null) {
+        op = createOp("LShift");
+      } else if (ctx.RIGHTSHIFT() != null) {
+        op = createOp("RShift");
+      } else {
+        throw new UnsupportedOperationException(
+            "Unsupported operator: " + ctx.getChild(1).getText());
+      }
+      node.add("op", op);
+      node.add("right", visit(ctx.getChild(2))); // Visit the right operand
+      return node;
+    } else {
+      return visit(ctx.sum());
+    }
+  }
+
+  @Override
   public JsonElement visitTerm(PythonParser.TermContext ctx) {
     if (ctx.getChildCount() == 3) { // binary op: left op right
       var node = createNode(ctx, "BinOp");
