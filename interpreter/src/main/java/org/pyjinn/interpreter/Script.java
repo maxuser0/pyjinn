@@ -45,6 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import org.pyjinn.parser.PyjinnParser;
@@ -677,7 +678,7 @@ public class Script {
           {
             Identifier id = getId(element);
             if (id.name().equals("JavaClass")) {
-              return new JavaClass();
+              return new JavaClassExpression();
             } else {
               return id;
             }
@@ -696,7 +697,7 @@ public class Script {
             var args = getAttr(element, "args").getAsJsonArray();
             Optional<JsonArray> keywords =
                 Optional.ofNullable(getAttr(element, "keywords")).map(JsonElement::getAsJsonArray);
-            if (func instanceof JavaClass) {
+            if (func instanceof JavaClassExpression) {
               if (args.size() != 1) {
                 throw new IllegalArgumentException(
                     "Expected exactly one argument to JavaClass but got " + args.size());
@@ -704,12 +705,17 @@ public class Script {
               var arg = parseExpression(args.get(0));
               if (arg instanceof ConstantExpression constExpr
                   && constExpr.value() instanceof String constString) {
-                try {
-                  return new JavaClassId(
-                      classLoader.loadClass(symbolCache.getRuntimeClassName(constString)));
-                } catch (ClassNotFoundException e) {
-                  throw new IllegalArgumentException(e);
-                }
+                return new JavaClass(
+                    constString,
+                    MemoizingSupplier.of(
+                        () -> {
+                          try {
+                            return classLoader.loadClass(
+                                symbolCache.getRuntimeClassName(constString));
+                          } catch (ClassNotFoundException e) {
+                            throw new IllegalArgumentException(e);
+                          }
+                        }));
               } else {
                 throw new IllegalArgumentException(
                     String.format(
@@ -1712,7 +1718,7 @@ public class Script {
               || (exceptionType.get() instanceof PyClass declaredType
                   && exception instanceof PyObject thrownObject
                   && thrownObject.type == declaredType)
-              || (exceptionType.get() instanceof JavaClassId javaClassId
+              || (exceptionType.get() instanceof JavaClass javaClassId
                   && javaClassId.type().isAssignableFrom(exception.getClass()))) {
             handler
                 .exceptionVariable()
@@ -3720,7 +3726,7 @@ public class Script {
     }
   }
 
-  public record JavaClass() implements Expression {
+  public record JavaClassExpression() implements Expression {
     @Override
     public Object eval(Context context) {
       throw new UnsupportedOperationException("JavaClass can be called but not evaluated");
@@ -3732,26 +3738,37 @@ public class Script {
     }
   }
 
-  public record JavaClassId(Class<?> type) implements Expression, Function {
+  public record JavaClass(String name, Supplier<Class<?>> classSupplier)
+      implements Expression, Function {
+
+    public JavaClass(Class<?> type) {
+      this(type.getName(), () -> type);
+    }
+
     @Override
     public Object eval(Context context) {
       return this;
     }
 
+    public Class<?> type() {
+      return classSupplier.get();
+    }
+
     @Override
     public String toString() {
-      return String.format("JavaClass(\"%s\")", type.getName());
+      return String.format("JavaClass(\"%s\")", name);
     }
 
     @Override
     public Object call(Environment env, Object... params) {
+      var type = type();
+
       // Treat calls on an interface as a "cast" that attempts to promote params[0] from a
       // Script.Function to a proxy for this interface.
       if (type.isInterface()) {
         if (params.length != 1) {
           throw new IllegalArgumentException(
-              "Calling interface %s with %d params but expected 1"
-                  .formatted(type.getName(), params.length));
+              "Calling interface %s with %d params but expected 1".formatted(name, params.length));
         }
         var param = params[0];
         if (param instanceof Function function) {
@@ -3759,11 +3776,11 @@ public class Script {
         } else {
           throw new IllegalArgumentException(
               "Calling interface %s with non-function param of type %s"
-                  .formatted(type.getName(), param.getClass().getName()));
+                  .formatted(name, param.getClass().getName()));
         }
       }
 
-      Constructor<?> ctor = env.findConstructor(type, params);
+      Constructor<?> ctor = env.findConstructor(type(), params);
       try {
         InterfaceProxy.promoteFunctionalParams(env, ctor, params);
         return ctor.newInstance(params);
@@ -4016,10 +4033,11 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var value = params[0];
-      if (value instanceof JavaClassId classId) {
+      if (value instanceof JavaClass classId) {
         return classId.type();
       } else {
-        return new JavaClassId(value.getClass());
+        var type = value.getClass();
+        return new JavaClass(type);
       }
     }
   }
@@ -4373,7 +4391,7 @@ public class Script {
 
       final boolean isStaticMethod;
       final Class<?> clss;
-      if (object instanceof JavaClassId classId) {
+      if (object instanceof JavaClass classId) {
         isStaticMethod = true;
         clss = classId.type();
       } else {
@@ -4570,7 +4588,7 @@ public class Script {
 
       final boolean isClass;
       final Class<?> objectClass;
-      if (objectValue instanceof JavaClassId javaClassId) {
+      if (objectValue instanceof JavaClass javaClassId) {
         isClass = true;
         objectClass = javaClassId.type();
       } else {
@@ -4706,7 +4724,7 @@ public class Script {
       return script.callStack.get();
     }
 
-    private static JavaClassId MATH_CLASS = new JavaClassId(math.class);
+    private static JavaClass MATH_CLASS = new JavaClass(math.class);
 
     public static GlobalContext create(String moduleFilename, SymbolCache symbolCache) {
       var context = new GlobalContext(moduleFilename, symbolCache);

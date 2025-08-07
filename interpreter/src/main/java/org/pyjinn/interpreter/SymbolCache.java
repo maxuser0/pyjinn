@@ -61,7 +61,7 @@ public class SymbolCache {
   public record NestedClassAccessor(Class<?> nestedClass) implements MemberAccessor {
     @Override
     public Object from(Object object) {
-      return new Script.JavaClassId(nestedClass);
+      return new Script.JavaClass(nestedClass);
     }
   }
 
