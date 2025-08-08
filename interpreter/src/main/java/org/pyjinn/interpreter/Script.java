@@ -591,7 +591,10 @@ public class Script {
       } catch (ParseException e) {
         throw e;
       } catch (Exception e) {
-        throw new ParseException("Exception while parsing statement: %s".formatted(element), e);
+        throw new ParseException(
+            "Syntax error in %s, line %s:\n%s"
+                .formatted(filename, getAttr(element, "lineno"), element),
+            e);
       }
       throw new IllegalArgumentException("Unknown statement type: " + element.toString());
     }
@@ -1053,7 +1056,7 @@ public class Script {
 
     // Couldn't find the cached module, so create it.
     String scriptCode = Files.readString(modulePath);
-    JsonElement scriptAst = PyjinnParser.parse(scriptCode);
+    JsonElement scriptAst = PyjinnParser.parse(moduleFilename, scriptCode);
     module = new Module(this, moduleFilename, filenameToModuleName(moduleFilename));
     module.parse(scriptAst, moduleFilename);
     modulesByName.put(name, module);

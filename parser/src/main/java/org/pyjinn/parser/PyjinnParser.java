@@ -23,15 +23,21 @@ public class PyjinnParser {
   public record ParserOutput(
       String source, PythonParser parser, ParseTree parseTree, JsonElement jsonAst) {}
 
-  public static JsonElement parse(String pyjinnCode) throws Exception {
-    return parseTrees(pyjinnCode).jsonAst();
+  public static JsonElement parse(String filename, String pyjinnCode) throws Exception {
+    return parseTrees(filename, pyjinnCode).jsonAst();
   }
 
-  public static ParserOutput parseTrees(String pyjinnCode) throws Exception {
+  public static ParserOutput parseTrees(String filename, String pyjinnCode) throws Exception {
     CharStream input = CharStreams.fromString(pyjinnCode);
     PythonLexer lexer = new PythonLexer(input);
+    lexer.removeErrorListeners();
+    lexer.addErrorListener(new PyjinnErrorListener(filename, pyjinnCode));
+
     CommonTokenStream tokens = new CommonTokenStream(lexer);
     PythonParser parser = new PythonParser(tokens);
+    parser.removeErrorListeners();
+    parser.addErrorListener(new PyjinnErrorListener(filename, pyjinnCode));
+
     ParseTree parseTree = parser.file_input();
     var visitor = new PythonJsonVisitor();
     var ast = visitor.visit(parseTree);

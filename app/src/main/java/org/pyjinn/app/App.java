@@ -32,14 +32,14 @@ public class App {
     } else {
       boolean intermediateOutput = false;
       if (argsSet.contains("dump-parse-tree")) {
-        var parserOutput = PyjinnParser.parseTrees(stdinString);
+        var parserOutput = PyjinnParser.parseTrees("<stdin>", stdinString);
         var parser = parserOutput.parser();
         System.out.println(parserOutput.parseTree().toStringTree(parser));
         argsSet.remove("dump-parse-tree");
         intermediateOutput = true;
       }
       if (argsSet.contains("dump-ast")) {
-        jsonAst = PyjinnParser.parse(stdinString);
+        jsonAst = PyjinnParser.parse("<stdin>", stdinString);
         Gson gson = new GsonBuilder().serializeNulls().setPrettyPrinting().create();
         System.out.println(gson.toJson(jsonAst));
         argsSet.remove("dump-ast");
@@ -51,7 +51,7 @@ public class App {
     }
 
     if (jsonAst == null) {
-      jsonAst = PyjinnParser.parse(stdinString);
+      jsonAst = PyjinnParser.parse("<stdin>", stdinString);
     }
 
     var script = new Script();

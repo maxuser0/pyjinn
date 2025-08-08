@@ -48,10 +48,14 @@ import org.junit.jupiter.api.Test;
 
 class PyjinnParserTest {
 
+  private static PyjinnParser.ParserOutput parseTrees(String source) throws Exception {
+    return PyjinnParser.parseTrees("test", source);
+  }
+
   @Test
   void intConstant() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             123
             """);
@@ -62,7 +66,7 @@ class PyjinnParserTest {
   @Test
   void hexIntConstant() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             0x123abc
             """);
@@ -73,7 +77,7 @@ class PyjinnParserTest {
   @Test
   void maxHexIntConstant() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             0xffffffff
             """);
@@ -84,7 +88,7 @@ class PyjinnParserTest {
   @Test
   void minHexLongConstant() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             0x100000000
             """);
@@ -95,7 +99,7 @@ class PyjinnParserTest {
   @Test
   void floatConstant() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             123.
             """);
@@ -107,7 +111,7 @@ class PyjinnParserTest {
   @Test
   void boolConstant() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             True
             """);
@@ -118,7 +122,7 @@ class PyjinnParserTest {
   @Test
   void noneConstant() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             None
             """);
@@ -148,7 +152,7 @@ class PyjinnParserTest {
   @Test
   void plusEqualAttribute() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x.y += z
             """);
@@ -175,7 +179,7 @@ class PyjinnParserTest {
   @Test
   void plusEqualSubscript() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[y] += z
             """);
@@ -203,7 +207,7 @@ class PyjinnParserTest {
   @Test
   void plusEqual() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x += y
             """);
@@ -225,7 +229,7 @@ class PyjinnParserTest {
   @Test
   void minusEqual() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x -= y
             """);
@@ -247,7 +251,7 @@ class PyjinnParserTest {
   @Test
   void timesEqual() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x *= y
             """);
@@ -269,7 +273,7 @@ class PyjinnParserTest {
   @Test
   void divideEqual() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x /= y
             """);
@@ -291,7 +295,7 @@ class PyjinnParserTest {
   @Test
   void listComprehension() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             u = [x + y for x in z]
             """);
@@ -343,7 +347,7 @@ class PyjinnParserTest {
   @Test
   void listComprehensionWithIfs() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             u = [x + y for x in z if v]
             """);
@@ -397,7 +401,7 @@ class PyjinnParserTest {
   @Test
   void stringInterpolation() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             "From %s to %s" % (x, y)
             """);
@@ -430,7 +434,7 @@ class PyjinnParserTest {
   @Test
   void mixedFString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             "a" f'b\\t{c}d' "e"
             """);
@@ -469,7 +473,7 @@ class PyjinnParserTest {
   @Test
   void fString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             f'{x}-{y}'
             """);
@@ -509,7 +513,7 @@ class PyjinnParserTest {
   @Test
   void multipartString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             'mixed' "quotes"
             """);
@@ -527,7 +531,7 @@ class PyjinnParserTest {
   @Test
   void singleQuotedString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             'this is a "test"'
             """);
@@ -545,7 +549,7 @@ class PyjinnParserTest {
   @Test
   void doubleQuotedString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             "this is a 'test'"
             """);
@@ -563,7 +567,7 @@ class PyjinnParserTest {
   @Test
   void rawString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             r"this\\tis\\na \\"test\\""
             """);
@@ -581,7 +585,7 @@ class PyjinnParserTest {
   @Test
   void stringWithEscapeSequences() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             "this\\tis\\na \\"test\\""
             """);
@@ -599,7 +603,7 @@ class PyjinnParserTest {
   @Test
   void tripleSingleQuotedString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             '''
             this is 'a'
@@ -620,7 +624,7 @@ class PyjinnParserTest {
   @Test
   void tripleDoubleQuotedString() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             \"\"\"
             this is 'a'
@@ -641,7 +645,7 @@ class PyjinnParserTest {
   @Test
   void factorialFunction() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             def factorial(n):
               if n == 0:
@@ -737,7 +741,7 @@ class PyjinnParserTest {
   @Test
   void forStatement() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             for x in y:
               z
@@ -769,7 +773,7 @@ class PyjinnParserTest {
   @Test
   void whileStatement() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             while x:
               y
@@ -798,7 +802,7 @@ class PyjinnParserTest {
   @Test
   void ifElifChainStatement() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             if a:
               b
@@ -875,7 +879,7 @@ class PyjinnParserTest {
   @Test
   void ifElifStatement() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             if a:
               b
@@ -924,7 +928,7 @@ class PyjinnParserTest {
   @Test
   void ifElseStatement() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             if x:
               y
@@ -961,7 +965,7 @@ class PyjinnParserTest {
   @Test
   void ifStatement() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             if x:
               y
@@ -990,7 +994,7 @@ class PyjinnParserTest {
   @Test
   void subscriptFieldFunctionCallMedley() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             u[v](w).x(y)[z] = a[b](c).d(e)[f]
             """);
@@ -1074,7 +1078,7 @@ class PyjinnParserTest {
   @Test
   void subscriptFieldAssignment() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[y].z = w
             """);
@@ -1107,7 +1111,7 @@ class PyjinnParserTest {
   @Test
   void fieldSubscriptAssignment() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x.y[z] = w
             """);
@@ -1139,7 +1143,7 @@ class PyjinnParserTest {
   @Test
   void fieldAssignment() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x.y = z
             """);
@@ -1166,7 +1170,7 @@ class PyjinnParserTest {
   @Test
   void frozenDataclass() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             @dataclass(frozen=True)
             class Foo:
@@ -1227,7 +1231,7 @@ class PyjinnParserTest {
   @Test
   void dataclass() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             @dataclass
             class Foo:
@@ -1272,7 +1276,7 @@ class PyjinnParserTest {
   @Test
   void classDef() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             class Foo:
               def __init__(self, x):
@@ -1353,7 +1357,7 @@ class PyjinnParserTest {
   @Test
   void dictLiteral() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x = {y: z, a: b}
             """);
@@ -1385,7 +1389,7 @@ class PyjinnParserTest {
   @Test
   void lambdaExpression() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             lambda x, y: x + y
             """);
@@ -1425,7 +1429,7 @@ class PyjinnParserTest {
   @Test
   void destructuredAssignment() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x, y = foo()
             """);
@@ -1459,7 +1463,7 @@ class PyjinnParserTest {
   @Test
   void simpleAssignment() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x = y
             """);
@@ -1481,7 +1485,7 @@ class PyjinnParserTest {
   @Test
   void tupleLiteral() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             (x, y, z)
             """);
@@ -1504,7 +1508,7 @@ class PyjinnParserTest {
   @Test
   void listLiteral() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             [x, y, z]
             """);
@@ -1527,7 +1531,7 @@ class PyjinnParserTest {
   @Test
   void orderOfOperations() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x + y * z - w
             """);
@@ -1570,7 +1574,7 @@ class PyjinnParserTest {
   @Test
   void multiplication() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x * y
             """);
@@ -1589,7 +1593,7 @@ class PyjinnParserTest {
   @Test
   void subtraction() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x - y
             """);
@@ -1608,7 +1612,7 @@ class PyjinnParserTest {
   @Test
   void fieldAccess() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x.y.z
             """);
@@ -1627,7 +1631,7 @@ class PyjinnParserTest {
   @Test
   void functionCall() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             f(x, y)
             """);
@@ -1651,7 +1655,7 @@ class PyjinnParserTest {
   @Test
   void functionCallWithStarredArg() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             foo(first_arg, *starred_arg, last_arg)
             """);
@@ -1689,7 +1693,7 @@ class PyjinnParserTest {
   @Test
   void subscriptEmptyRange() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[:]
             """);
@@ -1715,7 +1719,7 @@ class PyjinnParserTest {
   @Test
   void subscriptValue() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[77]
             """);
@@ -1739,7 +1743,7 @@ class PyjinnParserTest {
   @Test
   void subscriptColon() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[:]
             """);
@@ -1765,7 +1769,7 @@ class PyjinnParserTest {
   @Test
   void subscriptColonColon() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[::]
             """);
@@ -1791,7 +1795,7 @@ class PyjinnParserTest {
   @Test
   void subscriptColonValue() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[:99]
             """);
@@ -1821,7 +1825,7 @@ class PyjinnParserTest {
   @Test
   void subscriptColonValueColonValue() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[:99:77]
             """);
@@ -1853,7 +1857,7 @@ class PyjinnParserTest {
   @Test
   void subscriptValueColonValue() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[77:99]
             """);
@@ -1885,7 +1889,7 @@ class PyjinnParserTest {
   @Test
   void subscriptColonColonValue() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             x[::3]
             """);
@@ -1914,7 +1918,7 @@ class PyjinnParserTest {
   @Test
   void simpleAdditionFunctionDef() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             def foo(x, y):
               return x + y
@@ -1954,7 +1958,7 @@ class PyjinnParserTest {
   @Test
   void multipleStatementsFunctionDef() throws Exception {
     var parserOutput =
-        PyjinnParser.parseTrees(
+        parseTrees(
             """
             def foo(x, y):
               x
