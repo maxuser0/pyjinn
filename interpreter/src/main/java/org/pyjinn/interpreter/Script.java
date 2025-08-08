@@ -3274,7 +3274,12 @@ public class Script {
   }
 
   public static class PyList
-      implements Iterable<Object>, ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
+      implements PyStreamable,
+          Iterable<Object>,
+          ItemGetter,
+          ItemSetter,
+          ItemContainer,
+          ItemDeleter {
     private final List<Object> list;
 
     public PyList() {
@@ -3299,6 +3304,7 @@ public class Script {
       return list.iterator();
     }
 
+    @Override
     public Stream<Object> stream() {
       return list.stream();
     }
@@ -3442,8 +3448,12 @@ public class Script {
     }
   }
 
+  public interface PyStreamable {
+    Stream<Object> stream();
+  }
+
   // TODO(maxuser): Enforce immutability of tuples so that `t[0] = 0` is illegal.
-  public static class PyTuple implements Iterable<Object>, ItemGetter, ItemContainer {
+  public static class PyTuple implements PyStreamable, Iterable<Object>, ItemGetter, ItemContainer {
     private final Object[] array;
 
     public PyTuple(Object[] array) {
@@ -3462,6 +3472,11 @@ public class Script {
     @Override
     public int hashCode() {
       return Arrays.hashCode(array);
+    }
+
+    @Override
+    public Stream<Object> stream() {
+      return Arrays.stream(array);
     }
 
     @Override
