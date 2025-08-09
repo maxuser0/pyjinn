@@ -42,6 +42,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -78,6 +79,10 @@ public class Script {
 
     public String name() {
       return name;
+    }
+
+    public String filename() {
+      return globals.moduleFilename;
     }
 
     public Environment globals() {
@@ -165,6 +170,17 @@ public class Script {
   // Values in this map may be duplicates if the same module is referenced by distinct names.
   private final Map<String, Module> modulesByName = new ConcurrentHashMap<>();
 
+  public interface ZombieCallbackHandler {
+    void handle(String script, String callable, int count);
+  }
+
+  private ZombieCallbackHandler zombieCallbackHandler =
+      (script, callable, count) -> {
+        throw new IllegalStateException(
+            "Illegal invocation of %s (count: %d) defined in script that already exited: %s"
+                .formatted(callable, count, script));
+      };
+
   public Consumer<String> stdout = System.out::println;
   public Consumer<String> stderr = System.err::println;
 
@@ -240,6 +256,11 @@ public class Script {
 
   public void redirectStderr(Consumer<String> err) {
     this.stderr = err;
+  }
+
+  /** Sets a handler for when script functions are called after the enclosing script has exited. */
+  public void setZombieCallbackHandler(ZombieCallbackHandler handler) {
+    zombieCallbackHandler = handler;
   }
 
   public Script parse(JsonElement element) {
@@ -809,7 +830,8 @@ public class Script {
             return new Lambda(
                 parseFunctionArgs(
                     getAttr(getAttr(element, "args").getAsJsonObject(), "args").getAsJsonArray()),
-                parseExpression(getAttr(element, "body")));
+                parseExpression(getAttr(element, "body")),
+                getLineno(element));
           }
 
         case "JoinedStr":
@@ -915,14 +937,32 @@ public class Script {
 
   public record Decorator(String name, List<JsonElement> keywords) {}
 
-  public record BoundFunction(FunctionDef function, Context enclosingContext, List<Object> defaults)
+  public record BoundFunction(
+      FunctionDef function,
+      Context enclosingContext,
+      List<Object> defaults,
+      AtomicInteger zombieCounter)
       implements Function {
     public BoundFunction(FunctionDef function, Context enclosingContext) {
-      this(function, enclosingContext, function.evalArgDefaults(enclosingContext));
+      this(
+          function,
+          enclosingContext,
+          function.evalArgDefaults(enclosingContext),
+          new AtomicInteger());
     }
 
     @Override
     public Object call(Environment env, Object... params) {
+      if (enclosingContext.env().halted()) {
+        // TODO(maxuser): Clear function's internal state to avoid memory leak of the entire script.
+        var script = (Script) enclosingContext.env().getVariable("__script__");
+        script.zombieCallbackHandler.handle(
+            script.mainModule().filename(),
+            "function '%s'".formatted(function.identifier().name()),
+            zombieCounter.incrementAndGet());
+        return null;
+      }
+
       final List<FunctionArg> args = function.args;
       int numParams = params.length;
       var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
@@ -3583,7 +3623,13 @@ public class Script {
     }
   }
 
-  public record Lambda(List<FunctionArg> args, Expression body) implements Expression {
+  public record Lambda(
+      List<FunctionArg> args, Expression body, int lineno, AtomicInteger zombieCounter)
+      implements Expression {
+    public Lambda(List<FunctionArg> args, Expression body, int lineno) {
+      this(args, body, lineno, new AtomicInteger());
+    }
+
     @Override
     public Object eval(Context context) {
       return createFunction(context);
@@ -3591,6 +3637,16 @@ public class Script {
 
     private Function createFunction(Context enclosingContext) {
       return (env, params) -> {
+        if (enclosingContext.env().halted()) {
+          // TODO(maxuser): Clear lambda's internal state to avoid memory leak of the entire script.
+          var script = (Script) enclosingContext.env().getVariable("__script__");
+          script.zombieCallbackHandler.handle(
+              script.mainModule().filename(),
+              "lambda from line " + lineno,
+              zombieCounter.incrementAndGet());
+          return null;
+        }
+
         if (args.size() != params.length) {
           throw new IllegalArgumentException(
               String.format(
@@ -4722,6 +4778,9 @@ public class Script {
     /** Prepare for exit initiated by {@code Script.exit(int)}. */
     void halt();
 
+    /** Has the script been halted? */
+    boolean halted();
+
     Constructor<?> findConstructor(Class<?> clss, Object... params);
   }
 
@@ -4804,6 +4863,7 @@ public class Script {
       halted = true;
     }
 
+    @Override
     public boolean halted() {
       return halted;
     }
