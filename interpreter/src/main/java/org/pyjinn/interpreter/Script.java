@@ -1492,7 +1492,7 @@ public class Script {
     public final Optional<java.util.function.Function<PyObject, Integer>> hashMethod;
     public final Optional<java.util.function.Function<PyObject, String>> strMethod;
 
-    private static final PyClass CLASS_TYPE =
+    public static final PyClass CLASS_TYPE =
         new PyClass(
             "type",
             (env, params) -> null,
@@ -4111,6 +4111,8 @@ public class Script {
       var value = params[0];
       if (value instanceof JavaClass classId) {
         return classId.type();
+      } else if (value instanceof PyObject pyObject) {
+        return pyObject == PyClass.CLASS_TYPE ? PyClass.CLASS_TYPE : pyObject.type;
       } else {
         var type = value.getClass();
         return new JavaClass(type);
