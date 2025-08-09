@@ -3821,6 +3821,8 @@ public class Script {
 
     @Override
     public Object eval(Context context) {
+      // Call classSupplier to force loading of the class, even though the class isn't used yet.
+      classSupplier.get();
       return this;
     }
 
