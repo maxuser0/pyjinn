@@ -24,17 +24,17 @@ To build the standalone interpreter, run:
 $ ./gradlew app:shadowJar
 ```
 
-This builds the all-in-one jar file, `pyjinn-app-0.7-all.jar`:
+This builds the all-in-one jar file, `pyjinn-app-0.8-all.jar`:
 
 ```
-% ls -lh app/build/libs/pyjinn-app-0.7-all.jar
--rw-r--r--@ 1 maxuser  staff   1.1M Jul 21 19:56 app/build/libs/pyjinn-app-0.7-all.jar
+% ls -lh app/build/libs/pyjinn-app-0.8-all.jar
+-rw-r--r--@ 1 maxuser  staff   1.1M Jul 21 19:56 app/build/libs/pyjinn-app-0.8-all.jar
 ```
 
 Run the standalone interpreter using `java -jar ...`, e.g. on Mac, Linux, or with WSL on Windows:
 
 ```
-$ echo 'print([x for x in range(10) if x > 2])' |java -jar app/build/libs/pyjinn-app-0.7-all.jar
+$ echo 'print([x for x in range(10) if x > 2])' |java -jar app/build/libs/pyjinn-app-0.8-all.jar
 [3, 4, 5, 6, 7, 8, 9]
 ```
 
@@ -49,8 +49,8 @@ $ ./gradlew interpreter:shadowJar
 This builds the jar file:
 
 ```
-% ls -lh interpreter/build/libs/pyjinn-lib-0.7-all.jar
--rw-r--r--@ 1 maxuser  staff   887K Jul 21 19:54 interpreter/build/libs/pyjinn-lib-0.7-all.jar
+% ls -lh interpreter/build/libs/pyjinn-lib-0.8-all.jar
+-rw-r--r--@ 1 maxuser  staff   887K Jul 21 19:54 interpreter/build/libs/pyjinn-lib-0.8-all.jar
 ```
 
 ## Code Structure
@@ -84,7 +84,7 @@ Python lambdas and functions to Java method params that are an interface type th
 lambdas.  E.g.
 
 ```
-$ java -jar app/build/libs/pyjinn-app-0.7-all.jar << 'EOF'
+$ java -jar app/build/libs/pyjinn-app-0.8-all.jar << 'EOF'
 pythonList = [x for x in range(10) if x > 2]
 javaList = pythonList.getJavaList()
 filteredJavaList = javaList.stream().filter(lambda x: x < 7).map(lambda x: 2 * x).toList()
@@ -104,7 +104,7 @@ $ ./gradlew interpreter:publishToMavenLocal
 On Mac, Linux, and WSL on Windows the Pyjinn library will be published to:
 
 ```
-~/.m2/repository/org/pyjinn/pyjinn-lib/0.7/pyjinn-lib-0.7-all.jar
+~/.m2/repository/org/pyjinn/pyjinn-lib/0.8/pyjinn-lib-0.8-all.jar
 ```
 
 Make it available to other Gradle projects by adding the following to their `build.gradle`:
@@ -115,6 +115,6 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.pyjinn:pyjinn-lib:0.7:all'
+    implementation 'org.pyjinn:pyjinn-lib:0.8:all'
 }
 ```

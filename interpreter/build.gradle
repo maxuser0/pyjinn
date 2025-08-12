@@ -7,7 +7,7 @@ plugins {
 }
 
 group = 'org.pyjinn'
-version = '0.7'
+version = '0.8'
 
 processResources {
     def expandProps = [
