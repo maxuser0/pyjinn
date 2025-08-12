@@ -46,7 +46,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import org.pyjinn.parser.PyjinnParser;
@@ -141,6 +140,16 @@ public class Script {
       versionInfo = VersionInfo.load();
     }
     return versionInfo;
+  }
+
+  // javaClasses is static so that the map, and therefore instances of JavaClass, are shared across
+  // Script instances. If this weren't the case then JavaClass("X") referenced in one script would
+  // compare unequal with JavaClass("X") from another script, which would lead to subtle bugs when
+  // objects are shared across scripts in the same process.
+  private static ConcurrentHashMap<Class<?>, JavaClass> javaClasses = new ConcurrentHashMap<>();
+
+  private static JavaClass getJavaClass(Class<?> type) {
+    return javaClasses.computeIfAbsent(type, JavaClass::new);
   }
 
   public interface ModuleHandler {
@@ -702,7 +711,7 @@ public class Script {
           {
             Identifier id = getId(element);
             if (id.name().equals("JavaClass")) {
-              return new JavaClassExpression();
+              return new JavaClassKeyword();
             } else {
               return id;
             }
@@ -721,7 +730,7 @@ public class Script {
             var args = getAttr(element, "args").getAsJsonArray();
             Optional<JsonArray> keywords =
                 Optional.ofNullable(getAttr(element, "keywords")).map(JsonElement::getAsJsonArray);
-            if (func instanceof JavaClassExpression) {
+            if (func instanceof JavaClassKeyword) {
               if (args.size() != 1) {
                 throw new IllegalArgumentException(
                     "Expected exactly one argument to JavaClass but got " + args.size());
@@ -729,17 +738,7 @@ public class Script {
               var arg = parseExpression(args.get(0));
               if (arg instanceof ConstantExpression constExpr
                   && constExpr.value() instanceof String constString) {
-                return new JavaClass(
-                    constString,
-                    MemoizingSupplier.of(
-                        () -> {
-                          try {
-                            return classLoader.loadClass(
-                                symbolCache.getRuntimeClassName(constString));
-                          } catch (ClassNotFoundException e) {
-                            throw new IllegalArgumentException(e);
-                          }
-                        }));
+                return new JavaClassCall(constString, symbolCache, classLoader);
               } else {
                 throw new IllegalArgumentException(
                     String.format(
@@ -3800,7 +3799,7 @@ public class Script {
     }
   }
 
-  public record JavaClassExpression() implements Expression {
+  public record JavaClassKeyword() implements Expression {
     @Override
     public Object eval(Context context) {
       throw new UnsupportedOperationException("JavaClass can be called but not evaluated");
@@ -3812,27 +3811,24 @@ public class Script {
     }
   }
 
-  public record JavaClass(String name, Supplier<Class<?>> classSupplier)
-      implements Expression, Function {
-
-    public JavaClass(Class<?> type) {
-      this(type.getName(), () -> type);
-    }
-
+  public record JavaClassCall(String name, SymbolCache symbolCache, ClassLoader classLoader)
+      implements Expression {
     @Override
     public Object eval(Context context) {
-      // Call classSupplier to force loading of the class, even though the class isn't used yet.
-      classSupplier.get();
-      return this;
+      final Class<?> type;
+      try {
+        type = classLoader.loadClass(symbolCache.getRuntimeClassName(name));
+      } catch (ClassNotFoundException e) {
+        throw new IllegalArgumentException(e);
+      }
+      return getJavaClass(type);
     }
+  }
 
-    public Class<?> type() {
-      return classSupplier.get();
-    }
-
+  public record JavaClass(Class<?> type) implements Function {
     @Override
     public String toString() {
-      return String.format("JavaClass(\"%s\")", name);
+      return String.format("JavaClass(\"%s\")", type.getName());
     }
 
     @Override
@@ -3844,7 +3840,8 @@ public class Script {
       if (type.isInterface()) {
         if (params.length != 1) {
           throw new IllegalArgumentException(
-              "Calling interface %s with %d params but expected 1".formatted(name, params.length));
+              "Calling interface %s with %d params but expected 1"
+                  .formatted(type.getName(), params.length));
         }
         var param = params[0];
         if (param instanceof Function function) {
@@ -3852,7 +3849,7 @@ public class Script {
         } else {
           throw new IllegalArgumentException(
               "Calling interface %s with non-function param of type %s"
-                  .formatted(name, param.getClass().getName()));
+                  .formatted(type.getName(), param.getClass().getName()));
         }
       }
 
@@ -4115,7 +4112,7 @@ public class Script {
         return pyObject == PyClass.CLASS_TYPE ? PyClass.CLASS_TYPE : pyObject.type;
       } else {
         var type = value.getClass();
-        return new JavaClass(type);
+        return getJavaClass(type);
       }
     }
   }
@@ -4805,7 +4802,7 @@ public class Script {
       return script.callStack.get();
     }
 
-    private static JavaClass MATH_CLASS = new JavaClass(math.class);
+    private static JavaClass MATH_CLASS = getJavaClass(math.class);
 
     public static GlobalContext create(String moduleFilename, SymbolCache symbolCache) {
       var context = new GlobalContext(moduleFilename, symbolCache);
