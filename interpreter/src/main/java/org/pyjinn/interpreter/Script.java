@@ -1166,9 +1166,12 @@ public class Script {
           var module = script.importModule(module());
           if (names().size() == 1 && names().get(0).name().equals("*")) {
             for (var entry : module.globals().vars().getJavaMap().entrySet()) {
-              var name = entry.getKey();
+              var name = (String) entry.getKey();
+              if (name.startsWith("__")) {
+                continue; // Skip special module variables like __name__.
+              }
               var value = entry.getValue();
-              context.setVariable((String) name, value);
+              context.setVariable(name, value);
             }
           } else {
             for (var importName : names()) {
