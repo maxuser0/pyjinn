@@ -2605,9 +2605,7 @@ public class Script {
           }
         case DIV:
           if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
-            double d = lhsNum.doubleValue() / rhsNum.doubleValue();
-            int i = (int) d;
-            return i == d ? (Number) i : (Number) d;
+            return Numbers.divide(lhsNum, rhsNum);
           }
           break;
         case POW:
@@ -2626,13 +2624,10 @@ public class Script {
               } else {
                 return String.format(lhsString, rhsValue);
               }
-            } else {
-              var lhsNum = (Number) lhsValue;
-              var rhsNum = (Number) rhsValue;
-              var div = Numbers.divide(lhsNum, rhsNum);
-              var mult = Numbers.multiply(div, rhsNum);
-              return Numbers.subtract(lhsNum, mult);
+            } else if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
+              return Numbers.pyMod(lhsNum, rhsNum);
             }
+            break;
           }
         case LSHIFT:
           return convertLongToIntIfFits(checkNumberAsLong(lhsValue) << checkNumberAsLong(rhsValue));
@@ -5102,8 +5097,12 @@ public class Script {
     public static final double e = Math.E;
     public static final double tau = Math.TAU;
 
-    public static double sqrt(double x) {
-      return Math.sqrt(x);
+    public static double sqrt(Number x) {
+      return Math.sqrt(x.doubleValue());
+    }
+
+    public static Number fmod(Number x, Number y) {
+      return Numbers.javaMod(x, y);
     }
   }
 }

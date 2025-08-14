@@ -6285,11 +6285,11 @@ public class ScriptTest {
     assertTrue(output instanceof Script.PyList);
     var list = ((Script.PyList) output).getJavaList();
     assertEquals(5, list.size());
-    assertEquals(22. / 7., ((Number) list.get(0)).doubleValue(), 0.000000001);
-    assertEquals(256, list.get(1));
-    assertEquals(1, list.get(2));
-    assertEquals("This is a test.", list.get(3));
-    assertEquals("This is 1 test.", list.get(4));
+    assertEquals(22. / 7., ((Number) list.get(0)).doubleValue(), 0.000000001); // 22 / 7
+    assertEquals(256, list.get(1)); // 2 ** 8
+    assertEquals(1, list.get(2)); // 22 % 7
+    assertEquals("This is a test.", list.get(3)); // "This is a %s." % "test"
+    assertEquals("This is 1 test.", list.get(4)); // "This is %d %s." % (1, "test")
   }
 
   @Test
