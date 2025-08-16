@@ -1371,7 +1371,7 @@ public class Script {
     }
   }
 
-  public static class PyObject {
+  public static class PyObject implements Function {
     public final PyClass type;
     public final PyDict __dict__;
 
@@ -1408,6 +1408,15 @@ public class Script {
       }
 
       return new Object[] {};
+    }
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      Object[] result = callMethod(env, "__call__", params);
+      if (result.length == 0) {
+        throw new IllegalArgumentException("'%s' object is not callable".formatted(type.name));
+      }
+      return result[0];
     }
 
     @Override
