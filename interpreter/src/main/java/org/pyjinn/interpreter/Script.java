@@ -4853,6 +4853,7 @@ public class Script {
 
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
+      context.setVariable("Exception", new JavaClass(Exception.class));
       context.setVariable("math", MATH_CLASS);
       context.setVariable("globals", GlobalsFunction.INSTANCE);
       context.setVariable("hex", HexFunction.INSTANCE);
