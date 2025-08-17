@@ -46,6 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import org.pyjinn.parser.PyjinnParser;
@@ -2862,18 +2863,14 @@ public class Script {
        * Otherwise generates a string for a method call.
        */
       public String getDebugInvocationString(
-          String className, Optional<String> methodName, Object[] params) {
+          String className, Optional<String> methodName, Class<?>[] paramTypes) {
         String invocation =
             String.format(
                 "%s%s(%s)",
                 className,
                 methodName.map(s -> "." + s).orElse(""),
-                Arrays.stream(params)
-                    .map(
-                        v ->
-                            v == null
-                                ? "null"
-                                : "(%s) %s".formatted(v.getClass().getName(), PyObjects.toRepr(v)))
+                Arrays.stream(paramTypes)
+                    .map(t -> t == null ? "null" : t.getName())
                     .collect(joining(", ")));
 
         String invocationWithPrettyNames =
@@ -2881,15 +2878,8 @@ public class Script {
                 "%s%s(%s)",
                 toPrettyClassName.apply(className),
                 methodName.map(s -> "." + s).orElse(""),
-                Arrays.stream(params)
-                    .map(
-                        v ->
-                            v == null
-                                ? "null"
-                                : "(%s) %s"
-                                    .formatted(
-                                        toPrettyClassName.apply(v.getClass().getName()),
-                                        PyObjects.toRepr(v)))
+                Arrays.stream(paramTypes)
+                    .map(t -> t == null ? "null" : toPrettyClassName.apply(t.getName()))
                     .collect(joining(", ")));
 
         if (!invocation.equals(invocationWithPrettyNames)) {
@@ -2899,26 +2889,41 @@ public class Script {
       }
     }
 
-    public static Optional<Method> findBestMatchingMethod(
-        Class<?> clss,
+    public static Class<?>[] getTypes(Object[] params) {
+      Class<?>[] types = new Class<?>[params.length];
+      for (int i = 0; i < params.length; ++i) {
+        Object param = params[i];
+        types[i] = param == null ? null : param.getClass();
+      }
+      return types;
+    }
+
+    public static Optional<MethodInvoker> findBestMatchingMethod(
+        Class<?> clazz,
         boolean isStaticMethod,
         BiFunction<Class<?>, String, Set<String>> toRuntimeMethodNames,
         String methodName,
-        Object[] paramValues,
+        Class<?>[] paramTypes,
         Diagnostics diagnostics) {
+
+      if (clazz == String.class) {
+        var strMethod = PyStr.translateStringMethod(isStaticMethod, methodName, paramTypes);
+        if (strMethod.isPresent()) {
+          return strMethod;
+        }
+      }
+
       if (diagnostics != null) {
-        diagnostics.append("Resolving method call:\n  ");
         diagnostics.append(
-            diagnostics.getDebugInvocationString(
-                clss.getName(), Optional.of(methodName), paramValues));
-        diagnostics.append("\n");
+            "Resolving %smethod call for %s.%s()\n"
+                .formatted(isStaticMethod ? "static " : "", clazz.getSimpleName(), methodName));
       }
       logger.log(
           "Searching '%s' for method named '%s' with param length %d",
-          clss, methodName, paramValues.length);
-      var bestMethod =
+          clazz, methodName, paramTypes.length);
+      Optional<Method> bestMethod =
           findBestMatchingExecutable(
-              clss,
+              clazz,
               c -> {
                 var names = toRuntimeMethodNames.apply(c, methodName);
                 logger.log("  mapped '%s' method '%s' to: %s", c, methodName, names);
@@ -2934,7 +2939,7 @@ public class Script {
               (method, runtimeMethodNames) ->
                   Modifier.isStatic(method.getModifiers()) == isStaticMethod
                       && runtimeMethodNames.contains(method.getName()),
-              paramValues,
+              paramTypes,
               /* traverseSuperclasses= */ true,
               diagnostics);
       if (diagnostics != null) {
@@ -2942,38 +2947,45 @@ public class Script {
           diagnostics.append("No matching method found in class, superclass, or interfaces:\n  ");
           diagnostics.append(
               diagnostics.getDebugInvocationString(
-                  clss.getName(), Optional.of(methodName), paramValues));
+                  clazz.getName(), Optional.of(methodName), paramTypes));
         } else {
           diagnostics.append("Found matching method:\n  ");
           diagnostics.append(bestMethod.get().toString());
         }
       }
-      return bestMethod;
+
+      return bestMethod.map(
+          method ->
+              (Environment env, Object object, Object[] params) -> {
+                if (env != null) {
+                  InterfaceProxy.promoteFunctionalParams(env, method, params);
+                }
+                return method.invoke(isStaticMethod ? null : object, params);
+              });
     }
 
     public static Optional<Constructor<?>> findBestMatchingConstructor(
-        Class<?> clss, Object[] paramValues, Diagnostics diagnostics) {
+        Class<?> clazz, Class<?>[] paramTypes, Diagnostics diagnostics) {
       if (diagnostics != null) {
-        diagnostics.append("Resolving constructor call:\n  ");
-        diagnostics.append(
-            diagnostics.getDebugInvocationString(clss.getName(), Optional.empty(), paramValues));
-        diagnostics.append("\n");
+        diagnostics.append("Resolving constructor call for ");
+        diagnostics.append(clazz.getName());
+        diagnostics.append(".\n");
       }
-      logger.log("Searching '%s' for ctor with param length %d", clss, paramValues.length);
+      logger.log("Searching '%s' for ctor with param length %d", clazz, paramTypes.length);
       var bestCtor =
           findBestMatchingExecutable(
-              clss,
+              clazz,
               c -> null,
               Class<?>::getConstructors,
               (c, p) -> true,
-              paramValues,
+              paramTypes,
               /* traverseSuperclasses= */ false,
               diagnostics);
       if (diagnostics != null) {
         if (bestCtor.isEmpty()) {
           diagnostics.append("No matching constructor found:\n  ");
           diagnostics.append(
-              diagnostics.getDebugInvocationString(clss.getName(), Optional.empty(), paramValues));
+              diagnostics.getDebugInvocationString(clazz.getName(), Optional.empty(), paramTypes));
         } else {
           diagnostics.append("Found matching constructor:\n  ");
           diagnostics.append(bestCtor.get().toString());
@@ -2987,7 +2999,7 @@ public class Script {
         java.util.function.Function<Class<?>, U> perClassDataFactory,
         java.util.function.Function<Class<?>, T[]> executableGetter,
         BiPredicate<T, U> filter,
-        Object[] paramValues,
+        Class<?>[] paramTypes,
         boolean traverseSuperclasses,
         Diagnostics diagnostics) {
       // TODO(maxuser): Generalize the restriction on class names and make it user-configurable.
@@ -3002,10 +3014,9 @@ public class Script {
           diagnostics.append(
               "Options considered in '%s': %d\n".formatted(clss, executables.length));
         }
-        int numAttributeMismatches = 0;
         for (T executable : executables) {
           if (filter.test(executable, perClassData)) {
-            int score = getTypeCheckScore(executable.getParameterTypes(), paramValues);
+            int score = getTypeCheckScore(executable.getParameterTypes(), paramTypes);
             if (score > bestScore) {
               bestScore = score;
               bestExecutable = Optional.of(executable);
@@ -3019,18 +3030,10 @@ public class Script {
               }
             }
           } else {
-            ++numAttributeMismatches;
-            if (diagnostics != null && executables.length < 5) {
-              diagnostics.append("- name/static mismatch: %s\n".formatted(executable));
-            }
             logger.log("    callable member of '%s' not viable: %s", clss, executable);
           }
         }
         if (diagnostics != null) {
-          if (numAttributeMismatches > 0 && executables.length >= 5) {
-            diagnostics.append(
-                "- options with name/static mismatch: %d\n".formatted(numAttributeMismatches));
-          }
           if (bestExecutable.isPresent()) {
             diagnostics.append("Best match: %s\n".formatted(bestExecutable.get()));
           }
@@ -3056,7 +3059,7 @@ public class Script {
                     perClassDataFactory,
                     executableGetter,
                     filter,
-                    paramValues,
+                    paramTypes,
                     true,
                     diagnostics);
             if (viableExecutable.isPresent()) {
@@ -3071,7 +3074,7 @@ public class Script {
                 perClassDataFactory,
                 executableGetter,
                 filter,
-                paramValues,
+                paramTypes,
                 true,
                 diagnostics);
           }
@@ -3100,8 +3103,8 @@ public class Script {
      * Return value of 0 indicates that {@code paramValues} are incompatible with {@code
      * formalParamTypes}.
      */
-    private static int getTypeCheckScore(Class<?>[] formalParamTypes, Object[] paramValues) {
-      if (formalParamTypes.length != paramValues.length) {
+    private static int getTypeCheckScore(Class<?>[] formalParamTypes, Class<?>[] paramTypes) {
+      if (formalParamTypes.length != paramTypes.length) {
         return 0;
       }
 
@@ -3109,37 +3112,36 @@ public class Script {
       int score = 1;
 
       for (int i = 0; i < formalParamTypes.length; ++i) {
-        Class<?> type = promotePrimitiveType(formalParamTypes[i]);
-        Object value = paramValues[i];
-        if (value == null) {
+        Class<?> formalType = promotePrimitiveType(formalParamTypes[i]);
+        Class<?> actualType = paramTypes[i];
+        if (actualType == null) {
           // null is convertible to everything except primitive types.
-          if (type != formalParamTypes[i]) {
+          if (formalType != formalParamTypes[i]) {
             return 0;
           }
-          if (type.isArray()) {
+          if (formalType.isArray()) {
             score += 1;
           } else {
             score += 2;
           }
           continue;
         }
-        Class<?> valueType = value.getClass();
-        if (valueType == type) {
+        if (actualType == formalType) {
           score += 2;
           continue;
         }
-        if (Number.class.isAssignableFrom(type)
-            && Number.class.isAssignableFrom(valueType)
-            && numericTypeIsConvertible(valueType, type)) {
+        if (Number.class.isAssignableFrom(formalType)
+            && Number.class.isAssignableFrom(actualType)
+            && numericTypeIsConvertible(actualType, formalType)) {
           score += 1;
           continue;
         }
         // Allow implementations of Function to be passed to params expecting an interface, but
         // don't boost the score for this iffy conversion.
-        if (Function.class.isAssignableFrom(valueType) && type.isInterface()) {
+        if (Function.class.isAssignableFrom(actualType) && formalType.isInterface()) {
           continue;
         }
-        if (!type.isAssignableFrom(value.getClass())) {
+        if (!formalType.isAssignableFrom(actualType)) {
           return 0;
         }
       }
@@ -3498,7 +3500,8 @@ public class Script {
     Stream<Object> stream();
   }
 
-  // TODO(maxuser): Enforce immutability of tuples so that `t[0] = 0` is illegal.
+  // TODO(maxuser): Enforce immutability of tuples despite getJavaArray() returning array with
+  // mutable elements.
   public static class PyTuple implements PyStreamable, Iterable<Object>, ItemGetter, ItemContainer {
     private final Object[] array;
 
@@ -4472,10 +4475,10 @@ public class Script {
       }
 
       final boolean isStaticMethod;
-      final Class<?> clss;
+      final Class<?> clazz;
       if (object instanceof JavaClass classId) {
         isStaticMethod = true;
-        clss = classId.type();
+        clazz = classId.type();
       } else {
         if (object == null) {
           throw new NullPointerException(
@@ -4483,93 +4486,127 @@ public class Script {
                   .formatted(objectExpression, methodName, objectExpression));
         }
         isStaticMethod = false;
-        clss = object.getClass();
+        clazz = object.getClass();
       }
 
-      Object[] mappedParams = mapMethodParams(clss, isStaticMethod, methodName, params);
-      String mappedMethodName = mapMethodName(clss, isStaticMethod, methodName);
-      var cacheKey = ExecutableCacheKey.forMethod(clss, isStaticMethod, methodName, mappedParams);
-      Optional<Method> matchedMethod =
-          symbolCache
-              .getExecutable(
-                  cacheKey,
-                  ignoreKey ->
-                      TypeChecker.findBestMatchingMethod(
-                              clss,
-                              isStaticMethod,
-                              symbolCache::getRuntimeMethodNames,
-                              mappedMethodName,
-                              mappedParams,
-                              /* diagnostics= */ null)
-                          .map(Executable.class::cast))
-              .map(Method.class::cast);
+      Class<?>[] paramTypes = TypeChecker.getTypes(params);
+      var cacheKey = MethodCacheKey.of(clazz, isStaticMethod, methodName, paramTypes);
+      Optional<MethodInvoker> matchedMethod =
+          symbolCache.getMethodInvoker(
+              cacheKey,
+              ignoreKey ->
+                  TypeChecker.findBestMatchingMethod(
+                      clazz,
+                      isStaticMethod,
+                      symbolCache::getRuntimeMethodNames,
+                      methodName,
+                      paramTypes,
+                      /* diagnostics= */ null));
       if (matchedMethod.isPresent()) {
-        InterfaceProxy.promoteFunctionalParams(env, matchedMethod.get(), mappedParams);
         try {
-          return matchedMethod.get().invoke(isStaticMethod ? null : object, mappedParams);
+          return matchedMethod.get().invoke(env, object, params);
         } catch (IllegalAccessException | InvocationTargetException e) {
           throw new RuntimeException(e);
         }
-      } else if (object instanceof String delimiter
-          && !isStaticMethod
-          && methodName.equals("join")
-          && params.length == 1
-          && params[0] instanceof Iterable<?> sequence) {
-        // TODO(maxuser): Find a better way to support str methods.
-        return strJoin(delimiter, sequence);
       } else {
         // Re-run type checker with the same args but with error diagnostics for creating exception.
         var diagnostics = new TypeChecker.Diagnostics(symbolCache::getPrettyClassName);
         TypeChecker.findBestMatchingMethod(
-            clss,
+            clazz,
             isStaticMethod,
             symbolCache::getRuntimeMethodNames,
-            mappedMethodName,
-            mappedParams,
+            methodName,
+            paramTypes,
             diagnostics);
         throw diagnostics.createException();
       }
     }
   }
 
-  private static String strJoin(String delimiter, Iterable<?> sequence) {
-    var out = new StringBuilder();
-    int i = 0;
-    for (var element : sequence) {
-      if (i > 0) {
-        out.append(delimiter);
+  public class PyStr {
+    public static Optional<MethodInvoker> translateStringMethod(
+        boolean isStaticMethod, String methodName, Class<?>[] paramTypes) {
+      if (isStaticMethod) {
+        return Optional.empty();
       }
-      if (element instanceof String str) {
-        out.append(str);
+      switch (methodName) {
+        case "startswith":
+          if (paramTypes.length == 1 && String.class.isAssignableFrom(paramTypes[0])) {
+            return Optional.of(
+                (env, object, params) -> ((String) object).startsWith((String) params[0]));
+          }
+          break;
+
+        case "endswith":
+          if (paramTypes.length == 1 && String.class.isAssignableFrom(paramTypes[0])) {
+            return Optional.of(
+                (env, object, params) -> ((String) object).endsWith((String) params[0]));
+          }
+          break;
+
+        case "join":
+          if (paramTypes.length == 1 && Iterable.class.isAssignableFrom(paramTypes[0])) {
+            return Optional.of(
+                (env, object, params) -> PyStr.join((String) object, (Iterable<?>) params[0]));
+          }
+          break;
+
+        case "split":
+          if (paramTypes.length <= 2) {
+            return Optional.of((env, object, params) -> PyStr.split((String) object, params));
+          }
+          break;
+      }
+      return Optional.empty();
+    }
+
+    public static String join(String delimiter, Iterable<?> sequence) {
+      var out = new StringBuilder();
+      int i = 0;
+      for (var element : sequence) {
+        if (i > 0) {
+          out.append(delimiter);
+        }
+        if (element instanceof String str) {
+          out.append(str);
+        } else {
+          throw new IllegalArgumentException(
+              "sequence item %d: expected str instance, %s found"
+                  .formatted(i, element.getClass().getName()));
+        }
+        ++i;
+      }
+      return out.toString();
+    }
+
+    public static String[] split(String str, Object[] params) {
+      String sep = params.length > 0 ? (String) params[0] : null;
+      int maxsplit = params.length > 1 ? ((Number) params[1]).intValue() : -1;
+      if (sep != null && sep.isEmpty()) {
+        throw new IllegalArgumentException("empty separator in str.split()");
+      }
+
+      // Splits by any consecutive whitespace and discards empty strings.
+      if (sep == null) {
+        String trimmed = str.trim();
+        if (trimmed.isEmpty()) {
+          return new String[0]; // Splitting an empty or whitespace-only string gives [].
+        }
+        // The regex \\s+ matches one or more whitespace characters.
+        // Java's limit = Python's maxsplit + 1. If maxsplit is -1 (all), Java's limit is 0.
+        int limit = (maxsplit == -1) ? 0 : maxsplit + 1;
+        return trimmed.split("\\s+", limit);
       } else {
-        throw new IllegalArgumentException(
-            "sequence item %d: expected str instance, %s found"
-                .formatted(i, element.getClass().getName()));
-      }
-      ++i;
-    }
-    return out.toString();
-  }
+        // Keep trailing empty strings, Java's limit parameter must be negative for unlimited
+        // splits.
+        int limit = (maxsplit == -1) ? -1 : maxsplit + 1;
 
-  private static Object[] mapMethodParams(
-      Class<?> clss, boolean isStaticMethod, String methodName, Object[] params) {
-    if (clss == String.class && !isStaticMethod) {
-      if (methodName.equals("split") && params.length == 0) {
-        return new Object[] {"\\s+"};
+        // Quote the separator in case it contains special regex characters (e.g., "." or "|").
+        return str.split(Pattern.quote(sep), limit);
       }
     }
-    return params;
-  }
 
-  private static String mapMethodName(Class<?> clss, boolean isStaticMethod, String methodName) {
-    if (clss == String.class && !isStaticMethod) {
-      if (methodName.equals("startswith")) {
-        return "startsWith";
-      } else if (methodName.equals("endswith")) {
-        return "endsWith";
-      }
-    }
-    return methodName;
+    private PyStr() {}
   }
 
   public static class InterfaceProxy implements InvocationHandler {
@@ -4876,23 +4913,22 @@ public class Script {
       return halted;
     }
 
-    public Constructor<?> findConstructor(Class<?> clss, Object... params) {
-      var cacheKey = ExecutableCacheKey.forConstructor(clss, params);
+    public Constructor<?> findConstructor(Class<?> clazz, Object... params) {
+      Class<?>[] paramTypes = TypeChecker.getTypes(params);
+      var cacheKey = ConstructorCacheKey.of(clazz, paramTypes);
       var ctor =
-          symbolCache
-              .getExecutable(
-                  cacheKey,
-                  ignoreKey ->
-                      TypeChecker.findBestMatchingConstructor(clss, params, /* diagnostics= */ null)
-                          .map(Executable.class::cast))
-              .map(Constructor.class::cast);
+          symbolCache.getConstructor(
+              cacheKey,
+              ignoreKey ->
+                  TypeChecker.findBestMatchingConstructor(
+                      clazz, paramTypes, /* diagnostics= */ null));
       if (ctor.isPresent()) {
         return ctor.get();
       }
 
       // Re-run type checker with the same args but with error diagnostics for creating exception.
       var diagnostics = new TypeChecker.Diagnostics(symbolCache::getPrettyClassName);
-      TypeChecker.findBestMatchingConstructor(clss, params, diagnostics);
+      TypeChecker.findBestMatchingConstructor(clazz, paramTypes, diagnostics);
       throw diagnostics.createException();
     }
   }

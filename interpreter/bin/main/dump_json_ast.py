@@ -1,6 +1,6 @@
 #!/usr/bin/python3
-# SPDX-FileCopyrightText: © 2025 Greg Christiana <maxuser@pyjinn.org>
-# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: © 2024 Greg Christiana <maxuser@minescript.net>
+# SPDX-License-Identifier: GPL-3.0-only
 
 """Utility for dumping JSON representation of Python function AST."""
 
@@ -63,7 +63,7 @@ def main(argv):
   if "-s" in argv:
     dump_source = True
     argv.remove("-s")
-
+  
   # -i: ignore attributes with names in the comma-separated list
   # e.g. -i end_lineno,end_col_offset,kind,ctx,type_ignores,lineno,col_offset,type_comment,annotation,kwarg,kw_defaults,kwonlyargs,vararg,defaults,posonlyargs,keywords
   skip_attributes = {"end_lineno", "end_col_offset", "kind", "ctx"}

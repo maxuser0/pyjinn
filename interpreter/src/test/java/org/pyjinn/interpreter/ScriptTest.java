@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
+import org.pyjinn.parser.PyjinnParser;
 
 public class ScriptTest {
   /* Generated from Python code:
@@ -6351,6 +6352,26 @@ public class ScriptTest {
   }
 
   @Test
+  public void strMethods() throws Exception {
+    Script.Environment env;
+
+    env = execute("output = '::'.join(['foo', 'bar', 'baz'])");
+    assertEquals("foo::bar::baz", env.getVariable("output"));
+
+    env = execute("output = 'foo\\tbar   baz  '.split()");
+    assertArrayEquals(new String[] {"foo", "bar", "baz"}, (String[]) env.getVariable("output"));
+
+    env = execute("output = 'foo[bar]'.split('[')");
+    assertArrayEquals(new String[] {"foo", "bar]"}, (String[]) env.getVariable("output"));
+
+    env = execute("output = 'food'.startswith('foo')");
+    assertTrue((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'food'.endswith('od')");
+    assertTrue((Boolean) env.getVariable("output"));
+  }
+
+  @Test
   public void threads() throws InterruptedException, ExecutionException {
     var jsonAst = JsonParser.parseString(threadsJsonAst);
     var script = new Script();
@@ -6369,6 +6390,11 @@ public class ScriptTest {
     executor.shutdown();
 
     assertEquals(7, totalSum);
+  }
+
+  private static Script.Environment execute(String source) throws Exception {
+    var jsonAst = PyjinnParser.parse("script_test.pyj", source);
+    return new Script().parse(jsonAst).exec().mainModule().globals();
   }
 
   // TODO(maxuser): Add tests for:
@@ -6393,9 +6419,6 @@ public class ScriptTest {
   // - tuple assignment from Java array
   // - enforce immutability of tuples (unless Java array is explicitly accessed)
   // - fix bug where -= was behaving like +=
-  // - map str.split() to str.split("\\s+")
-  // - map str.startswith(s) to str.startsWith(s)
-  // - map str.endswith(s) to str.endsWith(s)
   // - passing script functions to Java methods taking functional params like Predicate<T>
   // - when checking methods of a non-public class, search for a public interface or superclass
   // - bound Python methods, e.g. `f = obj.func` where obj.func(...) is invoked by f(...)

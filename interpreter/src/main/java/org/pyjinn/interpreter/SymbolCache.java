@@ -1,6 +1,9 @@
+// SPDX-FileCopyrightText: © 2025 Greg Christiana <maxuser@pyjinn.org>
+// SPDX-License-Identifier: MIT
+
 package org.pyjinn.interpreter;
 
-import java.lang.reflect.Executable;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.Optional;
 import java.util.Set;
@@ -30,7 +33,10 @@ public class SymbolCache {
   // name.
   private final BiFunction<Class<?>, String, String> toRuntimeFieldName;
 
-  private final ConcurrentHashMap<ExecutableCacheKey, Optional<Executable>> executables =
+  private final ConcurrentHashMap<ConstructorCacheKey, Optional<Constructor<?>>> constructors =
+      new ConcurrentHashMap<>();
+
+  private final ConcurrentHashMap<MethodCacheKey, Optional<MethodInvoker>> methods =
       new ConcurrentHashMap<>();
 
   // Class members associated with the class itself, i.e. static fields and nested classes that can
@@ -96,9 +102,14 @@ public class SymbolCache {
     return toRuntimeFieldName.apply(type, fieldName);
   }
 
-  public Optional<Executable> getExecutable(
-      ExecutableCacheKey key, Function<ExecutableCacheKey, Optional<Executable>> mapping) {
-    return executables.computeIfAbsent(key, mapping);
+  public Optional<Constructor<?>> getConstructor(
+      ConstructorCacheKey key, Function<ConstructorCacheKey, Optional<Constructor<?>>> mapping) {
+    return constructors.computeIfAbsent(key, mapping);
+  }
+
+  public Optional<MethodInvoker> getMethodInvoker(
+      MethodCacheKey key, Function<MethodCacheKey, Optional<MethodInvoker>> mapping) {
+    return methods.computeIfAbsent(key, mapping);
   }
 
   public MemberAccessor getMember(MemberKey key, Function<MemberKey, MemberAccessor> mapping) {
