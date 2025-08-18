@@ -15,7 +15,6 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import java.io.PrintStream;
 import java.lang.reflect.Array;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
@@ -2898,6 +2897,23 @@ public class Script {
       return types;
     }
 
+    public static Object unwrapJavaString(Object object) {
+      if (object instanceof JavaString jstring) {
+        return jstring.string();
+      } else {
+        return object;
+      }
+    }
+
+    public static void unwrapJavaStrings(Object[] objects) {
+      for (int i = 0; i < objects.length; ++i) {
+        if (objects[i] instanceof JavaString jstring) {
+          objects[i] = jstring.string();
+        }
+      }
+    }
+
+    // paramTypes is destructive because it can overwrite type like JavaString -> String
     public static Optional<MethodInvoker> findBestMatchingMethod(
         Class<?> clazz,
         boolean isStaticMethod,
@@ -2906,12 +2922,30 @@ public class Script {
         Class<?>[] paramTypes,
         Diagnostics diagnostics) {
 
+      // Translate Java string methods to Pyjinn string methods.
       if (clazz == String.class) {
         var strMethod = PyStr.translateStringMethod(isStaticMethod, methodName, paramTypes);
+        // TODO(maxuser): When strMethod is empty, stop falling back to String methods below.
         if (strMethod.isPresent()) {
           return strMethod;
         }
       }
+
+      final boolean isObjectJavaStringWrapper = clazz == JavaString.class;
+      if (isObjectJavaStringWrapper) {
+        clazz = String.class;
+      }
+
+      // Unwrap JavaString wrappers to expose plain ol' String.
+      boolean hasJavaStringParam = false;
+      for (int i = 0; i < paramTypes.length; ++i) {
+        if (paramTypes[i] == JavaString.class) {
+          paramTypes[i] = String.class;
+          hasJavaStringParam = true;
+          break;
+        }
+      }
+      final boolean hasAnyJavaStringParams = hasJavaStringParam;
 
       if (diagnostics != null) {
         diagnostics.append(
@@ -2955,17 +2989,38 @@ public class Script {
       }
 
       return bestMethod.map(
-          method ->
-              (Environment env, Object object, Object[] params) -> {
-                if (env != null) {
-                  InterfaceProxy.promoteFunctionalParams(env, method, params);
-                }
-                return method.invoke(isStaticMethod ? null : object, params);
-              });
+          method -> {
+            // Compute hasFunctionalParams before this invoker gets inserted into the cache.
+            boolean hasFunctionalParams = InterfaceProxy.hasFunctionalParams(method, paramTypes);
+            return (Environment env, Object object, Object[] params) -> {
+              if (env != null && hasFunctionalParams) {
+                InterfaceProxy.promoteFunctionalParams(env, method, params);
+              }
+              if (isObjectJavaStringWrapper) {
+                object = unwrapJavaString(object);
+              }
+              if (hasAnyJavaStringParams) {
+                unwrapJavaStrings(params);
+              }
+              return method.invoke(isStaticMethod ? null : object, params);
+            };
+          });
     }
 
-    public static Optional<Constructor<?>> findBestMatchingConstructor(
+    // paramTypes is destructive because it can overwrite type like JavaString -> String
+    public static Optional<ConstructorInvoker> findBestMatchingConstructor(
         Class<?> clazz, Class<?>[] paramTypes, Diagnostics diagnostics) {
+      // Unwrap JavaString wrappers to expose plain ol' String.
+      boolean hasJavaStringParam = false;
+      for (int i = 0; i < paramTypes.length; ++i) {
+        if (paramTypes[i] == JavaString.class) {
+          paramTypes[i] = String.class;
+          hasJavaStringParam = true;
+          break;
+        }
+      }
+      final boolean hasAnyJavaStringParams = hasJavaStringParam;
+
       if (diagnostics != null) {
         diagnostics.append("Resolving constructor call for ");
         diagnostics.append(clazz.getName());
@@ -2991,11 +3046,25 @@ public class Script {
           diagnostics.append(bestCtor.get().toString());
         }
       }
-      return bestCtor;
+
+      return bestCtor.map(
+          ctor -> {
+            // Compute hasFunctionalParams before this invoker gets inserted into the cache.
+            boolean hasFunctionalParams = InterfaceProxy.hasFunctionalParams(ctor, paramTypes);
+            return (Environment env, Object[] params) -> {
+              if (env != null && hasFunctionalParams) {
+                InterfaceProxy.promoteFunctionalParams(env, ctor, params);
+              }
+              if (hasAnyJavaStringParams) {
+                unwrapJavaStrings(params);
+              }
+              return ctor.newInstance(params);
+            };
+          });
     }
 
     private static <T extends Executable, U> Optional<T> findBestMatchingExecutable(
-        Class<?> clss,
+        Class<?> clazz,
         java.util.function.Function<Class<?>, U> perClassDataFactory,
         java.util.function.Function<Class<?>, T[]> executableGetter,
         BiPredicate<T, U> filter,
@@ -3003,16 +3072,16 @@ public class Script {
         boolean traverseSuperclasses,
         Diagnostics diagnostics) {
       // TODO(maxuser): Generalize the restriction on class names and make it user-configurable.
-      boolean isAccessibleClass = isPublic(clss) && !clss.getName().startsWith("sun.");
+      boolean isAccessibleClass = isPublic(clazz) && !clazz.getName().startsWith("sun.");
 
       if (isAccessibleClass) {
-        U perClassData = perClassDataFactory.apply(clss);
+        U perClassData = perClassDataFactory.apply(clazz);
         int bestScore = 0; // Zero means that no viable executable has been found.
         Optional<T> bestExecutable = Optional.empty();
-        T[] executables = executableGetter.apply(clss);
+        T[] executables = executableGetter.apply(clazz);
         if (diagnostics != null) {
           diagnostics.append(
-              "Options considered in '%s': %d\n".formatted(clss, executables.length));
+              "Options considered in '%s': %d\n".formatted(clazz, executables.length));
         }
         for (T executable : executables) {
           if (filter.test(executable, perClassData)) {
@@ -3021,7 +3090,7 @@ public class Script {
               bestScore = score;
               bestExecutable = Optional.of(executable);
             }
-            logger.log("    callable member of '%s' with score %d: %s", clss, score, executable);
+            logger.log("    callable member of '%s' with score %d: %s", clazz, score, executable);
             if (diagnostics != null) {
               if (score == 0) {
                 diagnostics.append("- param mismatch: %s\n".formatted(executable));
@@ -3030,7 +3099,7 @@ public class Script {
               }
             }
           } else {
-            logger.log("    callable member of '%s' not viable: %s", clss, executable);
+            logger.log("    callable member of '%s' not viable: %s", clazz, executable);
           }
         }
         if (diagnostics != null) {
@@ -3046,12 +3115,12 @@ public class Script {
       if (traverseSuperclasses) {
         if (diagnostics != null) {
           diagnostics.startTraversingSuperclasses();
-          if (clss.getInterfaces().length > 0 || clss.getSuperclass() != null) {
-            diagnostics.append("Traversed superclasses of '%s'...\n".formatted(clss.getName()));
+          if (clazz.getInterfaces().length > 0 || clazz.getSuperclass() != null) {
+            diagnostics.append("Traversed superclasses of '%s'...\n".formatted(clazz.getName()));
           }
         }
         try {
-          for (var iface : clss.getInterfaces()) {
+          for (var iface : clazz.getInterfaces()) {
             logger.log("  searching interface '%s'", iface);
             var viableExecutable =
                 findBestMatchingExecutable(
@@ -3066,7 +3135,7 @@ public class Script {
               return viableExecutable;
             }
           }
-          var superclass = clss.getSuperclass();
+          var superclass = clazz.getSuperclass();
           if (superclass != null) {
             logger.log("  searching superclass '%s'", superclass);
             return findBestMatchingExecutable(
@@ -3127,6 +3196,11 @@ public class Script {
           continue;
         }
         if (actualType == formalType) {
+          score += 2;
+          continue;
+        }
+        if (actualType == JavaString.class && formalType.isAssignableFrom(String.class)) {
+          // JavaString auto-converts to String.
           score += 2;
           continue;
         }
@@ -3322,12 +3396,7 @@ public class Script {
   }
 
   public static class PyList
-      implements PyStreamable,
-          Iterable<Object>,
-          ItemGetter,
-          ItemSetter,
-          ItemContainer,
-          ItemDeleter {
+      implements Iterable<Object>, ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
     private final List<Object> list;
 
     public PyList() {
@@ -3338,7 +3407,8 @@ public class Script {
       this.list = list;
     }
 
-    public List<Object> getJavaList() {
+    // Package-private for access from JavaList().
+    List<Object> getJavaList() {
       return list;
     }
 
@@ -3350,11 +3420,6 @@ public class Script {
     @Override
     public Iterator<Object> iterator() {
       return list.iterator();
-    }
-
-    @Override
-    public Stream<Object> stream() {
-      return list.stream();
     }
 
     @Override
@@ -3496,20 +3561,17 @@ public class Script {
     }
   }
 
-  public interface PyStreamable {
-    Stream<Object> stream();
-  }
-
   // TODO(maxuser): Enforce immutability of tuples despite getJavaArray() returning array with
   // mutable elements.
-  public static class PyTuple implements PyStreamable, Iterable<Object>, ItemGetter, ItemContainer {
+  public static class PyTuple implements Iterable<Object>, ItemGetter, ItemContainer {
     private final Object[] array;
 
     public PyTuple(Object[] array) {
       this.array = array;
     }
 
-    public Object[] getJavaArray() {
+    // Package-private for access from JavaArray().
+    Object[] getJavaArray() {
       return array;
     }
 
@@ -3521,11 +3583,6 @@ public class Script {
     @Override
     public int hashCode() {
       return Arrays.hashCode(array);
-    }
-
-    @Override
-    public Stream<Object> stream() {
-      return Arrays.stream(array);
     }
 
     @Override
@@ -3714,7 +3771,8 @@ public class Script {
       this.map = map;
     }
 
-    public Map<Object, Object> getJavaMap() {
+    // Package-private for access from JavaMap().
+    Map<Object, Object> getJavaMap() {
       return map;
     }
 
@@ -3863,10 +3921,9 @@ public class Script {
         }
       }
 
-      Constructor<?> ctor = env.findConstructor(type(), params);
+      ConstructorInvoker ctor = env.findConstructor(type(), params);
       try {
-        InterfaceProxy.promoteFunctionalParams(env, ctor, params);
-        return ctor.newInstance(params);
+        return ctor.newInstance(env, params);
       } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
         throw new RuntimeException(e);
       }
@@ -4123,6 +4180,144 @@ public class Script {
       } else {
         var type = value.getClass();
         return getJavaClass(type);
+      }
+    }
+  }
+
+  /** Wrapper that informs interpreter to treat a string as Java API instead of Pyjinn API. */
+  public record JavaString(String string) {}
+
+  public record JavaStringFunction() implements Function {
+    public static final JavaStringFunction INSTANCE = new JavaStringFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+      if (value instanceof String string) {
+        return new JavaString(string);
+      } else {
+        throw new IllegalArgumentException(
+            "JavaString() requires a String/str object but got '%s'"
+                .formatted(value.getClass().getName()));
+      }
+    }
+  }
+
+  public static Object[] getJavaArray(PyTuple pyTuple) {
+    return pyTuple.getJavaArray();
+  }
+
+  public record JavaArrayFunction() implements Function {
+    public static final JavaArrayFunction INSTANCE = new JavaArrayFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectMinParams(params, 1);
+      expectMaxParams(params, 2);
+      if (params[0] instanceof PyTuple pyTuple) {
+        final Class<?> clazz;
+        if (params.length == 2) {
+          if (params[1] instanceof Class<?> classParam) {
+            clazz = classParam;
+          } else if (params[1] instanceof JavaClass javaClass) {
+            clazz = javaClass.type();
+          } else {
+            throw new IllegalArgumentException(
+                "Optional second param to JavaArray() must be Class<?> or JavaClass but got '%s'"
+                    .formatted(params[1].getClass().getName()));
+          }
+        } else {
+          clazz = Object.class;
+        }
+        if (clazz == Object.class) {
+          return pyTuple.getJavaArray();
+        } else {
+          Object[] objectArray = pyTuple.getJavaArray();
+          Object specificArray = Array.newInstance(clazz, objectArray.length);
+          if (clazz.isPrimitive()) {
+            if (clazz == byte.class) {
+              for (int i = 0; i < objectArray.length; ++i) {
+                Array.setByte(specificArray, i, (Byte) objectArray[i]);
+              }
+            } else if (clazz == int.class) {
+              for (int i = 0; i < objectArray.length; ++i) {
+                Array.setInt(specificArray, i, (Integer) objectArray[i]);
+              }
+            } else if (clazz == long.class) {
+              for (int i = 0; i < objectArray.length; ++i) {
+                Array.setLong(specificArray, i, (Long) objectArray[i]);
+              }
+            } else if (clazz == float.class) {
+              for (int i = 0; i < objectArray.length; ++i) {
+                Array.setFloat(specificArray, i, (Float) objectArray[i]);
+              }
+            } else if (clazz == double.class) {
+              for (int i = 0; i < objectArray.length; ++i) {
+                Array.setDouble(specificArray, i, (Double) objectArray[i]);
+              }
+            } else if (clazz == char.class) {
+              for (int i = 0; i < objectArray.length; ++i) {
+                Array.setChar(specificArray, i, (Character) objectArray[i]);
+              }
+            } else if (clazz == short.class) {
+              for (int i = 0; i < objectArray.length; ++i) {
+                Array.setShort(specificArray, i, (Short) objectArray[i]);
+              }
+            } else {
+              throw new IllegalArgumentException(
+                  "Unexpected primitive type '%s' passed as second param to JavaArray"
+                      .formatted(clazz.getName()));
+            }
+          } else {
+            for (int i = 0; i < objectArray.length; ++i) {
+              Array.set(specificArray, i, objectArray[i]);
+            }
+          }
+          return specificArray;
+        }
+      } else {
+        throw new IllegalArgumentException(
+            "JavaArray() requires a tuple object (PyTuple) but got '%s'"
+                .formatted(params[0].getClass().getName()));
+      }
+    }
+  }
+
+  public static List<Object> getJavaList(PyList pyList) {
+    return pyList.getJavaList();
+  }
+
+  public record JavaListFunction() implements Function {
+    public static final JavaListFunction INSTANCE = new JavaListFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+      if (value instanceof PyList pyList) {
+        return pyList.getJavaList();
+      } else {
+        throw new IllegalArgumentException(
+            "JavaList() requires a list object (PyList) but got '%s'"
+                .formatted(value.getClass().getName()));
+      }
+    }
+  }
+
+  public record JavaMapFunction() implements Function {
+    public static final JavaMapFunction INSTANCE = new JavaMapFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+      if (value instanceof PyDict pyDict) {
+        return pyDict.getJavaMap();
+      } else {
+        throw new IllegalArgumentException(
+            "JavaMap() requires a dict object (PyDict) but got '%s'"
+                .formatted(value.getClass().getName()));
       }
     }
   }
@@ -4531,79 +4726,186 @@ public class Script {
       }
       switch (methodName) {
         case "startswith":
-          if (paramTypes.length == 1 && String.class.isAssignableFrom(paramTypes[0])) {
-            return Optional.of(
-                (env, object, params) -> ((String) object).startsWith((String) params[0]));
-          }
-          break;
+          return Optional.of(startswith(paramTypes));
 
         case "endswith":
-          if (paramTypes.length == 1 && String.class.isAssignableFrom(paramTypes[0])) {
-            return Optional.of(
-                (env, object, params) -> ((String) object).endsWith((String) params[0]));
-          }
-          break;
+          return Optional.of(endswith(paramTypes));
+
+        case "upper":
+          return Optional.of(upper(paramTypes));
+
+        case "lower":
+          return Optional.of(lower(paramTypes));
 
         case "join":
-          if (paramTypes.length == 1 && Iterable.class.isAssignableFrom(paramTypes[0])) {
-            return Optional.of(
-                (env, object, params) -> PyStr.join((String) object, (Iterable<?>) params[0]));
-          }
-          break;
+          return Optional.of(join(paramTypes));
 
         case "split":
-          if (paramTypes.length <= 2) {
-            return Optional.of((env, object, params) -> PyStr.split((String) object, params));
-          }
-          break;
+          return Optional.of(split(paramTypes));
       }
       return Optional.empty();
     }
 
-    public static String join(String delimiter, Iterable<?> sequence) {
-      var out = new StringBuilder();
-      int i = 0;
-      for (var element : sequence) {
-        if (i > 0) {
-          out.append(delimiter);
-        }
-        if (element instanceof String str) {
-          out.append(str);
-        } else {
-          throw new IllegalArgumentException(
-              "sequence item %d: expected str instance, %s found"
-                  .formatted(i, element.getClass().getName()));
-        }
-        ++i;
-      }
-      return out.toString();
+    private static boolean isAssignableFromStringType(Class<?> clazz) {
+      return clazz.isAssignableFrom(String.class) || clazz == JavaString.class;
     }
 
-    public static String[] split(String str, Object[] params) {
-      String sep = params.length > 0 ? (String) params[0] : null;
-      int maxsplit = params.length > 1 ? ((Number) params[1]).intValue() : -1;
-      if (sep != null && sep.isEmpty()) {
-        throw new IllegalArgumentException("empty separator in str.split()");
-      }
-
-      // Splits by any consecutive whitespace and discards empty strings.
-      if (sep == null) {
-        String trimmed = str.trim();
-        if (trimmed.isEmpty()) {
-          return new String[0]; // Splitting an empty or whitespace-only string gives [].
+    private static MethodInvoker startswith(Class<?>[] paramTypes) {
+      if (paramTypes.length >= 1
+          && paramTypes.length <= 3
+          && isAssignableFromStringType(paramTypes[0])) {
+        boolean startIsEmpty = paramTypes.length < 2 || paramTypes[1] == null;
+        if (startIsEmpty) {
+          return (env, object, params) ->
+              ((String) object).startsWith((String) TypeChecker.unwrapJavaString(params[0]));
+        } else if (paramTypes[1] == Integer.class) {
+          boolean endIsEmpty = paramTypes.length < 3 || paramTypes[2] == null;
+          if (endIsEmpty) {
+            return (env, object, params) ->
+                ((String) object)
+                    .substring((Integer) params[1])
+                    .startsWith(((String) TypeChecker.unwrapJavaString(params[0])));
+          } else if (paramTypes[2] == Integer.class) {
+            return (env, object, params) ->
+                ((String) object)
+                    .substring((Integer) params[1], (Integer) params[2])
+                    .startsWith(((String) TypeChecker.unwrapJavaString(params[0])));
+          }
         }
-        // The regex \\s+ matches one or more whitespace characters.
-        // Java's limit = Python's maxsplit + 1. If maxsplit is -1 (all), Java's limit is 0.
-        int limit = (maxsplit == -1) ? 0 : maxsplit + 1;
-        return trimmed.split("\\s+", limit);
-      } else {
-        // Keep trailing empty strings, Java's limit parameter must be negative for unlimited
-        // splits.
-        int limit = (maxsplit == -1) ? -1 : maxsplit + 1;
-
-        // Quote the separator in case it contains special regex characters (e.g., "." or "|").
-        return str.split(Pattern.quote(sep), limit);
       }
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.startswith(prefix:str, start:int=None, end:int=None) but got (%s)"
+                .formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker endswith(Class<?>[] paramTypes) {
+      if (paramTypes.length >= 1
+          && paramTypes.length <= 3
+          && isAssignableFromStringType(paramTypes[0])) {
+        boolean startIsEmpty = paramTypes.length < 2 || paramTypes[1] == null;
+        if (startIsEmpty) {
+          return (env, object, params) ->
+              ((String) object).endsWith((String) TypeChecker.unwrapJavaString(params[0]));
+        } else if (paramTypes[1] == Integer.class) {
+          boolean endIsEmpty = paramTypes.length < 3 || paramTypes[2] == null;
+          if (endIsEmpty) {
+            return (env, object, params) ->
+                ((String) object)
+                    .substring((Integer) params[1])
+                    .endsWith(((String) TypeChecker.unwrapJavaString(params[0])));
+          } else if (paramTypes[2] == Integer.class) {
+            return (env, object, params) ->
+                ((String) object)
+                    .substring((Integer) params[1], (Integer) params[2])
+                    .endsWith(((String) TypeChecker.unwrapJavaString(params[0])));
+          }
+        }
+      }
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.endswith(prefix:str, start:int=None, end:int=None) but got (%s)"
+                .formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker upper(Class<?>[] paramTypes) {
+      if (paramTypes.length == 0) {
+        return (env, object, params) -> ((String) object).toUpperCase();
+      }
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.upper() but got (%s)".formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker lower(Class<?>[] paramTypes) {
+      if (paramTypes.length == 0) {
+        return (env, object, params) -> ((String) object).toLowerCase();
+      }
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.lower() but got (%s)".formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker join(Class<?>[] paramTypes) {
+      if (paramTypes.length == 1 && Iterable.class.isAssignableFrom(paramTypes[0])) {
+        return (env, object, params) -> {
+          String delimiter = (String) object;
+          Iterable<?> sequence = (Iterable<?>) params[0];
+          var out = new StringBuilder();
+          int i = 0;
+          for (var element : sequence) {
+            if (i > 0) {
+              out.append(delimiter);
+            }
+            if (TypeChecker.unwrapJavaString(element) instanceof String str) {
+              out.append(str);
+            } else {
+              throw new IllegalArgumentException(
+                  "sequence item %d: expected str instance, %s found"
+                      .formatted(i, element.getClass().getName()));
+            }
+            ++i;
+          }
+          return out.toString();
+        };
+      }
+
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.join(iterable) but got (%s)".formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker split(Class<?>[] paramTypes) {
+      if (paramTypes.length <= 2
+          && (paramTypes.length < 1
+              || paramTypes[0] == null
+              || isAssignableFromStringType(paramTypes[0]))
+          && (paramTypes.length < 2 || paramTypes[1] == null || paramTypes[1] == Integer.class)) {
+        return (env, object, params) -> {
+          String str = (String) object;
+          String sep = params.length > 0 ? (String) TypeChecker.unwrapJavaString(params[0]) : null;
+          int maxsplit = params.length > 1 ? (Integer) params[1] : -1;
+          if (sep != null && sep.isEmpty()) {
+            throw new IllegalArgumentException("empty separator in str.split()");
+          }
+
+          // Splits by any consecutive whitespace and discards empty strings.
+          if (sep == null) {
+            String trimmed = str.trim();
+            if (trimmed.isEmpty()) {
+              return new String[0]; // Splitting an empty or whitespace-only string gives [].
+            }
+            // The regex \\s+ matches one or more whitespace characters.
+            // Java's limit = Python's maxsplit + 1. If maxsplit is -1 (all), Java's limit is 0.
+            int limit = (maxsplit == -1) ? 0 : maxsplit + 1;
+            return trimmed.split("\\s+", limit);
+          } else {
+            // Keep trailing empty strings, Java's limit parameter must be negative for unlimited
+            // splits.
+            int limit = (maxsplit == -1) ? -1 : maxsplit + 1;
+
+            // Quote the separator in case it contains special regex characters (e.g., "." or "|").
+            return str.split(Pattern.quote(sep), limit);
+          }
+        };
+      }
+
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.split(sep:str=None, maxsplit:int=-1) but got (%s)"
+                .formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static String formatTypes(Class<?>[] types) {
+      return Arrays.stream(types)
+          .map(t -> t == null ? "NoneType" : t.getName())
+          .collect(joining(", "));
     }
 
     private PyStr() {}
@@ -4645,6 +4947,20 @@ public class Script {
       } else {
         return function.call(env, args);
       }
+    }
+
+    public static boolean hasFunctionalParams(Executable executable, Class<?>[] paramTypes) {
+      for (int i = 0; i < paramTypes.length; ++i) {
+        var paramType = paramTypes[i];
+        Class<?> functionalParamType;
+        if (paramType != null
+            && Function.class.isAssignableFrom(paramType)
+            && (functionalParamType = executable.getParameterTypes()[i]).isInterface()
+            && functionalParamType != Function.class) {
+          return true;
+        }
+      }
+      return false;
     }
 
     public static void promoteFunctionalParams(
@@ -4826,7 +5142,7 @@ public class Script {
     /** Has the script been halted? */
     boolean halted();
 
-    Constructor<?> findConstructor(Class<?> clss, Object... params);
+    ConstructorInvoker findConstructor(Class<?> clss, Object... params);
   }
 
   private static class GlobalContext extends Context implements Environment {
@@ -4874,6 +5190,10 @@ public class Script {
       context.setVariable("ord", OrdFunction.INSTANCE);
       context.setVariable("chr", ChrFunction.INSTANCE);
       context.setVariable("type", TypeFunction.INSTANCE);
+      context.setVariable("JavaString", JavaStringFunction.INSTANCE);
+      context.setVariable("JavaArray", JavaArrayFunction.INSTANCE);
+      context.setVariable("JavaList", JavaListFunction.INSTANCE);
+      context.setVariable("JavaMap", JavaMapFunction.INSTANCE);
       context.setVariable("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
       context.setVariable("__exit__", ExitFunction.INSTANCE);
       return context;
@@ -4914,7 +5234,7 @@ public class Script {
       return halted;
     }
 
-    public Constructor<?> findConstructor(Class<?> clazz, Object... params) {
+    public ConstructorInvoker findConstructor(Class<?> clazz, Object... params) {
       Class<?>[] paramTypes = TypeChecker.getTypes(params);
       var cacheKey = ConstructorCacheKey.of(clazz, paramTypes);
       var ctor =

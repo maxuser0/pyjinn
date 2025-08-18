@@ -3,7 +3,6 @@
 
 package org.pyjinn.interpreter;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.Optional;
 import java.util.Set;
@@ -33,7 +32,7 @@ public class SymbolCache {
   // name.
   private final BiFunction<Class<?>, String, String> toRuntimeFieldName;
 
-  private final ConcurrentHashMap<ConstructorCacheKey, Optional<Constructor<?>>> constructors =
+  private final ConcurrentHashMap<ConstructorCacheKey, Optional<ConstructorInvoker>> constructors =
       new ConcurrentHashMap<>();
 
   private final ConcurrentHashMap<MethodCacheKey, Optional<MethodInvoker>> methods =
@@ -102,8 +101,9 @@ public class SymbolCache {
     return toRuntimeFieldName.apply(type, fieldName);
   }
 
-  public Optional<Constructor<?>> getConstructor(
-      ConstructorCacheKey key, Function<ConstructorCacheKey, Optional<Constructor<?>>> mapping) {
+  public Optional<ConstructorInvoker> getConstructor(
+      ConstructorCacheKey key,
+      Function<ConstructorCacheKey, Optional<ConstructorInvoker>> mapping) {
     return constructors.computeIfAbsent(key, mapping);
   }
 

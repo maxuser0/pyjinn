@@ -6351,9 +6351,39 @@ public class ScriptTest {
     assertEquals(6.141592653589793, ((Number) output).doubleValue(), 0.000000001);
   }
 
+  private Script.Environment env;
+
   @Test
   public void strMethods() throws Exception {
-    Script.Environment env;
+    env = execute("output = 'foobarbaz'.startswith('foo')");
+    assertTrue((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.startswith('foo', 1)");
+    assertFalse((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.startswith('ba', 3, 6)");
+    assertTrue((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.startswith('az', 3, 6)");
+    assertFalse((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.endswith('baz')");
+    assertTrue((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.endswith('baz', 8)");
+    assertFalse((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.endswith('ar', 3, 6)");
+    assertTrue((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.endswith('ba', 3, 6)");
+    assertFalse((Boolean) env.getVariable("output"));
+
+    env = execute("output = 'FooBar'.upper()");
+    assertEquals("FOOBAR", (String) env.getVariable("output"));
+
+    env = execute("output = 'FooBar'.lower()");
+    assertEquals("foobar", (String) env.getVariable("output"));
 
     env = execute("output = '::'.join(['foo', 'bar', 'baz'])");
     assertEquals("foo::bar::baz", env.getVariable("output"));
@@ -6363,12 +6393,17 @@ public class ScriptTest {
 
     env = execute("output = 'foo[bar]'.split('[')");
     assertArrayEquals(new String[] {"foo", "bar]"}, (String[]) env.getVariable("output"));
+  }
 
-    env = execute("output = 'food'.startswith('foo')");
-    assertTrue((Boolean) env.getVariable("output"));
+  @Test
+  public void javaString() throws Exception {
+    // str.split() separator interpreted as a literal string
+    env = execute("output = 'foo[xyz]bar'.split('[xyz]')");
+    assertArrayEquals(new String[] {"foo", "bar"}, (String[]) env.getVariable("output"));
 
-    env = execute("output = 'food'.endswith('od')");
-    assertTrue((Boolean) env.getVariable("output"));
+    // String.split() separator interpreted as a regex
+    env = execute("output = JavaString('foo[xyz]bar').split('[xyz]')");
+    assertArrayEquals(new String[] {"foo[", "", "", "]bar"}, (String[]) env.getVariable("output"));
   }
 
   @Test
