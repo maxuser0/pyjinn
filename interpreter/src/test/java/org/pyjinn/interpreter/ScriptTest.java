@@ -6429,6 +6429,21 @@ public class ScriptTest {
   }
 
   @Test
+  public void sum() throws Exception {
+    env = execute("output = sum(())");
+    assertEquals(0, (Integer) env.getVariable("output"));
+
+    env = execute("output = sum((), 42)");
+    assertEquals(42, (Integer) env.getVariable("output"));
+
+    env = execute("output = sum([1, 4, 9])");
+    assertEquals(14, (Integer) env.getVariable("output"));
+
+    env = execute("output = sum([1, 4, 9], 100)");
+    assertEquals(114, (Integer) env.getVariable("output"));
+  }
+
+  @Test
   public void javaString() throws Exception {
     // str.split() separator interpreted as a literal string
     env = execute("output = 'foo[xyz]bar'.split('[xyz]')");

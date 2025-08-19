@@ -4048,6 +4048,45 @@ public class Script {
     }
   }
 
+  public static class SumFunction implements Function {
+    public static final SumFunction INSTANCE = new SumFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectMinParams(params, 1);
+      expectMaxParams(params, 2);
+      if (params.length == 1) {
+        Number sum = sum(getIterable(params[0]), 0);
+        if (sum != null) {
+          return sum;
+        }
+      } else if (params[1] instanceof Number start) {
+        Number sum = sum(getIterable(params[0]), start);
+        if (sum != null) {
+          return sum;
+        }
+      }
+      throw new IllegalArgumentException(
+          "Expected sum(iterable, start=0) with iterable of numbers but got (%s)"
+              .formatted(
+                  Arrays.stream(params)
+                      .map(p -> p == null ? "NoneType" : p.getClass().getName())
+                      .collect(joining(", "))));
+    }
+
+    Number sum(Iterable<?> iterable, Number start) {
+      Number sum = start;
+      for (var element : iterable) {
+        if (element instanceof Number number) {
+          sum = Numbers.add(sum, number);
+        } else {
+          return null;
+        }
+      }
+      return sum;
+    }
+  }
+
   public static class BoolFunction implements Function {
     public static final BoolFunction INSTANCE = new BoolFunction();
 
@@ -5327,6 +5366,7 @@ public class Script {
       context.setVariable("range", RangeFunction.INSTANCE);
       context.setVariable("round", RoundFunction.INSTANCE);
       context.setVariable("str", StrFunction.INSTANCE);
+      context.setVariable("sum", SumFunction.INSTANCE);
       context.setVariable("tuple", TupleFunction.INSTANCE);
       context.setVariable("type", TypeFunction.INSTANCE);
       return context;
