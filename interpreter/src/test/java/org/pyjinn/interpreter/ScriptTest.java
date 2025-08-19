@@ -6393,6 +6393,39 @@ public class ScriptTest {
 
     env = execute("output = 'foo[bar]'.split('[')");
     assertArrayEquals(new String[] {"foo", "bar]"}, (String[]) env.getVariable("output"));
+
+    env = execute("output = ' \\tfoo \\n'.strip()");
+    assertEquals("foo", (String) env.getVariable("output"));
+
+    env = execute("output = ' \\tfoo \\n'.lstrip()");
+    assertEquals("foo \n", (String) env.getVariable("output"));
+
+    env = execute("output = ' \\tfoo \\n'.rstrip()");
+    assertEquals(" \tfoo", (String) env.getVariable("output"));
+
+    env = execute("output = 'abfoocd'.strip('abcd')");
+    assertEquals("foo", (String) env.getVariable("output"));
+
+    env = execute("output = 'abfoocd'.lstrip('abcd')");
+    assertEquals("foocd", (String) env.getVariable("output"));
+
+    env = execute("output = 'abfoocd'.rstrip('abcd')");
+    assertEquals("abfoo", (String) env.getVariable("output"));
+
+    env = execute("output = 'foobarbaz'.find('bar')");
+    assertEquals(3, (Integer) env.getVariable("output"));
+
+    env = execute("output = 'foo'.find('bar')");
+    assertEquals(-1, (Integer) env.getVariable("output"));
+
+    env = execute("output = 'ofooboozoo'.replace('oo', '--')");
+    assertEquals("of--b--z--", (String) env.getVariable("output"));
+
+    env = execute("output = 'ofooboozoo'.replace('oo', '--', -1)");
+    assertEquals("of--b--z--", (String) env.getVariable("output"));
+
+    env = execute("output = 'ofooboozoo'.replace('oo', '--', 2)");
+    assertEquals("of--b--zoo", (String) env.getVariable("output"));
   }
 
   @Test

@@ -4184,9 +4184,6 @@ public class Script {
     }
   }
 
-  /** Wrapper that informs interpreter to treat a string as Java API instead of Pyjinn API. */
-  public record JavaString(String string) {}
-
   public record JavaStringFunction() implements Function {
     public static final JavaStringFunction INSTANCE = new JavaStringFunction();
 
@@ -4742,6 +4739,21 @@ public class Script {
 
         case "split":
           return Optional.of(split(paramTypes));
+
+        case "strip":
+          return Optional.of(strip(paramTypes, /* stripLeft= */ true, /* stripRight= */ true));
+
+        case "lstrip":
+          return Optional.of(strip(paramTypes, /* stripLeft= */ true, /* stripRight= */ false));
+
+        case "rstrip":
+          return Optional.of(strip(paramTypes, /* stripLeft= */ false, /* stripRight= */ true));
+
+        case "find":
+          return Optional.of(find(paramTypes));
+
+        case "replace":
+          return Optional.of(replace(paramTypes));
       }
       return Optional.empty();
     }
@@ -4898,6 +4910,127 @@ public class Script {
       return (env, object, params) -> {
         throw new IllegalArgumentException(
             "Expected str.split(sep:str=None, maxsplit:int=-1) but got (%s)"
+                .formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker strip(
+        Class<?>[] paramTypes, boolean stripLeft, boolean stripRight) {
+      if (paramTypes.length <= 1
+          && (paramTypes.length < 1
+              || paramTypes[0] == null
+              || isAssignableFromStringType(paramTypes[0]))) {
+        return (env, object, params) -> {
+          String str = (String) object;
+          String chars =
+              params.length > 0 ? (String) TypeChecker.unwrapJavaString(params[0]) : null;
+          if (chars == null) {
+            if (stripLeft && stripRight) {
+              return str.strip();
+            } else if (stripLeft) {
+              return str.stripLeading();
+            } else {
+              return str.stripTrailing();
+            }
+          }
+
+          if (chars.isEmpty()) {
+            return str;
+          }
+
+          Set<Character> charSet = new HashSet<>();
+          for (char c : chars.toCharArray()) {
+            charSet.add(c);
+          }
+
+          int start = 0;
+          int end = str.length();
+          if (stripLeft) {
+            while (start < end && charSet.contains(str.charAt(start))) {
+              start++;
+            }
+          }
+          if (stripRight) {
+            while (end > start && charSet.contains(str.charAt(end - 1))) {
+              end--;
+            }
+          }
+          return str.substring(start, end);
+        };
+      }
+
+      return (env, object, params) -> {
+        final String methodName;
+        if (stripLeft && stripRight) {
+          methodName = "strip";
+        } else if (stripLeft) {
+          methodName = "lstrip";
+        } else {
+          methodName = "rstrip";
+        }
+        throw new IllegalArgumentException(
+            "Expected str.%s(chars:str=None) but got (%s)"
+                .formatted(methodName, formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker find(Class<?>[] paramTypes) {
+      if (paramTypes.length >= 1
+          && paramTypes.length <= 3
+          && isAssignableFromStringType(paramTypes[0])) {
+        boolean startIsEmpty = paramTypes.length < 2 || paramTypes[1] == null;
+        if (startIsEmpty) {
+          return (env, object, params) ->
+              ((String) object).indexOf((String) TypeChecker.unwrapJavaString(params[0]));
+        } else if (paramTypes[1] == Integer.class) {
+          boolean endIsEmpty = paramTypes.length < 3 || paramTypes[2] == null;
+          if (endIsEmpty) {
+            return (env, object, params) ->
+                ((String) object)
+                    .indexOf(
+                        ((String) TypeChecker.unwrapJavaString(params[0])), (Integer) params[1]);
+          } else if (paramTypes[2] == Integer.class) {
+            return (env, object, params) ->
+                ((String) object)
+                    .indexOf(
+                        ((String) TypeChecker.unwrapJavaString(params[0])),
+                        (Integer) params[1],
+                        (Integer) params[2]);
+          }
+        }
+      }
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.endswith(prefix:str, start:int=None, end:int=None) but got (%s)"
+                .formatted(formatTypes(paramTypes)));
+      };
+    }
+
+    private static MethodInvoker replace(Class<?>[] paramTypes) {
+      if (paramTypes.length >= 2
+          && paramTypes.length <= 3
+          && isAssignableFromStringType(paramTypes[0])
+          && isAssignableFromStringType(paramTypes[1])
+          && (paramTypes.length < 3 || paramTypes[2] == Integer.class)) {
+        return (env, object, params) -> {
+          if (params.length == 2 || ((Integer) params[2] < 0)) {
+            return ((String) object)
+                .replace(
+                    (String) TypeChecker.unwrapJavaString(params[0]),
+                    (String) TypeChecker.unwrapJavaString(params[1]));
+          } else {
+            return String.join(
+                (String) TypeChecker.unwrapJavaString(params[1]),
+                ((String) object)
+                    .split(
+                        Pattern.quote((String) TypeChecker.unwrapJavaString(params[0])),
+                        (Integer) params[2] + 1));
+          }
+        };
+      }
+      return (env, object, params) -> {
+        throw new IllegalArgumentException(
+            "Expected str.replace(old:str, new:str, count:int=-1) but got (%s)"
                 .formatted(formatTypes(paramTypes)));
       };
     }
@@ -5170,32 +5303,32 @@ public class Script {
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
       context.setVariable("Exception", new JavaClass(Exception.class));
-      context.setVariable("math", MATH_CLASS);
-      context.setVariable("globals", GlobalsFunction.INSTANCE);
-      context.setVariable("hex", HexFunction.INSTANCE);
-      context.setVariable("int", IntFunction.INSTANCE);
-      context.setVariable("float", FloatFunction.INSTANCE);
-      context.setVariable("str", StrFunction.INSTANCE);
-      context.setVariable("bool", BoolFunction.INSTANCE);
-      context.setVariable("len", LenFunction.INSTANCE);
-      context.setVariable("tuple", TupleFunction.INSTANCE);
-      context.setVariable("list", ListFunction.INSTANCE);
-      context.setVariable("print", PrintFunction.INSTANCE);
-      context.setVariable("range", RangeFunction.INSTANCE);
-      context.setVariable("enumerate", EnumerateFunction.INSTANCE);
-      context.setVariable("abs", AbsFunction.INSTANCE);
-      context.setVariable("round", RoundFunction.INSTANCE);
-      context.setVariable("min", MinFunction.INSTANCE);
-      context.setVariable("max", MaxFunction.INSTANCE);
-      context.setVariable("ord", OrdFunction.INSTANCE);
-      context.setVariable("chr", ChrFunction.INSTANCE);
-      context.setVariable("type", TypeFunction.INSTANCE);
-      context.setVariable("JavaString", JavaStringFunction.INSTANCE);
       context.setVariable("JavaArray", JavaArrayFunction.INSTANCE);
       context.setVariable("JavaList", JavaListFunction.INSTANCE);
       context.setVariable("JavaMap", JavaMapFunction.INSTANCE);
-      context.setVariable("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
+      context.setVariable("JavaString", JavaStringFunction.INSTANCE);
       context.setVariable("__exit__", ExitFunction.INSTANCE);
+      context.setVariable("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
+      context.setVariable("abs", AbsFunction.INSTANCE);
+      context.setVariable("bool", BoolFunction.INSTANCE);
+      context.setVariable("chr", ChrFunction.INSTANCE);
+      context.setVariable("enumerate", EnumerateFunction.INSTANCE);
+      context.setVariable("float", FloatFunction.INSTANCE);
+      context.setVariable("globals", GlobalsFunction.INSTANCE);
+      context.setVariable("hex", HexFunction.INSTANCE);
+      context.setVariable("int", IntFunction.INSTANCE);
+      context.setVariable("len", LenFunction.INSTANCE);
+      context.setVariable("list", ListFunction.INSTANCE);
+      context.setVariable("math", MATH_CLASS);
+      context.setVariable("max", MaxFunction.INSTANCE);
+      context.setVariable("min", MinFunction.INSTANCE);
+      context.setVariable("ord", OrdFunction.INSTANCE);
+      context.setVariable("print", PrintFunction.INSTANCE);
+      context.setVariable("range", RangeFunction.INSTANCE);
+      context.setVariable("round", RoundFunction.INSTANCE);
+      context.setVariable("str", StrFunction.INSTANCE);
+      context.setVariable("tuple", TupleFunction.INSTANCE);
+      context.setVariable("type", TypeFunction.INSTANCE);
       return context;
     }
 
