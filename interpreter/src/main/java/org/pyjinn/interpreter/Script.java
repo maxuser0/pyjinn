@@ -65,6 +65,16 @@ public class Script {
   private final ThreadLocal<Deque<CallSite>> callStack =
       ThreadLocal.withInitial(ArrayDeque<CallSite>::new);
 
+  /** Convenience method for reading main module's global variables. */
+  public Object getVariable(String name) {
+    return mainModule().globals().getVariable(name);
+  }
+
+  /** Convenience method for writing main module's global variables. */
+  public void setVariable(String name, Object value) {
+    mainModule().globals().setVariable(name, value);
+  }
+
   public static class Module {
     private final String name;
     private final GlobalContext globals;
