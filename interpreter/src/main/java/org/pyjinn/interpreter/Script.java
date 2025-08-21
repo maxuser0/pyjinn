@@ -246,6 +246,10 @@ public class Script {
     atExitListeners.add(atExit);
   }
 
+  public void exit() {
+    exit(0);
+  }
+
   public void exit(int status) {
     if (atExitListeners == null) {
       // Script has already exited.
