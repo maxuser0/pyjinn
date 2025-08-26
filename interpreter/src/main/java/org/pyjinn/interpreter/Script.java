@@ -203,8 +203,12 @@ public class Script {
   public Consumer<String> stdout = System.out::println;
   public Consumer<String> stderr = System.err::println;
 
-  // Set to null once the script has exited.
-  private LinkedList<Consumer<Integer>> atExitListeners = new LinkedList<>();
+  // Listeners from outside the script that are called when the script exits.  Set to null once the
+  // script has exited.
+  private LinkedList<Consumer<Integer>> externalAtExitListeners = new LinkedList<>();
+
+  // Listeners from inside the script that are called when the script exits.
+  private LinkedList<CallbackWithContext> internalAtExitListeners = new LinkedList<>();
 
   // For use by apps that need to share custom data across modules.
   public final PyDict vars = new PyDict();
@@ -238,25 +242,62 @@ public class Script {
     this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, scriptFilename, MAIN_MODULE_NAME));
   }
 
+  /**
+   * Registers a listener outside the script to run when the script exits, passing the exit status.
+   */
   public void atExit(Consumer<Integer> atExit) {
-    if (atExitListeners == null) {
+    if (externalAtExitListeners == null) {
       // Script has already exited.
       return;
     }
-    atExitListeners.add(atExit);
+    externalAtExitListeners.add(atExit);
   }
 
+  private record CallbackWithContext(Function callback, Environment env) {
+    public Object call() {
+      return callback.call(env);
+    }
+  }
+
+  // Registers a listener within the script to run when the script exits.
+  void __atexit__(CallbackWithContext callback) {
+    if (externalAtExitListeners == null) {
+      // Script has already exited.
+      return;
+    }
+    internalAtExitListeners.add(callback);
+  }
+
+  /** Exits the script with a successful status (0). */
   public void exit() {
     exit(0);
   }
 
+  /**
+   * Exits the script with the given status.
+   *
+   * <p>Listeners registered from within the script via {@code __atexit__()} are run first in
+   * reverse order from their registration, then all modules in the script are halted to prevent
+   * them from executing further, then finally listeners registered from outside the script via
+   * {@code Script::atExit} are run in reverse order from their registration.
+   */
   public void exit(int status) {
-    if (atExitListeners == null) {
+    if (externalAtExitListeners == null) {
       // Script has already exited.
       return;
     }
-    var atExitListenersReversed = atExitListeners.reversed();
-    atExitListeners = null; // null indicates that the script has exited.
+    var atExitListenersReversed = externalAtExitListeners.reversed();
+    externalAtExitListeners = null; // null indicates that the script has exited.
+
+    for (var listener : internalAtExitListeners.reversed()) {
+      try {
+        listener.call();
+      } catch (Exception e) {
+        // TODO(maxuser): Log Pyjinn stacktrace, or at least the immediate caller.
+        logger.log("Exception thrown in callback at exit: %s", e);
+      }
+    }
+
     try {
       // Don't iterate over modulesByFilename because it doesn't include __main__.
       for (var module : modulesByName.values()) {
@@ -4237,6 +4278,25 @@ public class Script {
     }
   }
 
+  public record AtexitFunction() implements Function {
+    public static final AtexitFunction INSTANCE = new AtexitFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+      if (value instanceof Function callback) {
+        var script = (Script) env.getVariable("__script__");
+        script.__atexit__(new CallbackWithContext(callback, env));
+        return null;
+      } else {
+        throw new IllegalArgumentException(
+            "Expected argument to __atexit__() to be callable but got '%s'"
+                .formatted(value == null ? "null" : value.getClass()));
+      }
+    }
+  }
+
   public record JavaStringFunction() implements Function {
     public static final JavaStringFunction INSTANCE = new JavaStringFunction();
 
@@ -5360,6 +5420,7 @@ public class Script {
       context.setVariable("JavaList", JavaListFunction.INSTANCE);
       context.setVariable("JavaMap", JavaMapFunction.INSTANCE);
       context.setVariable("JavaString", JavaStringFunction.INSTANCE);
+      context.setVariable("__atexit__", AtexitFunction.INSTANCE);
       context.setVariable("__exit__", ExitFunction.INSTANCE);
       context.setVariable("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
       context.setVariable("abs", AbsFunction.INSTANCE);

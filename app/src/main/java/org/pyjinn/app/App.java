@@ -23,6 +23,10 @@ public class App {
             .lines()
             .collect(Collectors.joining("\n"));
 
+    if (System.getenv("PYJINN_DEBUG") != null) {
+      Script.setDebugLogger((message, params) -> System.out.printf(message + "\n", params));
+    }
+
     Set<String> argsSet = new HashSet<>(Arrays.asList(args));
 
     JsonElement jsonAst = null;
@@ -55,14 +59,18 @@ public class App {
     }
 
     var script = new Script();
-    script.parse(jsonAst);
-    script.exec();
+    try {
+      script.parse(jsonAst);
+      script.exec();
 
-    if (args.length == 1) {
-      var func = script.getFunction(args[0]);
-      System.out.println(func);
-      var returnValue = func.call(script.mainModule().globals());
-      System.out.println(returnValue);
+      if (args.length == 1) {
+        var func = script.getFunction(args[0]);
+        System.out.println(func);
+        var returnValue = func.call(script.mainModule().globals());
+        System.out.println(returnValue);
+      }
+    } finally {
+      script.exit(); // Ensure that at-exit callbacks are run.
     }
   }
 }
