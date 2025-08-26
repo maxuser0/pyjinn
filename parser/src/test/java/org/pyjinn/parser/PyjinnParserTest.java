@@ -739,6 +739,37 @@ class PyjinnParserTest {
   }
 
   @Test
+  void oneLineForStatement() throws Exception {
+    var parserOutput =
+        parseTrees(
+            """
+            for x in y: z
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var forStmt = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("For", forStmt.get("type").getAsString());
+
+    var target = forStmt.get("target").getAsJsonObject();
+    assertName("x", target);
+
+    var iter = forStmt.get("iter").getAsJsonObject();
+    assertName("y", iter);
+
+    var body = forStmt.get("body").getAsJsonArray();
+    assertEquals(1, body.size());
+
+    var expr = body.get(0).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var value = expr.get("value").getAsJsonObject();
+    assertName("z", value);
+
+    var orelse = forStmt.get("orelse").getAsJsonArray();
+    assertEquals(0, orelse.size());
+  }
+
+  @Test
   void forStatement() throws Exception {
     var parserOutput =
         parseTrees(
@@ -960,6 +991,34 @@ class PyjinnParserTest {
 
     var elseValue = elseExpr.get("value").getAsJsonObject();
     assertName("z", elseValue);
+  }
+
+  @Test
+  void oneLineIfStatement() throws Exception {
+    var parserOutput =
+        parseTrees(
+            """
+            if x: y
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var ifStmt = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("If", ifStmt.get("type").getAsString());
+
+    var test = ifStmt.get("test").getAsJsonObject();
+    assertName("x", test);
+
+    var body = ifStmt.get("body").getAsJsonArray();
+    assertEquals(1, body.size());
+
+    var expr = body.get(0).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var value = expr.get("value").getAsJsonObject();
+    assertName("y", value);
+
+    var orelse = ifStmt.get("orelse").getAsJsonArray();
+    assertEquals(0, orelse.size());
   }
 
   @Test
@@ -1913,6 +1972,45 @@ class PyjinnParserTest {
     var step = slice.get("step").getAsJsonObject();
     assertEquals("Constant", step.get("type").getAsString());
     assertEquals(3, step.get("value").getAsInt());
+  }
+
+  @Test
+  void oneLineAdditionFunctionDef() throws Exception {
+    var parserOutput =
+        parseTrees(
+            """
+            def foo(x, y): return x + y
+            """);
+    var ast = parserOutput.jsonAst();
+
+    // TODO(maxuser): Add assertion for presence of empty decorator_list
+    var functionDef = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("FunctionDef", functionDef.get("type").getAsString());
+    assertEquals("foo", functionDef.get("name").getAsString());
+
+    var argsObject = functionDef.get("args").getAsJsonObject();
+    assertEquals("arguments", argsObject.get("type").getAsString());
+
+    var argsArray = argsObject.get("args").getAsJsonArray();
+    assertEquals(2, argsArray.size());
+
+    var xArg = argsArray.get(0).getAsJsonObject();
+    assertEquals("arg", xArg.get("type").getAsString());
+
+    var yArg = argsArray.get(1).getAsJsonObject();
+    assertEquals("arg", yArg.get("type").getAsString());
+
+    var body = functionDef.get("body").getAsJsonArray();
+    assertEquals(1, body.size());
+
+    var returnStatement = body.get(0).getAsJsonObject();
+    assertEquals("Return", returnStatement.get("type").getAsString());
+
+    var sum = returnStatement.get("value").getAsJsonObject();
+    assertEquals("BinOp", sum.get("type").getAsString());
+    assertName("x", sum.get("left"));
+    assertEquals("Add", sum.get("op").getAsJsonObject().get("type").getAsString());
+    assertName("y", sum.get("right"));
   }
 
   @Test

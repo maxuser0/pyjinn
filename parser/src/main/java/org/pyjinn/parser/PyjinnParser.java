@@ -376,7 +376,21 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitBlock(PythonParser.BlockContext ctx) {
-    return visitStatements(ctx.statements());
+    if (ctx.statements() != null) {
+      return visitStatements(ctx.statements());
+    }
+    JsonArray array = new JsonArray();
+    for (var stmt : ctx.simple_stmts().simple_stmt()) {
+      JsonElement node = visitSimple_stmt(stmt);
+      if (node != null && !node.isJsonNull()) {
+        if (node.isJsonArray()) {
+          array.addAll(node.getAsJsonArray());
+        } else if (node.isJsonObject()) {
+          array.add(node);
+        }
+      }
+    }
+    return array;
   }
 
   @Override
