@@ -802,6 +802,34 @@ class PyjinnParserTest {
   }
 
   @Test
+  void oneLineWhileStatement() throws Exception {
+    var parserOutput =
+        parseTrees(
+            """
+            while x: y
+            """);
+    var ast = parserOutput.jsonAst();
+
+    var whileStmt = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("While", whileStmt.get("type").getAsString());
+
+    var test = whileStmt.get("test").getAsJsonObject();
+    assertName("x", test);
+
+    var body = whileStmt.get("body").getAsJsonArray();
+    assertEquals(1, body.size());
+
+    var expr = body.get(0).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var value = expr.get("value").getAsJsonObject();
+    assertName("y", value);
+
+    var orelse = whileStmt.get("orelse").getAsJsonArray();
+    assertEquals(0, orelse.size());
+  }
+
+  @Test
   void whileStatement() throws Exception {
     var parserOutput =
         parseTrees(
