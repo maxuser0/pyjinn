@@ -158,7 +158,7 @@ public class Script {
   // objects are shared across scripts in the same process.
   private static ConcurrentHashMap<Class<?>, JavaClass> javaClasses = new ConcurrentHashMap<>();
 
-  private static JavaClass getJavaClass(Class<?> type) {
+  static JavaClass getJavaClass(Class<?> type) {
     return javaClasses.computeIfAbsent(type, JavaClass::new);
   }
 
@@ -3956,24 +3956,9 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
-      var type = type();
-
-      // Treat calls on an interface as a "cast" that attempts to promote params[0] from a
-      // Script.Function to a proxy for this interface.
-      if (type.isInterface()) {
-        if (params.length != 1) {
-          throw new IllegalArgumentException(
-              "Calling interface %s with %d params but expected 1"
-                  .formatted(type.getName(), params.length));
-        }
-        var param = params[0];
-        if (param instanceof Function function) {
-          return InterfaceProxy.promoteFunctionToJavaInterface(env, type, function);
-        } else {
-          throw new IllegalArgumentException(
-              "Calling interface %s with non-function param of type %s"
-                  .formatted(type.getName(), param.getClass().getName()));
-        }
+      Function function;
+      if ((function = InterfaceProxy.getFunctionPassedToInterface(type, params)) != null) {
+        return InterfaceProxy.promoteFunctionToJavaInterface(env, type, function);
       }
 
       ConstructorInvoker ctor = env.findConstructor(type(), params);
@@ -4658,10 +4643,19 @@ public class Script {
         }
         paramValues.add(kwargsMap);
       }
+
+      if (caller instanceof Class<?> type) {
+        Function function;
+        if ((function = InterfaceProxy.getFunctionPassedToInterface(type, paramValues.toArray()))
+            != null) {
+          return InterfaceProxy.promoteFunctionToJavaInterface(context.env(), type, function);
+        }
+      }
+
       if (caller instanceof Function function) {
         try {
           context.enterFunction(filename, lineno);
-          return function.call(context.env(), paramValues.toArray(Object[]::new));
+          return function.call(context.env(), paramValues.toArray());
         } finally {
           context.leaveFunction();
         }
@@ -4784,6 +4778,15 @@ public class Script {
       if (object instanceof JavaClass classId) {
         isStaticMethod = true;
         clazz = classId.type();
+        var memberAccessor = FieldAccess.getMember(object, methodName, symbolCache);
+        if (memberAccessor instanceof SymbolCache.NestedClassAccessor classAccessor) {
+          Class<?> nestedClass = classAccessor.nestedClass();
+          Function function;
+          if ((function = InterfaceProxy.getFunctionPassedToInterface(nestedClass, params))
+              != null) {
+            return InterfaceProxy.promoteFunctionToJavaInterface(env, nestedClass, function);
+          }
+        }
       } else {
         if (object == null) {
           throw new NullPointerException(
@@ -5222,12 +5225,20 @@ public class Script {
       }
     }
 
+    public static Function getFunctionPassedToInterface(Class<?> clazz, Object[] params) {
+      return clazz.isInterface()
+              && clazz != Function.class
+              && params.length == 1
+              && params[0] instanceof Function function
+          ? function
+          : null;
+    }
+
     public static Object promoteFunctionToJavaInterface(
-        Environment env, Class<?> clazz, Function function) {
-      if (clazz.isInterface() && clazz != Function.class) {
-        return implement(env, clazz, function);
-      }
-      return function;
+        Environment env, Class<?> interfaceType, Function function) {
+      // Treat calls on an interface as a "cast" that attempts to promote function to a proxy for
+      // this interface.
+      return implement(env, interfaceType, function);
     }
 
     private static long numAbstractMethods(Class<?> clss) {
@@ -5267,19 +5278,7 @@ public class Script {
             "Cannot get field \"%s.%s\" because \"%s\" is null".formatted(object, field, object));
       }
 
-      final boolean isClass;
-      final Class<?> objectClass;
-      if (objectValue instanceof JavaClass javaClassId) {
-        isClass = true;
-        objectClass = javaClassId.type();
-      } else {
-        isClass = false;
-        objectClass = objectValue.getClass();
-      }
-
-      var memberAccessor =
-          symbolCache.getMember(
-              new SymbolCache.MemberKey(isClass, objectClass, field.name()), this::getMember);
+      var memberAccessor = getMember(objectValue, field.name(), symbolCache);
 
       if (memberAccessor == null) {
         throw new IllegalArgumentException(
@@ -5293,37 +5292,56 @@ public class Script {
       }
     }
 
-    private SymbolCache.MemberAccessor getMember(SymbolCache.MemberKey key) {
+    public static SymbolCache.MemberAccessor getMember(
+        Object object, String memberName, SymbolCache symbolCache) {
+      final boolean isClass;
+      final Class<?> objectClass;
+      if (object instanceof JavaClass javaClassId) {
+        isClass = true;
+        objectClass = javaClassId.type();
+      } else {
+        isClass = false;
+        objectClass = object.getClass();
+      }
+
+      return symbolCache.getMember(
+          new SymbolCache.MemberKey(isClass, objectClass, memberName),
+          key -> getMemberUncached(key, memberName, symbolCache));
+    }
+
+    private static SymbolCache.MemberAccessor getMemberUncached(
+        SymbolCache.MemberKey key, String memberName, SymbolCache symbolCache) {
       if (key.isClass()) {
         SymbolCache.MemberAccessor accessor;
-        boolean isFieldCapitalized = Character.isUpperCase(field.name().charAt(0));
+        boolean isFieldCapitalized = Character.isUpperCase(memberName.charAt(0));
         if (isFieldCapitalized) {
           // Check for nested class first because member is capitalized.
-          accessor = getNestedClass(key.type());
+          accessor = getNestedClass(key.type(), memberName, symbolCache);
           if (accessor != null) {
             return accessor;
           }
-          return getClassField(key.type());
+          return getClassField(key.type(), memberName, symbolCache);
         } else {
           // Check for class-level field first because member is not capitalized.
-          accessor = getClassField(key.type());
+          accessor = getClassField(key.type(), memberName, symbolCache);
           if (accessor != null) {
             return accessor;
           }
-          return getNestedClass(key.type());
+          return getNestedClass(key.type(), memberName, symbolCache);
         }
       } else {
-        return getInstanceField(key.type());
+        return getInstanceField(key.type(), memberName, symbolCache);
       }
     }
 
-    private SymbolCache.NestedClassAccessor getNestedClass(Class<?> type) {
+    private static SymbolCache.NestedClassAccessor getNestedClass(
+        Class<?> type, String memberName, SymbolCache symbolCache) {
       for (var nestedClass : type.getClasses()) {
         String prettyNestedClassName = symbolCache.getPrettyClassName(nestedClass.getName());
         int lastDollarIndex = prettyNestedClassName.lastIndexOf('$');
         if (lastDollarIndex != -1 && lastDollarIndex != prettyNestedClassName.length() - 1) {
           String nestedClassName = prettyNestedClassName.substring(lastDollarIndex + 1);
-          if (nestedClassName.equals(field.name())) {
+          if (nestedClassName.equals(memberName)) {
             return new SymbolCache.NestedClassAccessor(nestedClass);
           }
         }
@@ -5331,8 +5349,9 @@ public class Script {
       return null; // No matching nested class found.
     }
 
-    private SymbolCache.ClassFieldAccessor getClassField(Class<?> type) {
-      String fieldName = symbolCache.getRuntimeFieldName(type, field.name());
+    private static SymbolCache.ClassFieldAccessor getClassField(
+        Class<?> type, String memberName, SymbolCache symbolCache) {
+      String fieldName = symbolCache.getRuntimeFieldName(type, memberName);
       try {
         return new SymbolCache.ClassFieldAccessor(type.getField(fieldName));
       } catch (NoSuchFieldException e) {
@@ -5340,8 +5359,9 @@ public class Script {
       }
     }
 
-    private SymbolCache.MemberAccessor getInstanceField(Class<?> type) {
-      String fieldName = symbolCache.getRuntimeFieldName(type, field.name());
+    static SymbolCache.MemberAccessor getInstanceField(
+        Class<?> type, String memberName, SymbolCache symbolCache) {
+      String fieldName = symbolCache.getRuntimeFieldName(type, memberName);
       try {
         return new SymbolCache.InstanceFieldAccessor(type.getField(fieldName));
       } catch (NoSuchFieldException e) {
@@ -5571,6 +5591,9 @@ public class Script {
     }
 
     private static boolean isPyjinnSource(String filename) {
+      if (filename == null) {
+        return false;
+      }
       filename = filename.toLowerCase();
       return filename.endsWith(".pyj") || filename.endsWith(".py") || filename.equals("<stdin>");
     }
