@@ -6455,6 +6455,61 @@ public class ScriptTest {
   }
 
   @Test
+  public void functionConversionToInterface() throws Exception {
+    env =
+        execute(
+            """
+            called = False
+            def set_called():
+              global called
+              called = True
+
+            Runnable = JavaClass("java.lang.Runnable")
+            runnable = Runnable(set_called)
+            runnable.run()
+            """
+                .replaceAll("\n            ", "\n"));
+    assertTrue((Boolean) env.getVariable("called"));
+  }
+
+  public interface NestedInterface {
+    void doSomething();
+  }
+
+  @Test
+  public void functionConversionToNestedInterface() throws Exception {
+    env =
+        execute(
+            """
+            called = False
+            def set_called():
+              global called
+              called = True
+
+            ScriptTest = JavaClass("org.pyjinn.interpreter.ScriptTest")
+            nested = ScriptTest.NestedInterface(set_called)
+            nested.doSomething()
+            """
+                .replaceAll("\n            ", "\n"));
+    assertTrue((Boolean) env.getVariable("called"));
+  }
+
+  public record NestedClass(String foo) {}
+
+  @Test
+  public void nestedClassCtor() throws Exception {
+    env =
+        execute(
+            """
+            ScriptTest = JavaClass("org.pyjinn.interpreter.ScriptTest")
+            nested = ScriptTest.NestedClass("hello")
+            output = nested.foo()
+            """
+                .replaceAll("\n            ", "\n"));
+    assertEquals("hello", (String) env.getVariable("output"));
+  }
+
+  @Test
   public void threads() throws InterruptedException, ExecutionException {
     var jsonAst = JsonParser.parseString(threadsJsonAst);
     var script = new Script();

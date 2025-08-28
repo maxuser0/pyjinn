@@ -4780,12 +4780,7 @@ public class Script {
         clazz = classId.type();
         var memberAccessor = FieldAccess.getMember(object, methodName, symbolCache);
         if (memberAccessor instanceof SymbolCache.NestedClassAccessor classAccessor) {
-          Class<?> nestedClass = classAccessor.nestedClass();
-          Function function;
-          if ((function = InterfaceProxy.getFunctionPassedToInterface(nestedClass, params))
-              != null) {
-            return InterfaceProxy.promoteFunctionToJavaInterface(env, nestedClass, function);
-          }
+          return getJavaClass(classAccessor.nestedClass()).call(env, params);
         }
       } else {
         if (object == null) {

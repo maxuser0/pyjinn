@@ -28,7 +28,7 @@ This builds the all-in-one jar file, `pyjinn-app-0.9-all.jar`:
 
 ```
 % ls -lh app/build/libs/pyjinn-app-0.9-all.jar
--rw-r--r--@ 1 maxuser  staff   1.1M Jul 21 19:56 app/build/libs/pyjinn-app-0.9-all.jar
+-rw-r--r--@ 1 maxuser  staff   1.1M Aug 25 23:19 app/build/libs/pyjinn-app-0.9-all.jar
 ```
 
 Run the standalone interpreter using `java -jar ...`, e.g. on Mac, Linux, or with WSL on Windows:
@@ -50,7 +50,7 @@ This builds the jar file:
 
 ```
 % ls -lh interpreter/build/libs/pyjinn-lib-0.9-all.jar
--rw-r--r--@ 1 maxuser  staff   887K Jul 21 19:54 interpreter/build/libs/pyjinn-lib-0.9-all.jar
+-rw-r--r--@ 1 maxuser  staff   926K Aug 25 23:10 interpreter/build/libs/pyjinn-lib-0.9-all.jar
 ```
 
 ## Code Structure
