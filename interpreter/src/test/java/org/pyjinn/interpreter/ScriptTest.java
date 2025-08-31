@@ -6658,6 +6658,33 @@ public class ScriptTest {
   }
 
   @Test
+  public void floorDivision() throws Exception {
+    env =
+        execute(
+            """
+            a = 11 // 2
+            b = 11.0 // 2
+            c = -11 // 2
+            d = 11 // -2
+            e = -11 // -2
+            f = -11.0 // 2
+            """);
+
+    assertVariableValue(5, "a");
+    assertVariableValue(5.0, "b");
+    assertVariableValue(-6, "c");
+    assertVariableValue(-6, "d");
+    assertVariableValue(5, "e");
+    assertVariableValue(-6.0, "f");
+  }
+
+  private void assertVariableValue(Object expectedValue, String variableName) {
+    Object object = env.getVariable(variableName);
+    assertNotNull(object);
+    assertEquals(expectedValue, object);
+  }
+
+  @Test
   public void threads() throws InterruptedException, ExecutionException {
     var jsonAst = JsonParser.parseString(threadsJsonAst);
     var script = new Script();

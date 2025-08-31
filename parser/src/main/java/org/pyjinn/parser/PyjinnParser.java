@@ -820,6 +820,8 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
         op = createOp("Div");
       } else if (ctx.PERCENT() != null) {
         op = createOp("Mod");
+      } else if (ctx.DOUBLESLASH() != null) {
+        op = createOp("FloorDiv");
       } else {
         throw new UnsupportedOperationException(
             "Unsupported operator: " + ctx.getChild(1).getText());

@@ -2621,6 +2621,7 @@ public class Script {
       SUB("-"),
       MUL("*"),
       DIV("/"),
+      FLOOR_DIV("//"),
       POW("**"),
       MOD("%"),
       LSHIFT("<<"),
@@ -2647,6 +2648,8 @@ public class Script {
           return Op.MUL;
         case "Div":
           return Op.DIV;
+        case "FloorDiv":
+          return Op.FLOOR_DIV;
         case "Pow":
           return Op.POW;
         case "Mod":
@@ -2697,6 +2700,11 @@ public class Script {
         case DIV:
           if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
             return Numbers.divide(lhsNum, rhsNum);
+          }
+          break;
+        case FLOOR_DIV:
+          if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
+            return Numbers.floorDiv(lhsNum, rhsNum);
           }
           break;
         case POW:

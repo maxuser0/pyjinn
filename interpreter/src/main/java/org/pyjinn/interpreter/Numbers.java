@@ -110,6 +110,39 @@ public class Numbers {
     return x.doubleValue() / y.doubleValue();
   }
 
+  public static Number floorDiv(Number x, Number y) {
+    if (x instanceof Double d) {
+      return Math.floor(d / y.doubleValue());
+    } else if (y instanceof Double d) {
+      return Math.floor(x.doubleValue() / d);
+    } else if (x instanceof Float f) {
+      return Math.floor(f / y.floatValue());
+    } else if (y instanceof Float f) {
+      return Math.floor(x.floatValue() / f);
+    } else if (x instanceof Long l) {
+      return Math.floorDiv(l, y.longValue());
+    } else if (y instanceof Long l) {
+      return Math.floorDiv(x.longValue(), l);
+    } else if (x instanceof Integer i) {
+      return Math.floorDiv(i, y.intValue());
+    } else if (y instanceof Integer i) {
+      return Math.floorDiv(x.intValue(), i);
+    } else if (x instanceof Short s) {
+      return Math.floorDiv(s, y.shortValue());
+    } else if (y instanceof Short s) {
+      return Math.floorDiv(x.shortValue(), s);
+    } else if (x instanceof Byte b) {
+      return Math.floorDiv(b, y.byteValue());
+    } else if (y instanceof Byte b) {
+      return Math.floorDiv(x.byteValue(), b);
+    } else {
+      throw new IllegalArgumentException(
+          String.format(
+              "Unable to do floor division of numbers: %s // %s (%s * %s)",
+              x, y, x.getClass().getName(), y.getClass().getName()));
+    }
+  }
+
   private static int pyModInt(int x, int y) {
     return Math.floorMod(x, y);
   }
