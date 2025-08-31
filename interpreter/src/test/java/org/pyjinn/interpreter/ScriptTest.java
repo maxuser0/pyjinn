@@ -6467,8 +6467,7 @@ public class ScriptTest {
             Runnable = JavaClass("java.lang.Runnable")
             runnable = Runnable(set_called)
             runnable.run()
-            """
-                .replaceAll("\n            ", "\n"));
+            """);
     assertTrue((Boolean) env.getVariable("called"));
   }
 
@@ -6489,8 +6488,7 @@ public class ScriptTest {
             ScriptTest = JavaClass("org.pyjinn.interpreter.ScriptTest")
             nested = ScriptTest.NestedInterface(set_called)
             nested.doSomething()
-            """
-                .replaceAll("\n            ", "\n"));
+            """);
     assertTrue((Boolean) env.getVariable("called"));
   }
 
@@ -6504,9 +6502,159 @@ public class ScriptTest {
             ScriptTest = JavaClass("org.pyjinn.interpreter.ScriptTest")
             nested = ScriptTest.NestedClass("hello")
             output = nested.foo()
-            """
-                .replaceAll("\n            ", "\n"));
+            """);
     assertEquals("hello", (String) env.getVariable("output"));
+  }
+
+  @Test
+  public void varargs() throws Exception {
+    env =
+        execute(
+            """
+            args_array = None
+
+            def foo(*args):
+              global args_array
+              args_array = JavaArray(args)
+
+            foo("foo", "bar")
+            """);
+
+    assertArrayEquals(new Object[] {"foo", "bar"}, (Object[]) env.getVariable("args_array"));
+  }
+
+  @Test
+  public void packKeywordArgs() throws Exception {
+    env =
+        execute(
+            """
+            a = None
+            b = None
+            c = None
+
+            def foo(x, y, z):
+              global a, b, c
+              a = x
+              b = y
+              c = z
+
+            args = {"x": "first", "y": "second", "z": "third"}
+            foo(**args)
+            """);
+
+    assertEquals("first", env.getVariable("a"));
+    assertEquals("second", env.getVariable("b"));
+    assertEquals("third", env.getVariable("c"));
+  }
+
+  @Test
+  public void unpackKeywordArgs() throws Exception {
+    env =
+        execute(
+            """
+            kwargs = None
+
+            def foo(**kw):
+              global kwargs
+              kwargs = kw
+
+            foo(x=0, y=1, z=2)
+            """);
+
+    var kwargs = env.getVariable("kwargs");
+    assertNotNull(kwargs);
+    assertEquals(Script.PyDict.class, kwargs.getClass());
+    var dict = (Script.PyDict) kwargs;
+    assertEquals(3, dict.__len__());
+    assertEquals(0, dict.get("x"));
+    assertEquals(1, dict.get("y"));
+    assertEquals(2, dict.get("z"));
+  }
+
+  @Test
+  public void unpackKeywordArgsAfterNamedArgs() throws Exception {
+    env =
+        execute(
+            """
+            gx = None
+            gy = None
+            kwargs = None
+
+            def foo(x, y, **kw):
+              global gx, gy, kwargs
+              gx = x
+              gy = y
+              kwargs = kw
+
+            foo(x=0, y=1, z=2)
+            """);
+
+    assertEquals(0, env.getVariable("gx"));
+    assertEquals(1, env.getVariable("gy"));
+
+    var kwargs = env.getVariable("kwargs");
+    assertNotNull(kwargs);
+    assertEquals(Script.PyDict.class, kwargs.getClass());
+    var dict = (Script.PyDict) kwargs;
+    assertEquals(1, dict.__len__());
+    assertEquals(2, dict.get("z"));
+  }
+
+  @Test
+  public void dictEmpty() throws Exception {
+    env = execute("output = dict()");
+    var output = env.getVariable("output");
+    assertNotNull(output);
+    assertEquals(Script.PyDict.class, output.getClass());
+    var dict = (Script.PyDict) output;
+    assertEquals(0, dict.__len__());
+  }
+
+  @Test
+  public void dictFromKeywords() throws Exception {
+    env = execute("output = dict(x=1, y=2)");
+    var output = env.getVariable("output");
+    assertNotNull(output);
+    assertEquals(Script.PyDict.class, output.getClass());
+    var dict = (Script.PyDict) output;
+    assertEquals(2, dict.__len__());
+    assertEquals(1, dict.get("x"));
+    assertEquals(2, dict.get("y"));
+  }
+
+  @Test
+  public void dictFromIterablePairs() throws Exception {
+    env = execute("output = dict([(1, 2), (3, 4)])");
+    var output = env.getVariable("output");
+    assertNotNull(output);
+    assertEquals(Script.PyDict.class, output.getClass());
+    var dict = (Script.PyDict) output;
+    assertEquals(2, dict.__len__());
+    assertEquals(2, dict.get(1));
+    assertEquals(4, dict.get(3));
+  }
+
+  @Test
+  public void dictCopy() throws Exception {
+    env =
+        execute(
+            """
+            d1 = dict(x=0, y=1)
+            d2 = dict(d1)
+            d2["z"] = "three"
+            """);
+    var d1 = env.getVariable("d1");
+    assertNotNull(d1);
+    assertEquals(Script.PyDict.class, d1.getClass());
+    var dict1 = (Script.PyDict) d1;
+
+    var d2 = env.getVariable("d2");
+    assertNotNull(d2);
+    assertEquals(Script.PyDict.class, d2.getClass());
+    var dict2 = (Script.PyDict) d2;
+
+    assertEquals(2, dict1.__len__());
+    assertEquals(3, dict2.__len__());
   }
 
   @Test

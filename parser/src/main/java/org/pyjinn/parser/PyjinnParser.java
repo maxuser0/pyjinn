@@ -327,10 +327,24 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
         var star = parameters.star_etc();
         if (star == null) {
           arguments.add("vararg", JsonNull.INSTANCE);
-        } else if (star.getChild(0).getText().equals("*")) {
-          var vararg = createNode(star, "arg");
-          vararg.addProperty("arg", star.getChild(1).getText());
-          arguments.add("vararg", vararg);
+          arguments.add("kwarg", JsonNull.INSTANCE);
+        } else {
+          if (star.getChild(0).getText().equals("*")) {
+            var vararg = createNode(star, "arg");
+            vararg.addProperty("arg", star.getChild(1).getText().replaceAll(",", ""));
+            arguments.add("vararg", vararg);
+          } else {
+            arguments.add("vararg", JsonNull.INSTANCE);
+          }
+
+          if (star.kwds() != null) {
+            var kwarg = createNode(star.kwds(), "arg");
+            // Assume: star.kwds().getChild(0).getText().equals("**")
+            kwarg.addProperty("arg", star.kwds().getChild(1).getText());
+            arguments.add("kwarg", kwarg);
+          } else {
+            arguments.add("kwarg", JsonNull.INSTANCE);
+          }
         }
 
         var defaultParamList = parameters.param_with_default();
@@ -947,6 +961,15 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
         var keyword = createNode(kwarg, "keyword");
         keyword.addProperty("arg", kwarg.NAME().getText());
         keyword.add("value", visitExpression(kwarg.expression()));
+        keywords.add(keyword);
+      }
+      for (var kwarg : ctx.kwargs().kwarg_or_double_starred()) {
+        var value = createNode(ctx, "Name");
+        // Assume: kwarg.getChild(0).getText().equals("**")
+        value.addProperty("id", kwarg.getChild(1).getText());
+        var keyword = createNode(kwarg, "keyword");
+        keyword.add("arg", JsonNull.INSTANCE);
+        keyword.add("value", value);
         keywords.add(keyword);
       }
     }

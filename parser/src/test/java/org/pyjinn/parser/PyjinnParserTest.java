@@ -2121,6 +2121,139 @@ class PyjinnParserTest {
     assertName("y", y.get("value"));
   }
 
+  @Test
+  void unpackKeywordArgs() throws Exception {
+    var parserOutput = parseTrees("def foo(**keyword_test): pass");
+    var ast = parserOutput.jsonAst();
+
+    var functionDef = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("FunctionDef", functionDef.get("type").getAsString());
+    assertEquals("foo", functionDef.get("name").getAsString());
+
+    var args = functionDef.get("args").getAsJsonObject();
+    assertEquals("arguments", args.get("type").getAsString());
+
+    // args should be empty
+    var argsList = args.get("args").getAsJsonArray();
+    assertEquals(0, argsList.size());
+
+    // vararg should be null
+    assertTrue(args.get("vararg").isJsonNull());
+
+    // kwarg should be present and correct
+    var kwarg = args.get("kwarg").getAsJsonObject();
+    assertEquals("arg", kwarg.get("type").getAsString());
+    assertEquals("keyword_test", kwarg.get("arg").getAsString());
+
+    // defaults should be empty
+    var defaults = args.get("defaults").getAsJsonArray();
+    assertEquals(0, defaults.size());
+
+    // body should contain a single Pass statement
+    var body = functionDef.get("body").getAsJsonArray();
+    assertEquals(1, body.size());
+    var passStmt = body.get(0).getAsJsonObject();
+    assertEquals("Pass", passStmt.get("type").getAsString());
+  }
+
+  @Test
+  void packKeywordArgs() throws Exception {
+    var parserOutput = parseTrees("foo(**keyword_test)");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var call = expr.get("value").getAsJsonObject();
+    assertEquals("Call", call.get("type").getAsString());
+
+    var func = call.get("func").getAsJsonObject();
+    assertName("foo", func);
+
+    var args = call.get("args").getAsJsonArray();
+    assertEquals(0, args.size());
+
+    var keywords = call.get("keywords").getAsJsonArray();
+    assertEquals(1, keywords.size());
+
+    var keyword = keywords.get(0).getAsJsonObject();
+    assertEquals("keyword", keyword.get("type").getAsString());
+    assertTrue(keyword.get("arg").isJsonNull());
+
+    var value = keyword.get("value").getAsJsonObject();
+    assertName("keyword_test", value);
+  }
+
+  @Test
+  void unpackVarArgsAndKeywordArgs() throws Exception {
+    var parserOutput = parseTrees("def foo(*varargs_test, **keyword_test): pass");
+    var ast = parserOutput.jsonAst();
+
+    var functionDef = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("FunctionDef", functionDef.get("type").getAsString());
+    assertEquals("foo", functionDef.get("name").getAsString());
+
+    var args = functionDef.get("args").getAsJsonObject();
+    assertEquals("arguments", args.get("type").getAsString());
+
+    // args should be empty
+    var argsList = args.get("args").getAsJsonArray();
+    assertEquals(0, argsList.size());
+
+    // vararg should be present and correct
+    var vararg = args.get("vararg").getAsJsonObject();
+    assertEquals("arg", vararg.get("type").getAsString());
+    assertEquals("varargs_test", vararg.get("arg").getAsString());
+
+    // kwarg should be present and correct
+    var kwarg = args.get("kwarg").getAsJsonObject();
+    assertEquals("arg", kwarg.get("type").getAsString());
+    assertEquals("keyword_test", kwarg.get("arg").getAsString());
+
+    // defaults should be empty
+    var defaults = args.get("defaults").getAsJsonArray();
+    assertEquals(0, defaults.size());
+
+    // body should contain a single Pass statement
+    var body = functionDef.get("body").getAsJsonArray();
+    assertEquals(1, body.size());
+    var passStmt = body.get(0).getAsJsonObject();
+    assertEquals("Pass", passStmt.get("type").getAsString());
+  }
+
+  @Test
+  void packVarArgsAndKeywordArgs() throws Exception {
+    var parserOutput = parseTrees("foo(*varargs_test, **keyword_test)");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var call = expr.get("value").getAsJsonObject();
+    assertEquals("Call", call.get("type").getAsString());
+
+    var func = call.get("func").getAsJsonObject();
+    assertName("foo", func);
+
+    var args = call.get("args").getAsJsonArray();
+    assertEquals(1, args.size());
+
+    var starred = args.get(0).getAsJsonObject();
+    assertEquals("Starred", starred.get("type").getAsString());
+    var starredValue = starred.get("value").getAsJsonObject();
+    assertName("varargs_test", starredValue);
+
+    var keywords = call.get("keywords").getAsJsonArray();
+    assertEquals(1, keywords.size());
+
+    var keyword = keywords.get(0).getAsJsonObject();
+    assertEquals("keyword", keyword.get("type").getAsString());
+    assertTrue(keyword.get("arg").isJsonNull());
+
+    var keywordValue = keyword.get("value").getAsJsonObject();
+    assertName("keyword_test", keywordValue);
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());

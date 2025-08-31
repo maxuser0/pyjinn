@@ -480,6 +480,7 @@ public class Script {
       var decorators = getDecorators(element);
       var argsObject = getAttr(element, "args").getAsJsonObject();
       List<FunctionArg> args = parseFunctionArgs(getAttr(argsObject, "args").getAsJsonArray());
+
       var star = getAttr(argsObject, "vararg");
       Optional<FunctionArg> vararg =
           star == null || star.isJsonNull()
@@ -487,6 +488,14 @@ public class Script {
               : Optional.of(
                   new FunctionArg(
                       new Identifier(getAttr(star.getAsJsonObject(), "arg").getAsString())));
+
+      var doubleStar = getAttr(argsObject, "kwarg");
+      Optional<FunctionArg> kwarg =
+          doubleStar == null || doubleStar.isJsonNull()
+              ? Optional.empty()
+              : Optional.of(
+                  new FunctionArg(
+                      new Identifier(getAttr(doubleStar.getAsJsonObject(), "arg").getAsString())));
 
       List<Expression> defaults =
           Optional.ofNullable(getAttr(argsObject, "defaults"))
@@ -496,8 +505,8 @@ public class Script {
                           .map(this::parseExpression)
                           .toList())
               .orElse(List.of());
+
       Statement body = parseStatementBlock(getBody(element));
-      // TODO(maxuser): Support **kwargs.
       var func =
           new FunctionDef(
               getLineno(element),
@@ -506,6 +515,7 @@ public class Script {
               decorators,
               args,
               vararg,
+              kwarg,
               defaults,
               body);
       return func;
@@ -909,7 +919,7 @@ public class Script {
       }
       var arg = getAttr(element, "arg");
       var value = getAttr(element, "value");
-      return new KeywordArg(arg.getAsString(), parseExpression(value));
+      return new KeywordArg(arg.isJsonNull() ? null : arg.getAsString(), parseExpression(value));
     }
 
     private Expression parseSliceExpression(JsonElement element) {
@@ -1068,6 +1078,13 @@ public class Script {
         localContext.setVariable(name, argValue);
       }
 
+      PyDict kwarg = null; // Populated if there's a **-prefixed arg.
+      if (function.kwarg().isPresent()) {
+        kwarg = new PyDict();
+        String kwargName = function.kwarg().get().identifier().name();
+        localContext.setVariable(kwargName, kwarg);
+      }
+
       // Assign kwargs.
       if (kwargs != null) {
         for (var entry : kwargs.entrySet()) {
@@ -1077,14 +1094,19 @@ public class Script {
                 "%s() got multiple values for argument '%s'"
                     .formatted(function.identifier.name(), name));
           }
-          if (!unassignedArgs.contains(name)) {
-            throw new IllegalArgumentException(
-                "%s() got an unexpected keyword argument '%s'"
-                    .formatted(function.identifier.name(), name));
+          if (unassignedArgs.contains(name)) {
+            assignedArgs.add(name);
+            unassignedArgs.remove(name);
+            localContext.setVariable(name, entry.getValue());
+          } else {
+            if (kwarg != null) {
+              kwarg.__setitem__(name, entry.getValue());
+            } else {
+              throw new IllegalArgumentException(
+                  "%s() got an unexpected keyword argument '%s'"
+                      .formatted(function.identifier.name(), name));
+            }
           }
-          assignedArgs.add(name);
-          unassignedArgs.remove(name);
-          localContext.setVariable(name, entry.getValue());
         }
       }
 
@@ -1279,6 +1301,7 @@ public class Script {
                     /* decorators= */ List.of(),
                     /* args= */ fields.stream().map(f -> new FunctionArg(f.identifier)).toList(),
                     /* vararg= */ Optional.empty(),
+                    /* kwarg= */ Optional.empty(),
                     defaults,
                     new Statement() {
                       @Override
@@ -1631,6 +1654,7 @@ public class Script {
       List<Decorator> decorators,
       List<FunctionArg> args,
       Optional<FunctionArg> vararg,
+      Optional<FunctionArg> kwarg,
       List<Expression> defaults,
       Statement body)
       implements Statement {
@@ -4177,6 +4201,60 @@ public class Script {
     }
   }
 
+  public static class DictFunction implements Function {
+    public static final DictFunction INSTANCE = new DictFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      if (params.length == 0) {
+        return new PyDict();
+      }
+
+      if (params.length != 1) {
+        throw new IllegalArgumentException(
+            "dict() takes 0 args, keywords args, dict, or an iterable of pairs but got %d args"
+                .formatted(params.length));
+      }
+
+      if (params[0] instanceof PyDict dict) {
+        return new PyDict(new HashMap<>(dict.getJavaMap()));
+      }
+
+      if (params[0] instanceof KeywordArgs kwargs) {
+        var dict = new PyDict();
+        dict.getJavaMap().putAll(kwargs);
+        return dict;
+      }
+
+      if (params[0] instanceof Iterable<?> iterableElements) {
+        var dict = new PyDict();
+        int i = -1;
+        for (var element : iterableElements) {
+          ++i;
+          if (element instanceof Iterable<?> iterable) {
+            List<?> list = StreamSupport.stream(iterable.spliterator(), false).toList();
+            if (list.size() == 2) {
+              dict.__setitem__(list.get(0), list.get(1));
+            } else {
+              throw new IllegalArgumentException(
+                  "dictionary sequence element #%d has length %d; 2 is required"
+                      .formatted(i, list.size()));
+            }
+          } else {
+            throw new IllegalArgumentException(
+                "dictionary sequence element #%d is not iterable: %s"
+                    .formatted(i, element == null ? "null" : element.getClass()));
+          }
+        }
+        return dict;
+      }
+
+      throw new IllegalArgumentException(
+          "dict() takes 0 args, keywords args, or 1 iterable of pairs but got 1 arg of type %s"
+              .formatted(params[0] == null ? "null" : params[0].getClass()));
+    }
+  }
+
   public static class ListFunction implements Function {
     public static final ListFunction INSTANCE = new ListFunction();
 
@@ -4639,7 +4717,26 @@ public class Script {
       if (!kwargs.isEmpty()) {
         var kwargsMap = new KeywordArgs();
         for (var kwarg : kwargs) {
-          kwargsMap.put(kwarg.name(), kwarg.value().eval(context));
+          if (kwarg.name() == null) {
+            var packedKwarg = kwarg.value().eval(context);
+            if (packedKwarg instanceof PyDict dict) {
+              for (var entry : dict.getJavaMap().entrySet()) {
+                if (entry.getKey() instanceof String name) {
+                  kwargsMap.put(name, entry.getValue());
+                } else {
+                  throw new IllegalArgumentException(
+                      "Keywords must be strings, not %s"
+                          .formatted(entry.getKey() == null ? "null" : entry.getKey().getClass()));
+                }
+              }
+            } else {
+              throw new IllegalArgumentException(
+                  "Argument after ** must be a mapping, not %s"
+                      .formatted(packedKwarg == null ? "null" : packedKwarg.getClass()));
+            }
+          } else {
+            kwargsMap.put(kwarg.name(), kwarg.value().eval(context));
+          }
         }
         paramValues.add(kwargsMap);
       }
@@ -5441,6 +5538,7 @@ public class Script {
       context.setVariable("abs", AbsFunction.INSTANCE);
       context.setVariable("bool", BoolFunction.INSTANCE);
       context.setVariable("chr", ChrFunction.INSTANCE);
+      context.setVariable("dict", DictFunction.INSTANCE);
       context.setVariable("enumerate", EnumerateFunction.INSTANCE);
       context.setVariable("float", FloatFunction.INSTANCE);
       context.setVariable("globals", GlobalsFunction.INSTANCE);
