@@ -208,7 +208,7 @@ public class Script {
   private LinkedList<Consumer<Integer>> externalAtExitListeners = new LinkedList<>();
 
   // Listeners from inside the script that are called when the script exits.
-  private LinkedList<CallbackWithContext> internalAtExitListeners = new LinkedList<>();
+  private LinkedList<AtExitCallback> internalAtExitListeners = new LinkedList<>();
 
   // For use by apps that need to share custom data across modules.
   public final PyDict vars = new PyDict();
@@ -253,19 +253,28 @@ public class Script {
     externalAtExitListeners.add(atExit);
   }
 
-  private record CallbackWithContext(Function callback, Environment env) {
+  private record AtExitCallback(Function callback, Environment env, Object[] params) {
     public Object call() {
-      return callback.call(env);
+      return callback.call(env, params);
     }
   }
 
   // Registers a listener within the script to run when the script exits.
-  void __atexit__(CallbackWithContext callback) {
+  void registerAtExit(AtExitCallback callback) {
     if (externalAtExitListeners == null) {
       // Script has already exited.
       return;
     }
     internalAtExitListeners.add(callback);
+  }
+
+  // Unregisters listeners previously registered with the same callback with registerAtExit.
+  void unregisterAtExit(Function callback) {
+    if (externalAtExitListeners == null) {
+      // Script has already exited.
+      return;
+    }
+    internalAtExitListeners.removeIf(cb -> cb.callback == callback);
   }
 
   /** Exits the script with a successful status (0). */
@@ -276,8 +285,8 @@ public class Script {
   /**
    * Exits the script with the given status.
    *
-   * <p>Listeners registered from within the script via {@code __atexit__()} are run first in
-   * reverse order from their registration, then all modules in the script are halted to prevent
+   * <p>Listeners registered from within the script via {@code __atexit_register__()} are run first
+   * in reverse order from their registration, then all modules in the script are halted to prevent
    * them from executing further, then finally listeners registered from outside the script via
    * {@code Script::atExit} are run in reverse order from their registration.
    */
@@ -4349,8 +4358,28 @@ public class Script {
     }
   }
 
-  public record AtexitFunction() implements Function {
-    public static final AtexitFunction INSTANCE = new AtexitFunction();
+  public record AtexitRegsisterFunction() implements Function {
+    public static final AtexitRegsisterFunction INSTANCE = new AtexitRegsisterFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectMinParams(params, 1);
+      var value = params[0];
+      if (value instanceof Function callback) {
+        var script = (Script) env.getVariable("__script__");
+        script.registerAtExit(
+            new AtExitCallback(callback, env, Arrays.copyOfRange(params, 1, params.length)));
+        return null;
+      } else {
+        throw new IllegalArgumentException(
+            "Expected argument to __atexit_register__() to be callable but got '%s'"
+                .formatted(value == null ? "null" : value.getClass()));
+      }
+    }
+  }
+
+  public record AtexitUnregsisterFunction() implements Function {
+    public static final AtexitUnregsisterFunction INSTANCE = new AtexitUnregsisterFunction();
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4358,11 +4387,11 @@ public class Script {
       var value = params[0];
       if (value instanceof Function callback) {
         var script = (Script) env.getVariable("__script__");
-        script.__atexit__(new CallbackWithContext(callback, env));
+        script.unregisterAtExit(callback);
         return null;
       } else {
         throw new IllegalArgumentException(
-            "Expected argument to __atexit__() to be callable but got '%s'"
+            "Expected argument to __atexit_unregister__() to be callable but got '%s'"
                 .formatted(value == null ? "null" : value.getClass()));
       }
     }
@@ -5540,7 +5569,8 @@ public class Script {
       context.setVariable("JavaList", JavaListFunction.INSTANCE);
       context.setVariable("JavaMap", JavaMapFunction.INSTANCE);
       context.setVariable("JavaString", JavaStringFunction.INSTANCE);
-      context.setVariable("__atexit__", AtexitFunction.INSTANCE);
+      context.setVariable("__atexit_register__", AtexitRegsisterFunction.INSTANCE);
+      context.setVariable("__atexit_unregister__", AtexitUnregsisterFunction.INSTANCE);
       context.setVariable("__exit__", ExitFunction.INSTANCE);
       context.setVariable("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
       context.setVariable("abs", AbsFunction.INSTANCE);

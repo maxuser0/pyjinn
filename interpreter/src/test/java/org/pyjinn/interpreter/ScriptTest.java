@@ -6351,6 +6351,7 @@ public class ScriptTest {
     assertEquals(6.141592653589793, ((Number) output).doubleValue(), 0.000000001);
   }
 
+  private Script script;
   private Script.Environment env;
 
   @Test
@@ -6678,6 +6679,112 @@ public class ScriptTest {
     assertVariableValue(-6.0, "f");
   }
 
+  @Test
+  public void registerAtExit() throws Exception {
+    execute(
+        """
+        array = JavaArray((None,))
+
+        def on_exit(message):
+          array[0] = message
+
+        __atexit_register__(on_exit, "finished")
+        """);
+
+    var array = getVariable(Object[].class, "array");
+    assertArrayEquals(new Object[] {null}, array);
+
+    script.exit();
+    assertArrayEquals(new Object[] {"finished"}, array);
+  }
+
+  @Test
+  public void registerAtExitWithKeywordArgs() throws Exception {
+    execute(
+        """
+        array = JavaArray((None,))
+
+        def on_exit(**args):
+          array[0] = args
+
+        __atexit_register__(on_exit, x="foo", y="bar")
+        """);
+
+    var array = getVariable(Object[].class, "array");
+    assertArrayEquals(new Object[] {null}, array);
+
+    script.exit();
+    assertEquals(1, array.length);
+    assertNotNull(array[0]);
+    assertEquals(Script.PyDict.class, array[0].getClass());
+
+    var dict = (Script.PyDict) array[0];
+    assertEquals(2, dict.__len__());
+    assertEquals("foo", dict.get("x"));
+    assertEquals("bar", dict.get("y"));
+  }
+
+  @Test
+  public void registerAtExitWithVarArgsAndKeywordArgs() throws Exception {
+    execute(
+        """
+        array = JavaArray((None, None))
+
+        def on_exit(*args, **kwargs):
+          array[0] = args
+          array[1] = kwargs
+
+        __atexit_register__(on_exit, 99, 100, x="foo", y="bar")
+        """);
+
+    var array = getVariable(Object[].class, "array");
+    assertArrayEquals(new Object[] {null, null}, array);
+
+    script.exit();
+    assertEquals(2, array.length);
+
+    assertNotNull(array[0]);
+    assertEquals(Script.PyTuple.class, array[0].getClass());
+    var args = (Script.PyTuple) array[0];
+    assertEquals(2, args.__len__());
+    assertEquals(99, args.__getitem__(0));
+    assertEquals(100, args.__getitem__(1));
+
+    assertNotNull(array[1]);
+    assertEquals(Script.PyDict.class, array[1].getClass());
+    var kwargs = (Script.PyDict) array[1];
+    assertEquals(2, kwargs.__len__());
+    assertEquals("foo", kwargs.get("x"));
+    assertEquals("bar", kwargs.get("y"));
+  }
+
+  @Test
+  public void unregisterAtExit() throws Exception {
+    execute(
+        """
+        array = JavaArray((None,))
+
+        def on_exit(message):
+          array[0] = message
+
+        __atexit_register__(on_exit, "finished")
+        __atexit_unregister__(on_exit)
+        """);
+
+    var array = getVariable(Object[].class, "array");
+    assertArrayEquals(new Object[] {null}, array);
+
+    script.exit();
+    assertArrayEquals(new Object[] {null}, array);
+  }
+
+  private <T> T getVariable(Class<T> clazz, String variableName) {
+    Object object = env.getVariable(variableName);
+    assertNotNull(object);
+    assertTrue(clazz.isAssignableFrom(object.getClass()));
+    return clazz.cast(object);
+  }
+
   private void assertVariableValue(Object expectedValue, String variableName) {
     Object object = env.getVariable(variableName);
     assertNotNull(object);
@@ -6705,9 +6812,12 @@ public class ScriptTest {
     assertEquals(7, totalSum);
   }
 
-  private static Script.Environment execute(String source) throws Exception {
+  private Script.Environment execute(String source) throws Exception {
     var jsonAst = PyjinnParser.parse("script_test.pyj", source);
-    return new Script().parse(jsonAst).exec().mainModule().globals();
+    script = new Script();
+    script.parse(jsonAst).exec();
+    env = script.mainModule().globals();
+    return env;
   }
 
   // TODO(maxuser): Add tests for:
