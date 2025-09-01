@@ -6778,6 +6778,26 @@ public class ScriptTest {
     assertArrayEquals(new Object[] {null}, array);
   }
 
+  @Test
+  public void varargExpression() throws Exception {
+    execute("output = int(*[3.14])");
+    assertEquals(3, getVariable(Integer.class, "output"));
+  }
+
+  @Test
+  public void emptyVarargs() throws Exception {
+    execute("output = int(3.14, *[])");
+    assertEquals(3, getVariable(Integer.class, "output"));
+  }
+
+  @Test
+  public void emptyKeywordArgs() throws Exception {
+    // Verifies that `**{}` doesn't produce an additional kwargs param to params to
+    // Script.Function.call(env, params).
+    execute("output = int(3.14, **{})");
+    assertEquals(3, getVariable(Integer.class, "output"));
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.getVariable(variableName);
     assertNotNull(object);

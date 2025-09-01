@@ -4775,7 +4775,9 @@ public class Script {
             kwargsMap.put(kwarg.name(), kwarg.value().eval(context));
           }
         }
-        paramValues.add(kwargsMap);
+        if (!kwargsMap.isEmpty()) {
+          paramValues.add(kwargsMap);
+        }
       }
 
       if (caller instanceof Class<?> type) {

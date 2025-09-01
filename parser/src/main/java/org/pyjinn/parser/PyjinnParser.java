@@ -966,9 +966,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
         keywords.add(keyword);
       }
       for (var kwarg : ctx.kwargs().kwarg_or_double_starred()) {
-        var value = createNode(ctx, "Name");
-        // Assume: kwarg.getChild(0).getText().equals("**")
-        value.addProperty("id", kwarg.getChild(1).getText());
+        var value = visitExpression(kwarg.expression());
         var keyword = createNode(kwarg, "keyword");
         keyword.add("arg", JsonNull.INSTANCE);
         keyword.add("value", value);
