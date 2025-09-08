@@ -3467,7 +3467,7 @@ public class Script {
     }
   }
 
-  public interface Lengthable {
+  public interface Lengthable extends Iterable<Object> {
     int __len__();
   }
 
@@ -3491,8 +3491,7 @@ public class Script {
     void __delitem__(Object key);
   }
 
-  public static class PyList
-      implements Iterable<Object>, ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
+  public static class PyList implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
     private final List<Object> list;
 
     public PyList() {
@@ -3659,7 +3658,7 @@ public class Script {
 
   // TODO(maxuser): Enforce immutability of tuples despite getJavaArray() returning array with
   // mutable elements.
-  public static class PyTuple implements Iterable<Object>, ItemGetter, ItemContainer {
+  public static class PyTuple implements ItemGetter, ItemContainer {
     private final Object[] array;
 
     public PyTuple(Object[] array) {
@@ -3854,8 +3853,7 @@ public class Script {
     }
   }
 
-  public static class PyDict
-      implements Iterable<Object>, ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
+  public static class PyDict implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
     private static final Object NOT_FOUND = new Object();
     private final Map<Object, Object> map;
 
