@@ -80,6 +80,11 @@ public class Script {
     mainModule().globals().del(name);
   }
 
+  /** Return the module with the given name, or null if no such module has been loaded. */
+  public Module module(String name) {
+    return modulesByName.get(name);
+  }
+
   public static class Module {
     private final String name;
     private final GlobalContext globals;
