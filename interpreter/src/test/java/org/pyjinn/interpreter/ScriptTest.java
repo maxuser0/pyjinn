@@ -6357,102 +6357,102 @@ public class ScriptTest {
   @Test
   public void strMethods() throws Exception {
     env = execute("output = 'foobarbaz'.startswith('foo')");
-    assertTrue((Boolean) env.getVariable("output"));
+    assertTrue((Boolean) env.get("output"));
 
     env = execute("output = 'foobarbaz'.startswith('foo', 1)");
-    assertFalse((Boolean) env.getVariable("output"));
+    assertFalse((Boolean) env.get("output"));
 
     env = execute("output = 'foobarbaz'.startswith('ba', 3, 6)");
-    assertTrue((Boolean) env.getVariable("output"));
+    assertTrue((Boolean) env.get("output"));
 
     env = execute("output = 'foobarbaz'.startswith('az', 3, 6)");
-    assertFalse((Boolean) env.getVariable("output"));
+    assertFalse((Boolean) env.get("output"));
 
     env = execute("output = 'foobarbaz'.endswith('baz')");
-    assertTrue((Boolean) env.getVariable("output"));
+    assertTrue((Boolean) env.get("output"));
 
     env = execute("output = 'foobarbaz'.endswith('baz', 8)");
-    assertFalse((Boolean) env.getVariable("output"));
+    assertFalse((Boolean) env.get("output"));
 
     env = execute("output = 'foobarbaz'.endswith('ar', 3, 6)");
-    assertTrue((Boolean) env.getVariable("output"));
+    assertTrue((Boolean) env.get("output"));
 
     env = execute("output = 'foobarbaz'.endswith('ba', 3, 6)");
-    assertFalse((Boolean) env.getVariable("output"));
+    assertFalse((Boolean) env.get("output"));
 
     env = execute("output = 'FooBar'.upper()");
-    assertEquals("FOOBAR", (String) env.getVariable("output"));
+    assertEquals("FOOBAR", (String) env.get("output"));
 
     env = execute("output = 'FooBar'.lower()");
-    assertEquals("foobar", (String) env.getVariable("output"));
+    assertEquals("foobar", (String) env.get("output"));
 
     env = execute("output = '::'.join(['foo', 'bar', 'baz'])");
-    assertEquals("foo::bar::baz", env.getVariable("output"));
+    assertEquals("foo::bar::baz", env.get("output"));
 
     env = execute("output = 'foo\\tbar   baz  '.split()");
-    assertArrayEquals(new String[] {"foo", "bar", "baz"}, (String[]) env.getVariable("output"));
+    assertArrayEquals(new String[] {"foo", "bar", "baz"}, (String[]) env.get("output"));
 
     env = execute("output = 'foo[bar]'.split('[')");
-    assertArrayEquals(new String[] {"foo", "bar]"}, (String[]) env.getVariable("output"));
+    assertArrayEquals(new String[] {"foo", "bar]"}, (String[]) env.get("output"));
 
     env = execute("output = ' \\tfoo \\n'.strip()");
-    assertEquals("foo", (String) env.getVariable("output"));
+    assertEquals("foo", (String) env.get("output"));
 
     env = execute("output = ' \\tfoo \\n'.lstrip()");
-    assertEquals("foo \n", (String) env.getVariable("output"));
+    assertEquals("foo \n", (String) env.get("output"));
 
     env = execute("output = ' \\tfoo \\n'.rstrip()");
-    assertEquals(" \tfoo", (String) env.getVariable("output"));
+    assertEquals(" \tfoo", (String) env.get("output"));
 
     env = execute("output = 'abfoocd'.strip('abcd')");
-    assertEquals("foo", (String) env.getVariable("output"));
+    assertEquals("foo", (String) env.get("output"));
 
     env = execute("output = 'abfoocd'.lstrip('abcd')");
-    assertEquals("foocd", (String) env.getVariable("output"));
+    assertEquals("foocd", (String) env.get("output"));
 
     env = execute("output = 'abfoocd'.rstrip('abcd')");
-    assertEquals("abfoo", (String) env.getVariable("output"));
+    assertEquals("abfoo", (String) env.get("output"));
 
     env = execute("output = 'foobarbaz'.find('bar')");
-    assertEquals(3, (Integer) env.getVariable("output"));
+    assertEquals(3, (Integer) env.get("output"));
 
     env = execute("output = 'foo'.find('bar')");
-    assertEquals(-1, (Integer) env.getVariable("output"));
+    assertEquals(-1, (Integer) env.get("output"));
 
     env = execute("output = 'ofooboozoo'.replace('oo', '--')");
-    assertEquals("of--b--z--", (String) env.getVariable("output"));
+    assertEquals("of--b--z--", (String) env.get("output"));
 
     env = execute("output = 'ofooboozoo'.replace('oo', '--', -1)");
-    assertEquals("of--b--z--", (String) env.getVariable("output"));
+    assertEquals("of--b--z--", (String) env.get("output"));
 
     env = execute("output = 'ofooboozoo'.replace('oo', '--', 2)");
-    assertEquals("of--b--zoo", (String) env.getVariable("output"));
+    assertEquals("of--b--zoo", (String) env.get("output"));
   }
 
   @Test
   public void sum() throws Exception {
     env = execute("output = sum(())");
-    assertEquals(0, (Integer) env.getVariable("output"));
+    assertEquals(0, (Integer) env.get("output"));
 
     env = execute("output = sum((), 42)");
-    assertEquals(42, (Integer) env.getVariable("output"));
+    assertEquals(42, (Integer) env.get("output"));
 
     env = execute("output = sum([1, 4, 9])");
-    assertEquals(14, (Integer) env.getVariable("output"));
+    assertEquals(14, (Integer) env.get("output"));
 
     env = execute("output = sum([1, 4, 9], 100)");
-    assertEquals(114, (Integer) env.getVariable("output"));
+    assertEquals(114, (Integer) env.get("output"));
   }
 
   @Test
   public void javaString() throws Exception {
     // str.split() separator interpreted as a literal string
     env = execute("output = 'foo[xyz]bar'.split('[xyz]')");
-    assertArrayEquals(new String[] {"foo", "bar"}, (String[]) env.getVariable("output"));
+    assertArrayEquals(new String[] {"foo", "bar"}, (String[]) env.get("output"));
 
     // String.split() separator interpreted as a regex
     env = execute("output = JavaString('foo[xyz]bar').split('[xyz]')");
-    assertArrayEquals(new String[] {"foo[", "", "", "]bar"}, (String[]) env.getVariable("output"));
+    assertArrayEquals(new String[] {"foo[", "", "", "]bar"}, (String[]) env.get("output"));
   }
 
   @Test
@@ -6469,7 +6469,7 @@ public class ScriptTest {
             runnable = Runnable(set_called)
             runnable.run()
             """);
-    assertTrue((Boolean) env.getVariable("called"));
+    assertTrue((Boolean) env.get("called"));
   }
 
   public interface NestedInterface {
@@ -6490,7 +6490,7 @@ public class ScriptTest {
             nested = ScriptTest.NestedInterface(set_called)
             nested.doSomething()
             """);
-    assertTrue((Boolean) env.getVariable("called"));
+    assertTrue((Boolean) env.get("called"));
   }
 
   public record NestedClass(String foo) {}
@@ -6504,7 +6504,7 @@ public class ScriptTest {
             nested = ScriptTest.NestedClass("hello")
             output = nested.foo()
             """);
-    assertEquals("hello", (String) env.getVariable("output"));
+    assertEquals("hello", (String) env.get("output"));
   }
 
   @Test
@@ -6521,7 +6521,7 @@ public class ScriptTest {
             foo("foo", "bar")
             """);
 
-    assertArrayEquals(new Object[] {"foo", "bar"}, (Object[]) env.getVariable("args_array"));
+    assertArrayEquals(new Object[] {"foo", "bar"}, (Object[]) env.get("args_array"));
   }
 
   @Test
@@ -6543,9 +6543,9 @@ public class ScriptTest {
             foo(**args)
             """);
 
-    assertEquals("first", env.getVariable("a"));
-    assertEquals("second", env.getVariable("b"));
-    assertEquals("third", env.getVariable("c"));
+    assertEquals("first", env.get("a"));
+    assertEquals("second", env.get("b"));
+    assertEquals("third", env.get("c"));
   }
 
   @Test
@@ -6562,7 +6562,7 @@ public class ScriptTest {
             foo(x=0, y=1, z=2)
             """);
 
-    var kwargs = env.getVariable("kwargs");
+    var kwargs = env.get("kwargs");
     assertNotNull(kwargs);
     assertEquals(Script.PyDict.class, kwargs.getClass());
     var dict = (Script.PyDict) kwargs;
@@ -6590,10 +6590,10 @@ public class ScriptTest {
             foo(x=0, y=1, z=2)
             """);
 
-    assertEquals(0, env.getVariable("gx"));
-    assertEquals(1, env.getVariable("gy"));
+    assertEquals(0, env.get("gx"));
+    assertEquals(1, env.get("gy"));
 
-    var kwargs = env.getVariable("kwargs");
+    var kwargs = env.get("kwargs");
     assertNotNull(kwargs);
     assertEquals(Script.PyDict.class, kwargs.getClass());
     var dict = (Script.PyDict) kwargs;
@@ -6604,7 +6604,7 @@ public class ScriptTest {
   @Test
   public void dictEmpty() throws Exception {
     env = execute("output = dict()");
-    var output = env.getVariable("output");
+    var output = env.get("output");
     assertNotNull(output);
     assertEquals(Script.PyDict.class, output.getClass());
     var dict = (Script.PyDict) output;
@@ -6614,7 +6614,7 @@ public class ScriptTest {
   @Test
   public void dictFromKeywords() throws Exception {
     env = execute("output = dict(x=1, y=2)");
-    var output = env.getVariable("output");
+    var output = env.get("output");
     assertNotNull(output);
     assertEquals(Script.PyDict.class, output.getClass());
     var dict = (Script.PyDict) output;
@@ -6626,7 +6626,7 @@ public class ScriptTest {
   @Test
   public void dictFromIterablePairs() throws Exception {
     env = execute("output = dict([(1, 2), (3, 4)])");
-    var output = env.getVariable("output");
+    var output = env.get("output");
     assertNotNull(output);
     assertEquals(Script.PyDict.class, output.getClass());
     var dict = (Script.PyDict) output;
@@ -6644,12 +6644,12 @@ public class ScriptTest {
             d2 = dict(d1)
             d2["z"] = "three"
             """);
-    var d1 = env.getVariable("d1");
+    var d1 = env.get("d1");
     assertNotNull(d1);
     assertEquals(Script.PyDict.class, d1.getClass());
     var dict1 = (Script.PyDict) d1;
 
-    var d2 = env.getVariable("d2");
+    var d2 = env.get("d2");
     assertNotNull(d2);
     assertEquals(Script.PyDict.class, d2.getClass());
     var dict2 = (Script.PyDict) d2;
@@ -6799,14 +6799,14 @@ public class ScriptTest {
   }
 
   private <T> T getVariable(Class<T> clazz, String variableName) {
-    Object object = env.getVariable(variableName);
+    Object object = env.get(variableName);
     assertNotNull(object);
     assertTrue(clazz.isAssignableFrom(object.getClass()));
     return clazz.cast(object);
   }
 
   private void assertVariableValue(Object expectedValue, String variableName) {
-    Object object = env.getVariable(variableName);
+    Object object = env.get(variableName);
     assertNotNull(object);
     assertEquals(expectedValue, object);
   }

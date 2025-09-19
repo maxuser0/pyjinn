@@ -65,14 +65,19 @@ public class Script {
   private final ThreadLocal<Deque<CallSite>> callStack =
       ThreadLocal.withInitial(ArrayDeque<CallSite>::new);
 
-  /** Convenience method for reading main module's global variables. */
-  public Object getVariable(String name) {
-    return mainModule().globals().getVariable(name);
+  /** Convenience method for reading main module's global variable with the given name. */
+  public Object get(String name) {
+    return mainModule().globals().get(name);
   }
 
-  /** Convenience method for writing main module's global variables. */
-  public void setVariable(String name, Object value) {
-    mainModule().globals().setVariable(name, value);
+  /** Convenience method for writing main module's global variable with the given name. */
+  public void set(String name, Object value) {
+    mainModule().globals().set(name, value);
+  }
+
+  /** Convenience method for undefining main module's global variable with the given name. */
+  public void del(String name) {
+    mainModule().globals().del(name);
   }
 
   public static class Module {
@@ -82,8 +87,8 @@ public class Script {
     public Module(Script script, String filename, String name) {
       this.name = name;
       this.globals = GlobalContext.create(filename, script.symbolCache);
-      globals.setVariable("__script__", script);
-      globals.setVariable("__name__", name);
+      globals.set("__script__", script);
+      globals.set("__name__", name);
     }
 
     public String name() {
@@ -99,7 +104,7 @@ public class Script {
     }
 
     public void parse(JsonElement element, String scriptFilename) {
-      if (globals.getVariable("__script__") instanceof Script script) {
+      if (globals.get("__script__") instanceof Script script) {
         var parser =
             new JsonAstParser(
                 this,
@@ -114,12 +119,12 @@ public class Script {
                 .formatted(
                     name,
                     Script.class.getSimpleName(),
-                    globals.getVariable("__script__").getClass().getSimpleName()));
+                    globals.get("__script__").getClass().getSimpleName()));
       }
     }
 
     public void exec() {
-      if (globals.getVariable("__script__") instanceof Script script) {
+      if (globals.get("__script__") instanceof Script script) {
         script.moduleHandler.onExecModule(this);
       }
       globals.execGlobalStatements();
@@ -352,7 +357,7 @@ public class Script {
   }
 
   public BoundFunction getFunction(String name) {
-    return (BoundFunction) mainModule().globals.getVariable(name);
+    return (BoundFunction) mainModule().globals.get(name);
   }
 
   public record JsonAstParser(
@@ -1028,7 +1033,7 @@ public class Script {
     public Object call(Environment env, Object... params) {
       if (enclosingContext.env().halted()) {
         // TODO(maxuser): Clear function's internal state to avoid memory leak of the entire script.
-        var script = (Script) enclosingContext.env().getVariable("__script__");
+        var script = (Script) enclosingContext.env().get("__script__");
         script.zombieCallbackHandler.handle(
             script.mainModule().filename(),
             "function '%s'".formatted(function.identifier().name()),
@@ -1064,7 +1069,7 @@ public class Script {
         for (int i = args.size(); i < numParams; ++i) {
           vararg[i - args.size()] = params[i];
         }
-        localContext.setVariable(function.vararg().get().identifier().name(), new PyTuple(vararg));
+        localContext.set(function.vararg().get().identifier().name(), new PyTuple(vararg));
         numParams = args.size();
       } else if (numParams > args.size()) {
         throw new IllegalArgumentException(
@@ -1084,14 +1089,14 @@ public class Script {
         String name = arg.identifier().name();
         assignedArgs.add(name);
         unassignedArgs.remove(name);
-        localContext.setVariable(name, argValue);
+        localContext.set(name, argValue);
       }
 
       PyDict kwarg = null; // Populated if there's a **-prefixed arg.
       if (function.kwarg().isPresent()) {
         kwarg = new PyDict();
         String kwargName = function.kwarg().get().identifier().name();
-        localContext.setVariable(kwargName, kwarg);
+        localContext.set(kwargName, kwarg);
       }
 
       // Assign kwargs.
@@ -1106,7 +1111,7 @@ public class Script {
           if (unassignedArgs.contains(name)) {
             assignedArgs.add(name);
             unassignedArgs.remove(name);
-            localContext.setVariable(name, entry.getValue());
+            localContext.set(name, entry.getValue());
           } else {
             if (kwarg != null) {
               kwarg.__setitem__(name, entry.getValue());
@@ -1126,7 +1131,7 @@ public class Script {
         if (unassignedArgs.contains(name)) {
           assignedArgs.add(name);
           unassignedArgs.remove(name);
-          localContext.setVariable(name, defaults.get(i));
+          localContext.set(name, defaults.get(i));
         }
       }
 
@@ -1214,7 +1219,7 @@ public class Script {
     @Override
     public void exec(Context context) {
       try {
-        if (context.globals.getVariable("__script__") instanceof Script script) {
+        if (context.globals.get("__script__") instanceof Script script) {
           for (var importModule : modules) {
             var module = script.importModule(importModule.name());
 
@@ -1235,7 +1240,7 @@ public class Script {
               object = new PyObject(PyClass.MODULE_TYPE);
               object.__dict__.__setitem__(nameParts[i], prevObject);
             }
-            context.setVariable(nameParts[0], object);
+            context.set(nameParts[0], object);
           }
         }
       } catch (Exception e) {
@@ -1248,7 +1253,7 @@ public class Script {
     @Override
     public void exec(Context context) {
       try {
-        if (context.globals.getVariable("__script__") instanceof Script script) {
+        if (context.globals.get("__script__") instanceof Script script) {
           var module = script.importModule(module());
           if (names().size() == 1 && names().get(0).name().equals("*")) {
             for (var entry : module.globals().vars().getJavaMap().entrySet()) {
@@ -1257,12 +1262,12 @@ public class Script {
                 continue; // Skip special module variables like __name__.
               }
               var value = entry.getValue();
-              context.setVariable(name, value);
+              context.set(name, value);
             }
           } else {
             for (var importName : names()) {
-              var importedEntity = module.globals().getVariable(importName.name());
-              context.setVariable(importName.importedName(), importedEntity);
+              var importedEntity = module.globals().get(importName.name());
+              context.set(importName.importedName(), importedEntity);
             }
           }
         }
@@ -1318,7 +1323,7 @@ public class Script {
                         var object = new PyObject(type[0]);
                         for (var field : fields) {
                           String name = field.identifier().name();
-                          object.__dict__.__setitem__(name, context.getVariable(name));
+                          object.__dict__.__setitem__(name, context.get(name));
                         }
                         context.returnWithValue(object);
                       }
@@ -1381,7 +1386,7 @@ public class Script {
               classLevelMethods,
               dataclass.map(d -> dataclassHashCode(fields)),
               dataclass.map(d -> dataclassToString(fields)));
-      context.setVariable(identifier.name(), type[0]);
+      context.set(identifier.name(), type[0]);
       if (!dataclass.isPresent()) {
         for (var field : fields) {
           field
@@ -1581,7 +1586,7 @@ public class Script {
 
   public record ClassLevelMethod(boolean isClassmethod, Function function) {}
 
-  public static class PyClass extends PyObject implements Function {
+  public static class PyClass extends PyObject {
     public final String name;
     public final Function ctor;
     public final boolean isFrozen;
@@ -1745,7 +1750,7 @@ public class Script {
         context.enterLoop();
         for (var value : getIterable(iter.eval(context))) {
           if (loopVar != null) {
-            context.setVariable(loopVar.name(), value);
+            context.set(loopVar.name(), value);
           } else {
             Assignment.assignTuple(context, loopVars, value);
           }
@@ -1818,7 +1823,7 @@ public class Script {
   public record Identifier(String name) implements Expression {
     @Override
     public Object eval(Context context) {
-      return context.getVariable(name);
+      return context.get(name);
     }
 
     @Override
@@ -1855,7 +1860,7 @@ public class Script {
         }
         boolean handled = false;
         for (var handler : exceptionHandlers) {
-          var exceptionType = handler.exceptionType().map(t -> context.getVariable(t.name()));
+          var exceptionType = handler.exceptionType().map(t -> context.get(t.name()));
           if (exceptionType.isEmpty()
               || (exceptionType.get() instanceof PyClass declaredType
                   && exception instanceof PyObject thrownObject
@@ -2028,7 +2033,7 @@ public class Script {
                   lengthToUnpack, lhsVars.size(), rhsValue));
         }
         for (int i = 0; i < lengthToUnpack; ++i) {
-          context.setVariable(lhsVars.get(i).name(), getter.__getitem__(i));
+          context.set(lhsVars.get(i).name(), getter.__getitem__(i));
         }
       } else {
         throw new IllegalArgumentException(
@@ -2165,7 +2170,7 @@ public class Script {
       }
       Object rhsValue = rhs.eval(context);
       if (lhs instanceof Identifier lhsId) {
-        var oldValue = context.getVariable(lhsId.name());
+        var oldValue = context.get(lhsId.name());
         var newValue = op.apply(oldValue, rhsValue);
         if (newValue != null) {
           context.setVariable(lhsId, newValue);
@@ -2225,7 +2230,7 @@ public class Script {
     public void exec(Context context) {
       for (var target : targets) {
         if (target instanceof Identifier id) {
-          context.deleteVariable(id.name());
+          context.del(id.name());
         } else if (target instanceof ArrayIndex arrayIndex) {
           var array = arrayIndex.array().eval(context);
           var index = arrayIndex.index().eval(context);
@@ -3412,7 +3417,7 @@ public class Script {
       outerLoop:
       for (var value : getIterable(iter.eval(localContext))) {
         if (loopVar != null) {
-          localContext.setVariable(loopVar.name(), value);
+          localContext.set(loopVar.name(), value);
         } else {
           Assignment.assignTuple(localContext, loopVars, value);
         }
@@ -3800,7 +3805,7 @@ public class Script {
       return (env, params) -> {
         if (enclosingContext.env().halted()) {
           // TODO(maxuser): Clear lambda's internal state to avoid memory leak of the entire script.
-          var script = (Script) enclosingContext.env().getVariable("__script__");
+          var script = (Script) enclosingContext.env().get("__script__");
           script.zombieCallbackHandler.handle(
               script.mainModule().filename(),
               "lambda from line " + lineno,
@@ -3818,7 +3823,7 @@ public class Script {
         for (int i = 0; i < args.size(); ++i) {
           var arg = args.get(i);
           var argValue = params[i];
-          localContext.setVariable(arg.identifier().name(), argValue);
+          localContext.set(arg.identifier().name(), argValue);
         }
         return body.eval(localContext);
       };
@@ -4306,7 +4311,7 @@ public class Script {
     public Object call(Environment env, Object... params) {
       int numParams = params.length;
       var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
-      var script = (Script) env.getVariable("__script__");
+      var script = (Script) env.get("__script__");
       final Consumer<String> out;
       if (kwargs == null) {
         out = script.stdout;
@@ -4364,7 +4369,7 @@ public class Script {
       expectMinParams(params, 1);
       var value = params[0];
       if (value instanceof Function callback) {
-        var script = (Script) env.getVariable("__script__");
+        var script = (Script) env.get("__script__");
         script.registerAtExit(
             new AtExitCallback(callback, env, Arrays.copyOfRange(params, 1, params.length)));
         return null;
@@ -4384,7 +4389,7 @@ public class Script {
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof Function callback) {
-        var script = (Script) env.getVariable("__script__");
+        var script = (Script) env.get("__script__");
         script.unregisterAtExit(callback);
         return null;
       } else {
@@ -4560,7 +4565,7 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectMinParams(params, 0);
       expectMaxParams(params, 1);
-      if (env.getVariable("__script__") instanceof Script script) {
+      if (env.get("__script__") instanceof Script script) {
         int status =
             (params.length == 1 && params[0] != null) ? ((Number) params[0]).intValue() : 0;
         script.exit(status);
@@ -5521,11 +5526,11 @@ public class Script {
   }
 
   public interface Environment {
-    Object getVariable(String name);
+    Object get(String name);
 
-    void setVariable(String name, Object value);
+    void set(String name, Object value);
 
-    void deleteVariable(String name);
+    void del(String name);
 
     PyDict vars();
 
@@ -5553,7 +5558,7 @@ public class Script {
     }
 
     public Deque<CallSite> getCallStack() {
-      var script = (Script) getVariable("__script__");
+      var script = (Script) get("__script__");
       return script.callStack.get();
     }
 
@@ -5564,37 +5569,37 @@ public class Script {
 
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
-      context.setVariable("Exception", new JavaClass(Exception.class));
-      context.setVariable("JavaArray", JavaArrayFunction.INSTANCE);
-      context.setVariable("JavaList", JavaListFunction.INSTANCE);
-      context.setVariable("JavaMap", JavaMapFunction.INSTANCE);
-      context.setVariable("JavaString", JavaStringFunction.INSTANCE);
-      context.setVariable("__atexit_register__", AtexitRegsisterFunction.INSTANCE);
-      context.setVariable("__atexit_unregister__", AtexitUnregsisterFunction.INSTANCE);
-      context.setVariable("__exit__", ExitFunction.INSTANCE);
-      context.setVariable("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
-      context.setVariable("abs", AbsFunction.INSTANCE);
-      context.setVariable("bool", BoolFunction.INSTANCE);
-      context.setVariable("chr", ChrFunction.INSTANCE);
-      context.setVariable("dict", DictFunction.INSTANCE);
-      context.setVariable("enumerate", EnumerateFunction.INSTANCE);
-      context.setVariable("float", FloatFunction.INSTANCE);
-      context.setVariable("globals", GlobalsFunction.INSTANCE);
-      context.setVariable("hex", HexFunction.INSTANCE);
-      context.setVariable("int", IntFunction.INSTANCE);
-      context.setVariable("len", LenFunction.INSTANCE);
-      context.setVariable("list", ListFunction.INSTANCE);
-      context.setVariable("math", MATH_CLASS);
-      context.setVariable("max", MaxFunction.INSTANCE);
-      context.setVariable("min", MinFunction.INSTANCE);
-      context.setVariable("ord", OrdFunction.INSTANCE);
-      context.setVariable("print", PrintFunction.INSTANCE);
-      context.setVariable("range", RangeFunction.INSTANCE);
-      context.setVariable("round", RoundFunction.INSTANCE);
-      context.setVariable("str", StrFunction.INSTANCE);
-      context.setVariable("sum", SumFunction.INSTANCE);
-      context.setVariable("tuple", TupleFunction.INSTANCE);
-      context.setVariable("type", TypeFunction.INSTANCE);
+      context.set("Exception", new JavaClass(Exception.class));
+      context.set("JavaArray", JavaArrayFunction.INSTANCE);
+      context.set("JavaList", JavaListFunction.INSTANCE);
+      context.set("JavaMap", JavaMapFunction.INSTANCE);
+      context.set("JavaString", JavaStringFunction.INSTANCE);
+      context.set("__atexit_register__", AtexitRegsisterFunction.INSTANCE);
+      context.set("__atexit_unregister__", AtexitUnregsisterFunction.INSTANCE);
+      context.set("__exit__", ExitFunction.INSTANCE);
+      context.set("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
+      context.set("abs", AbsFunction.INSTANCE);
+      context.set("bool", BoolFunction.INSTANCE);
+      context.set("chr", ChrFunction.INSTANCE);
+      context.set("dict", DictFunction.INSTANCE);
+      context.set("enumerate", EnumerateFunction.INSTANCE);
+      context.set("float", FloatFunction.INSTANCE);
+      context.set("globals", GlobalsFunction.INSTANCE);
+      context.set("hex", HexFunction.INSTANCE);
+      context.set("int", IntFunction.INSTANCE);
+      context.set("len", LenFunction.INSTANCE);
+      context.set("list", ListFunction.INSTANCE);
+      context.set("math", MATH_CLASS);
+      context.set("max", MaxFunction.INSTANCE);
+      context.set("min", MinFunction.INSTANCE);
+      context.set("ord", OrdFunction.INSTANCE);
+      context.set("print", PrintFunction.INSTANCE);
+      context.set("range", RangeFunction.INSTANCE);
+      context.set("round", RoundFunction.INSTANCE);
+      context.set("str", StrFunction.INSTANCE);
+      context.set("sum", SumFunction.INSTANCE);
+      context.set("tuple", TupleFunction.INSTANCE);
+      context.set("type", TypeFunction.INSTANCE);
       return context;
     }
 
@@ -5760,10 +5765,10 @@ public class Script {
     }
 
     public void setBoundFunction(BoundFunction boundFunction) {
-      setVariable(boundFunction.function().identifier().name(), boundFunction);
+      set(boundFunction.function().identifier().name(), boundFunction);
     }
 
-    public void setVariable(String name, Object value) {
+    public void set(String name, Object value) {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
         globals.vars.__setitem__(name, value);
       } else if (enclosingContext != null
@@ -5776,28 +5781,28 @@ public class Script {
     }
 
     public void setVariable(Identifier id, Object value) {
-      setVariable(id.name(), value);
+      set(id.name(), value);
     }
 
-    public Object getVariable(String name) {
+    public Object get(String name) {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
-        return globals.getVariable(name);
+        return globals.get(name);
       }
       var value = vars.get(name, NOT_FOUND);
       if (value != NOT_FOUND) {
         return value;
       } else if (enclosingContext != null) {
-        return enclosingContext.getVariable(name);
+        return enclosingContext.get(name);
       } else if (this != globals) {
-        return globals.getVariable(name);
+        return globals.get(name);
       } else {
         throw new IllegalArgumentException("Variable not found: " + name);
       }
     }
 
-    public void deleteVariable(String name) {
+    public void del(String name) {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
-        globals.deleteVariable(name);
+        globals.del(name);
         return;
       }
       if (!vars.__contains__(name)) {
