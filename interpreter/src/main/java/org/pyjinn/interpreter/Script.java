@@ -223,7 +223,7 @@ public class Script {
   private LinkedList<AtExitCallback> internalAtExitListeners = new LinkedList<>();
 
   // For use by apps that need to share custom data across modules.
-  public final PyDict vars = new PyDict();
+  public final PyjDict vars = new PyjDict();
 
   public Script() {
     this(
@@ -1076,7 +1076,7 @@ public class Script {
         for (int i = args.size(); i < numParams; ++i) {
           vararg[i - args.size()] = params[i];
         }
-        localContext.set(function.vararg().get().identifier().name(), new PyTuple(vararg));
+        localContext.set(function.vararg().get().identifier().name(), new PyjTuple(vararg));
         numParams = args.size();
       } else if (numParams > args.size()) {
         throw new IllegalArgumentException(
@@ -1099,9 +1099,9 @@ public class Script {
         localContext.set(name, argValue);
       }
 
-      PyDict kwarg = null; // Populated if there's a **-prefixed arg.
+      PyjDict kwarg = null; // Populated if there's a **-prefixed arg.
       if (function.kwarg().isPresent()) {
-        kwarg = new PyDict();
+        kwarg = new PyjDict();
         String kwargName = function.kwarg().get().identifier().name();
         localContext.set(kwargName, kwarg);
       }
@@ -1155,13 +1155,13 @@ public class Script {
   }
 
   // `type` is an array of length 1 because CtorFunction needs to be instantiated before the
-  // surrounding class is fully defined. (Alternatively, PyClass could be mutable so that it's
+  // surrounding class is fully defined. (Alternatively, PyjClass could be mutable so that it's
   // instantiated before CtorFunction.)
-  public record CtorFunction(PyClass[] type, BoundFunction function) implements Function {
+  public record CtorFunction(PyjClass[] type, BoundFunction function) implements Function {
     @Override
     public Object call(Environment env, Object... params) {
       Object[] ctorParams = new Object[params.length + 1];
-      var self = new PyObject(type[0]);
+      var self = new PyjObject(type[0]);
       ctorParams[0] = self;
       System.arraycopy(params, 0, ctorParams, 1, params.length);
       function.call(env, ctorParams);
@@ -1232,8 +1232,8 @@ public class Script {
 
             // To support modules with dots in their name, e.g. `import foo.bar.baz`,
             // iterate the name parts in reverse order. For the last part (`baz`),
-            // create a PyObject whose __dict__ is the imported module's global vars
-            // and wrap each previous name part in a PyObject's __dict__. It's equivalent to:
+            // create a PyjObject whose __dict__ is the imported module's global vars
+            // and wrap each previous name part in a PyjObject's __dict__. It's equivalent to:
             //
             // baz = imported_module.globals()
             // _bar = object()
@@ -1241,10 +1241,10 @@ public class Script {
             // foo = object()
             // foo.__dict__["bar"] = _bar
             String[] nameParts = importModule.importedName().split("\\.");
-            var object = new PyObject(PyClass.MODULE_TYPE, module.globals().vars());
+            var object = new PyjObject(PyjClass.MODULE_TYPE, module.globals().vars());
             for (int i = nameParts.length - 1; i > 0; --i) {
               var prevObject = object;
-              object = new PyObject(PyClass.MODULE_TYPE);
+              object = new PyjObject(PyjClass.MODULE_TYPE);
               object.__dict__.__setitem__(nameParts[i], prevObject);
             }
             context.set(nameParts[0], object);
@@ -1296,7 +1296,7 @@ public class Script {
     /** Adds this class definition to the specified {@code context}. */
     @Override
     public void exec(Context context) {
-      var type = new PyClass[1]; // Using array to circumvent immutability constraint for record.
+      var type = new PyjClass[1]; // Using array to circumvent immutability constraint for record.
       Function ctor;
       Optional<Decorator> dataclass =
           decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
@@ -1327,7 +1327,7 @@ public class Script {
                     new Statement() {
                       @Override
                       public void exec(Context context) {
-                        var object = new PyObject(type[0]);
+                        var object = new PyjObject(type[0]);
                         for (var field : fields) {
                           String name = field.identifier().name();
                           object.__dict__.__setitem__(name, context.get(name));
@@ -1345,7 +1345,7 @@ public class Script {
         ctor =
             (env, params) -> {
               Function.expectNumParams(params, 0, identifier.name() + ".__init__");
-              return new PyObject(type[0]);
+              return new PyjObject(type[0]);
             };
       }
 
@@ -1385,7 +1385,7 @@ public class Script {
                                           .getAsBoolean()))
               .orElse(false);
       type[0] =
-          new PyClass(
+          new PyjClass(
               identifier.name(),
               ctor,
               isFrozen,
@@ -1404,7 +1404,7 @@ public class Script {
       }
     }
 
-    private static java.util.function.Function<PyObject, Integer> dataclassHashCode(
+    private static java.util.function.Function<PyjObject, Integer> dataclassHashCode(
         List<ClassFieldDef> fields) {
       return dataObject ->
           Objects.hash(
@@ -1413,7 +1413,7 @@ public class Script {
                   .toArray());
     }
 
-    private static java.util.function.Function<PyObject, String> dataclassToString(
+    private static java.util.function.Function<PyjObject, String> dataclassToString(
         List<ClassFieldDef> fields) {
       return dataObject ->
           fields.stream()
@@ -1470,26 +1470,26 @@ public class Script {
     }
   }
 
-  public static class PyObject implements Function {
-    public final PyClass type;
-    public final PyDict __dict__;
+  public static class PyjObject implements Function {
+    public final PyjClass type;
+    public final PyjDict __dict__;
 
-    public PyObject(PyClass type) {
-      this(type, new PyDict());
+    public PyjObject(PyjClass type) {
+      this(type, new PyjDict());
     }
 
-    public PyObject(PyClass type, PyDict dict) {
+    public PyjObject(PyjClass type, PyjDict dict) {
       this.type = type;
       this.__dict__ = dict;
     }
 
     /**
-     * Calls PyObject method named {@code methodName} with {@code params}.
+     * Calls PyjObject method named {@code methodName} with {@code params}.
      *
      * <p>Return type is an array rather than Optional because Optional cannot store null.
      *
-     * @param methodName name of PyObject method to call
-     * @param params arguments passed to PyObject method
+     * @param methodName name of PyjObject method to call
+     * @param params arguments passed to PyjObject method
      * @return return value wrapped in an array of 1 element, or empty array if no matching method
      */
     public Object[] callMethod(Environment env, String methodName, Object... params) {
@@ -1520,7 +1520,7 @@ public class Script {
 
     @Override
     public boolean equals(Object other) {
-      if (other instanceof PyObject pyOther
+      if (other instanceof PyjObject pyOther
           && type == pyOther.type
           && type.isFrozen
           && type.hashMethod.isPresent()) {
@@ -1549,7 +1549,7 @@ public class Script {
     }
   }
 
-  public static class PyObjects {
+  public static class PyjObjects {
     public static String toString(Object value) {
       if (value == null) {
         return "None";
@@ -1564,12 +1564,12 @@ public class Script {
         }
         out.append("]");
         return out.toString();
-      } else if (value instanceof PyList pyList) {
+      } else if (value instanceof PyjList pyList) {
         return pyList.getJavaList().stream()
-            .map(PyObjects::toRepr)
+            .map(PyjObjects::toRepr)
             .collect(joining(", ", "[", "]"));
       } else if (value instanceof List<?> list) {
-        return list.stream().map(PyObjects::toRepr).collect(joining(", ", "[", "]"));
+        return list.stream().map(PyjObjects::toRepr).collect(joining(", ", "[", "]"));
       } else if (value instanceof Boolean bool) {
         return bool ? "True" : "False";
       } else {
@@ -1586,24 +1586,24 @@ public class Script {
                 .create();
         return gson.toJson(string);
       } else {
-        return PyObjects.toString(value);
+        return PyjObjects.toString(value);
       }
     }
   }
 
   public record ClassLevelMethod(boolean isClassmethod, Function function) {}
 
-  public static class PyClass extends PyObject {
+  public static class PyjClass extends PyjObject {
     public final String name;
     public final Function ctor;
     public final boolean isFrozen;
     public final Map<String, Function> instanceMethods;
     public final Map<String, ClassLevelMethod> classLevelMethods;
-    public final Optional<java.util.function.Function<PyObject, Integer>> hashMethod;
-    public final Optional<java.util.function.Function<PyObject, String>> strMethod;
+    public final Optional<java.util.function.Function<PyjObject, Integer>> hashMethod;
+    public final Optional<java.util.function.Function<PyjObject, String>> strMethod;
 
-    public static final PyClass CLASS_TYPE =
-        new PyClass(
+    public static final PyjClass CLASS_TYPE =
+        new PyjClass(
             "type",
             (env, params) -> null,
             false,
@@ -1612,8 +1612,8 @@ public class Script {
             Optional.empty(),
             Optional.empty());
 
-    private static final PyClass MODULE_TYPE =
-        new PyClass(
+    private static final PyjClass MODULE_TYPE =
+        new PyjClass(
             "module",
             (env, params) -> null,
             false,
@@ -1622,14 +1622,14 @@ public class Script {
             Optional.empty(),
             Optional.empty());
 
-    public PyClass(
+    public PyjClass(
         String name,
         Function ctor,
         boolean isFrozen,
         Map<String, Function> instanceMethods,
         Map<String, ClassLevelMethod> classLevelMethods,
-        Optional<java.util.function.Function<PyObject, Integer>> hashMethod,
-        Optional<java.util.function.Function<PyObject, String>> strMethod) {
+        Optional<java.util.function.Function<PyjObject, Integer>> hashMethod,
+        Optional<java.util.function.Function<PyjObject, String>> strMethod) {
       super(CLASS_TYPE);
       this.name = name;
       this.ctor = ctor;
@@ -1853,14 +1853,14 @@ public class Script {
       if (context.skipStatement()) {
         return;
       }
-      PyException pyException = null;
+      PyjException pyException = null;
       try {
         context.exec(tryBody);
       } catch (Exception e) {
-        // PyException exists only to prevent all eval/exec/invoke methods from declaring that they
+        // PyjException exists only to prevent all eval/exec/invoke methods from declaring that they
         // throw Exception.  Unwrap the underlying exception here.
         final Object exception;
-        if (e instanceof PyException pe) {
+        if (e instanceof PyjException pe) {
           exception = pe.thrown;
         } else {
           exception = e;
@@ -1869,8 +1869,8 @@ public class Script {
         for (var handler : exceptionHandlers) {
           var exceptionType = handler.exceptionType().map(t -> context.get(t.name()));
           if (exceptionType.isEmpty()
-              || (exceptionType.get() instanceof PyClass declaredType
-                  && exception instanceof PyObject thrownObject
+              || (exceptionType.get() instanceof PyjClass declaredType
+                  && exception instanceof PyjObject thrownObject
                   && thrownObject.type == declaredType)
               || (exceptionType.get() instanceof JavaClass javaClassId
                   && javaClassId.type().isAssignableFrom(exception.getClass()))) {
@@ -1886,7 +1886,7 @@ public class Script {
           }
         }
         if (!handled) {
-          pyException = new PyException(e);
+          pyException = new PyjException(e);
           pyException.setStackTrace(e.getStackTrace()); // Keep original (script) stack trace.
           throw pyException;
         }
@@ -1935,11 +1935,11 @@ public class Script {
    * RuntimeException subclass that allows arbitrary Exception types to be thrown without requiring
    * all eval/exec/invoke methods to declare that they throw Exception.
    */
-  public static class PyException extends RuntimeException {
+  public static class PyjException extends RuntimeException {
     public final Object thrown;
 
-    public PyException(Object thrown) {
-      super(PyObjects.toString(thrown));
+    public PyjException(Object thrown) {
+      super(PyjObjects.toString(thrown));
       this.thrown = thrown;
     }
   }
@@ -1950,7 +1950,7 @@ public class Script {
       if (context.skipStatement()) {
         return;
       }
-      throw new PyException(exception.eval(context));
+      throw new PyjException(exception.eval(context));
     }
 
     @Override
@@ -2044,7 +2044,7 @@ public class Script {
         }
       } else {
         throw new IllegalArgumentException(
-            "Cannot unpack value to tuple: " + PyObjects.toString(rhsValue));
+            "Cannot unpack value to tuple: " + PyjObjects.toString(rhsValue));
       }
     }
 
@@ -2060,7 +2060,7 @@ public class Script {
         return;
       } else if (lhs instanceof FieldAccess lhsFieldAccess) {
         var lhsObject = lhsFieldAccess.object().eval(context);
-        if (lhsObject instanceof PyObject pyObject) {
+        if (lhsObject instanceof PyjObject pyObject) {
           String fieldName = lhsFieldAccess.field().name();
           if (pyObject.type.isFrozen) {
             throw new FrozenInstanceError(
@@ -2136,7 +2136,7 @@ public class Script {
             } else if (lhs instanceof String lhsStr && rhs instanceof String rhsStr) {
               return lhsStr + rhsStr;
             }
-            if (lhs instanceof PyList pyList) {
+            if (lhs instanceof PyjList pyList) {
               pyList.__iadd__(rhs);
               return null; // Return value unused because op has already been applied to the list.
             }
@@ -2208,7 +2208,7 @@ public class Script {
         }
       } else if (lhs instanceof FieldAccess lhsFieldAccess) {
         var lhsObject = lhsFieldAccess.object().eval(context);
-        if (lhsObject instanceof PyObject pyObject) {
+        if (lhsObject instanceof PyjObject pyObject) {
           String fieldName = lhsFieldAccess.field().name();
           if (pyObject.type.isFrozen) {
             throw new FrozenInstanceError(
@@ -2357,7 +2357,7 @@ public class Script {
 
     @Override
     public String toString() {
-      return PyObjects.toRepr(value);
+      return PyjObjects.toRepr(value);
     }
   }
 
@@ -2695,15 +2695,15 @@ public class Script {
           } else if (lhsValue instanceof String lhsString && rhsValue instanceof String rhsString) {
             return lhsString + rhsString;
           }
-          if (lhsValue instanceof PyList pyList) {
+          if (lhsValue instanceof PyjList pyList) {
             lhsValue = pyList.getJavaList();
           }
-          if (rhsValue instanceof PyList pyList) {
+          if (rhsValue instanceof PyjList pyList) {
             rhsValue = pyList.getJavaList();
           }
           if (lhsValue instanceof List lhsList && rhsValue instanceof List rhsList) {
             @SuppressWarnings("unchecked")
-            var newList = new PyList(new ArrayList<Object>(lhsList));
+            var newList = new PyjList(new ArrayList<Object>(lhsList));
             newList.__iadd__(rhsList);
             return newList;
           }
@@ -2738,7 +2738,7 @@ public class Script {
         case MOD:
           {
             if (lhsValue instanceof String lhsString) {
-              if (rhsValue instanceof PyTuple tuple) {
+              if (rhsValue instanceof PyjTuple tuple) {
                 return String.format(
                     lhsString, StreamSupport.stream(tuple.spliterator(), false).toArray());
               } else {
@@ -3032,7 +3032,7 @@ public class Script {
 
       // Translate Java string methods to Pyjinn string methods.
       if (clazz == String.class) {
-        var strMethod = PyStr.translateStringMethod(isStaticMethod, methodName, paramTypes);
+        var strMethod = PyjString.translateStringMethod(isStaticMethod, methodName, paramTypes);
         // TODO(maxuser): When strMethod is empty, stop falling back to String methods below.
         if (strMethod.isPresent()) {
           return strMethod;
@@ -3376,7 +3376,7 @@ public class Script {
                       v ->
                           v == null
                               ? "null"
-                              : "(%s) %s".formatted(v.getClass().getName(), PyObjects.toRepr(v)))
+                              : "(%s) %s".formatted(v.getClass().getName(), PyjObjects.toRepr(v)))
                   .collect(joining(", ")));
 
       String methodWithPrettyNames =
@@ -3392,7 +3392,7 @@ public class Script {
                               : "(%s) %s"
                                   .formatted(
                                       symbolCache.getPrettyClassName(v.getClass().getName()),
-                                      PyObjects.toRepr(v)))
+                                      PyjObjects.toRepr(v)))
                   .collect(joining(", ")));
 
       if (!method.equals(methodWithPrettyNames)) {
@@ -3408,7 +3408,7 @@ public class Script {
     @Override
     public Object eval(Context context) {
       var localContext = context.createLocalContext();
-      var list = new PyList();
+      var list = new PyjList();
       // TODO(maxuser): Share portions of impl with ForBlock::exec.
       final Identifier loopVar;
       final TupleLiteral loopVars;
@@ -3455,7 +3455,7 @@ public class Script {
   public record TupleLiteral(List<Expression> elements) implements Expression {
     @Override
     public Object eval(Context context) {
-      return new PyTuple(elements.stream().map(e -> e.eval(context)).toArray());
+      return new PyjTuple(elements.stream().map(e -> e.eval(context)).toArray());
     }
 
     @Override
@@ -3470,7 +3470,7 @@ public class Script {
     @Override
     public Object eval(Context context) {
       // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
-      return new PyList(elements.stream().map(e -> e.eval(context)).collect(toList()));
+      return new PyjList(elements.stream().map(e -> e.eval(context)).collect(toList()));
     }
 
     @Override
@@ -3503,14 +3503,14 @@ public class Script {
     void __delitem__(Object key);
   }
 
-  public static class PyList implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
+  public static class PyjList implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
     private final List<Object> list;
 
-    public PyList() {
+    public PyjList() {
       list = new ArrayList<>();
     }
 
-    public PyList(List<Object> list) {
+    public PyjList(List<Object> list) {
       this.list = list;
     }
 
@@ -3521,7 +3521,7 @@ public class Script {
 
     @Override
     public boolean equals(Object value) {
-      return value instanceof PyList pyList && this.list.equals(pyList.list);
+      return value instanceof PyjList pyList && this.list.equals(pyList.list);
     }
 
     @Override
@@ -3531,12 +3531,12 @@ public class Script {
 
     @Override
     public String toString() {
-      return list.stream().map(PyObjects::toString).collect(joining(", ", "[", "]"));
+      return list.stream().map(PyjObjects::toString).collect(joining(", ", "[", "]"));
     }
 
-    public PyList __add__(Object value) {
-      PyList newList = copy();
-      if (value instanceof PyList pyList) {
+    public PyjList __add__(Object value) {
+      PyjList newList = copy();
+      if (value instanceof PyjList pyList) {
         newList.list.addAll(pyList.list);
       } else if (value instanceof List<?> list) {
         newList.list.addAll(list);
@@ -3568,7 +3568,7 @@ public class Script {
     }
 
     public void __iadd__(Object value) {
-      if (value instanceof PyList pyList) {
+      if (value instanceof PyjList pyList) {
         this.list.addAll(pyList.list);
       } else if (value instanceof List<?> list) {
         this.list.addAll(list);
@@ -3592,7 +3592,7 @@ public class Script {
       } else if (key instanceof SliceValue sliceValue) {
         var slice = sliceValue.resolveIndices(list.size());
         // TODO(maxuser): SliceValue.step not supported.
-        return new PyList(list.subList(slice.lower(), slice.upper()));
+        return new PyjList(list.subList(slice.lower(), slice.upper()));
       }
       throw new IllegalArgumentException(
           String.format(
@@ -3621,8 +3621,8 @@ public class Script {
       list.clear();
     }
 
-    public PyList copy() {
-      return new PyList(new ArrayList<>(list));
+    public PyjList copy() {
+      return new PyjList(new ArrayList<>(list));
     }
 
     public long count(Object value) {
@@ -3670,10 +3670,10 @@ public class Script {
 
   // TODO(maxuser): Enforce immutability of tuples despite getJavaArray() returning array with
   // mutable elements.
-  public static class PyTuple implements ItemGetter, ItemContainer {
+  public static class PyjTuple implements ItemGetter, ItemContainer {
     private final Object[] array;
 
-    public PyTuple(Object[] array) {
+    public PyjTuple(Object[] array) {
       this.array = array;
     }
 
@@ -3684,7 +3684,7 @@ public class Script {
 
     @Override
     public boolean equals(Object value) {
-      return value instanceof PyTuple pyTuple && Arrays.equals(this.array, pyTuple.array);
+      return value instanceof PyjTuple pyTuple && Arrays.equals(this.array, pyTuple.array);
     }
 
     @Override
@@ -3700,13 +3700,13 @@ public class Script {
     @Override
     public String toString() {
       return array.length == 1
-          ? String.format("(%s,)", PyObjects.toString(array[0]))
-          : Arrays.stream(array).map(PyObjects::toString).collect(joining(", ", "(", ")"));
+          ? String.format("(%s,)", PyjObjects.toString(array[0]))
+          : Arrays.stream(array).map(PyjObjects::toString).collect(joining(", ", "(", ")"));
     }
 
-    public PyTuple __add__(Object value) {
-      if (value instanceof PyTuple tuple) {
-        return new PyTuple(
+    public PyjTuple __add__(Object value) {
+      if (value instanceof PyjTuple tuple) {
+        return new PyjTuple(
             Stream.concat(Arrays.stream(array), Arrays.stream(tuple.array)).toArray());
       }
       throw new IllegalArgumentException(
@@ -3739,7 +3739,7 @@ public class Script {
       } else if (key instanceof SliceValue sliceValue) {
         var slice = sliceValue.resolveIndices(array.length);
         // TODO(maxuser): SliceValue.step not supported.
-        return new PyTuple(Arrays.copyOfRange(array, slice.lower(), slice.upper()));
+        return new PyjTuple(Arrays.copyOfRange(array, slice.lower(), slice.upper()));
       }
       throw new IllegalArgumentException(
           String.format(
@@ -3777,7 +3777,7 @@ public class Script {
       for (int i = 0; i < keys.size(); ++i) {
         map.put(keys.get(i).eval(context), values.get(i).eval(context));
       }
-      return new PyDict(map);
+      return new PyjDict(map);
     }
 
     @Override
@@ -3847,7 +3847,7 @@ public class Script {
   public record FormattedString(List<Expression> values) implements Expression {
     @Override
     public Object eval(Context context) {
-      return values.stream().map(v -> PyObjects.toString(v.eval(context))).collect(joining());
+      return values.stream().map(v -> PyjObjects.toString(v.eval(context))).collect(joining());
     }
 
     @Override
@@ -3865,15 +3865,15 @@ public class Script {
     }
   }
 
-  public static class PyDict implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
+  public static class PyjDict implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
     private static final Object NOT_FOUND = new Object();
     private final Map<Object, Object> map;
 
-    public PyDict() {
+    public PyjDict() {
       map = new HashMap<>();
     }
 
-    public PyDict(Map<Object, Object> map) {
+    public PyjDict(Map<Object, Object> map) {
       this.map = map;
     }
 
@@ -3884,7 +3884,7 @@ public class Script {
 
     @Override
     public boolean equals(Object value) {
-      return value instanceof PyDict pyDict && this.map.equals(pyDict.map);
+      return value instanceof PyjDict pyDict && this.map.equals(pyDict.map);
     }
 
     @Override
@@ -3892,8 +3892,8 @@ public class Script {
       return map.keySet().iterator();
     }
 
-    public Iterable<PyTuple> items() {
-      return map.entrySet().stream().map(e -> new PyTuple(new Object[] {e.getKey(), e.getValue()}))
+    public Iterable<PyjTuple> items() {
+      return map.entrySet().stream().map(e -> new PyjTuple(new Object[] {e.getKey(), e.getValue()}))
           ::iterator;
     }
 
@@ -3935,7 +3935,7 @@ public class Script {
     public Object __getitem__(Object key) {
       var value = map.getOrDefault(key, NOT_FOUND);
       if (value == NOT_FOUND) {
-        throw new NoSuchElementException("Key not found: " + PyObjects.toString(key));
+        throw new NoSuchElementException("Key not found: " + PyjObjects.toString(key));
       }
       return value;
     }
@@ -3963,9 +3963,9 @@ public class Script {
         if (!firstEntry) {
           out.append(", ");
         }
-        out.append(PyObjects.toString(entry.getKey()));
+        out.append(PyjObjects.toString(entry.getKey()));
         out.append(": ");
-        out.append(PyObjects.toString(entry.getValue()));
+        out.append(PyjObjects.toString(entry.getValue()));
         firstEntry = false;
       }
       out.append("}");
@@ -4120,7 +4120,7 @@ public class Script {
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
-      return PyObjects.toString(params[0]);
+      return PyjObjects.toString(params[0]);
     }
   }
 
@@ -4202,30 +4202,30 @@ public class Script {
 
   public static class TupleClass extends JavaClass {
     public TupleClass() {
-      super(PyTuple.class);
+      super(PyjTuple.class);
     }
 
     @Override
     public Object call(Environment env, Object... params) {
       expectMaxParams(params, 1);
       if (params.length == 0) {
-        return new PyTuple(new Object[] {});
+        return new PyjTuple(new Object[] {});
       } else {
         Iterable<?> iterable = getIterable(params[0]);
-        return new PyTuple(StreamSupport.stream(iterable.spliterator(), false).toArray());
+        return new PyjTuple(StreamSupport.stream(iterable.spliterator(), false).toArray());
       }
     }
   }
 
   public static class DictClass extends JavaClass {
     public DictClass() {
-      super(PyDict.class);
+      super(PyjDict.class);
     }
 
     @Override
     public Object call(Environment env, Object... params) {
       if (params.length == 0) {
-        return new PyDict();
+        return new PyjDict();
       }
 
       if (params.length != 1) {
@@ -4234,18 +4234,18 @@ public class Script {
                 .formatted(params.length));
       }
 
-      if (params[0] instanceof PyDict dict) {
-        return new PyDict(new HashMap<>(dict.getJavaMap()));
+      if (params[0] instanceof PyjDict dict) {
+        return new PyjDict(new HashMap<>(dict.getJavaMap()));
       }
 
       if (params[0] instanceof KeywordArgs kwargs) {
-        var dict = new PyDict();
+        var dict = new PyjDict();
         dict.getJavaMap().putAll(kwargs);
         return dict;
       }
 
       if (params[0] instanceof Iterable<?> iterableElements) {
-        var dict = new PyDict();
+        var dict = new PyjDict();
         int i = -1;
         for (var element : iterableElements) {
           ++i;
@@ -4275,20 +4275,20 @@ public class Script {
 
   public static class ListClass extends JavaClass {
     public ListClass() {
-      super(PyList.class);
+      super(PyjList.class);
     }
 
     @Override
     public Object call(Environment env, Object... params) {
       expectMaxParams(params, 1);
       if (params.length == 0) {
-        return new PyList();
+        return new PyjList();
       } else {
         @SuppressWarnings("unchecked")
         Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
         // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable
         // List.
-        return new PyList(StreamSupport.stream(iterable.spliterator(), false).collect(toList()));
+        return new PyjList(StreamSupport.stream(iterable.spliterator(), false).collect(toList()));
       }
     }
   }
@@ -4300,7 +4300,7 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 0);
       var globals = (GlobalContext) env;
-      return new PyList(globals.getCallStack().stream().map(c -> (Object) c.toString()).toList());
+      return new PyjList(globals.getCallStack().stream().map(c -> (Object) c.toString()).toList());
     }
   }
 
@@ -4337,7 +4337,7 @@ public class Script {
 
       if (out != null) {
         out.accept(
-            Arrays.stream(params, 0, numParams).map(PyObjects::toString).collect(joining(" ")));
+            Arrays.stream(params, 0, numParams).map(PyjObjects::toString).collect(joining(" ")));
       }
       return null;
     }
@@ -4352,8 +4352,8 @@ public class Script {
       var value = params[0];
       if (value instanceof JavaClass classId) {
         return classId.type();
-      } else if (value instanceof PyObject pyObject) {
-        return pyObject == PyClass.CLASS_TYPE ? PyClass.CLASS_TYPE : pyObject.type;
+      } else if (value instanceof PyjObject pyObject) {
+        return pyObject == PyjClass.CLASS_TYPE ? PyjClass.CLASS_TYPE : pyObject.type;
       } else {
         var type = value.getClass();
         return JavaClass.of(type);
@@ -4417,7 +4417,7 @@ public class Script {
     }
   }
 
-  public static Object[] getJavaArray(PyTuple pyTuple) {
+  public static Object[] getJavaArray(PyjTuple pyTuple) {
     return pyTuple.getJavaArray();
   }
 
@@ -4428,7 +4428,7 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectMinParams(params, 1);
       expectMaxParams(params, 2);
-      if (params[0] instanceof PyTuple pyTuple) {
+      if (params[0] instanceof PyjTuple pyTuple) {
         final Class<?> clazz;
         if (params.length == 2) {
           if (params[1] instanceof Class<?> classParam) {
@@ -4491,13 +4491,13 @@ public class Script {
         }
       } else {
         throw new IllegalArgumentException(
-            "JavaArray() requires a tuple object (PyTuple) but got '%s'"
+            "JavaArray() requires a tuple object (PyjTuple) but got '%s'"
                 .formatted(params[0].getClass().getName()));
       }
     }
   }
 
-  public static List<Object> getJavaList(PyList pyList) {
+  public static List<Object> getJavaList(PyjList pyList) {
     return pyList.getJavaList();
   }
 
@@ -4508,11 +4508,11 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var value = params[0];
-      if (value instanceof PyList pyList) {
+      if (value instanceof PyjList pyList) {
         return pyList.getJavaList();
       } else {
         throw new IllegalArgumentException(
-            "JavaList() requires a list object (PyList) but got '%s'"
+            "JavaList() requires a list object (PyjList) but got '%s'"
                 .formatted(value.getClass().getName()));
       }
     }
@@ -4525,11 +4525,11 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       var value = params[0];
-      if (value instanceof PyDict pyDict) {
+      if (value instanceof PyjDict pyDict) {
         return pyDict.getJavaMap();
       } else {
         throw new IllegalArgumentException(
-            "JavaMap() requires a dict object (PyDict) but got '%s'"
+            "JavaMap() requires a dict object (PyjDict) but got '%s'"
                 .formatted(value.getClass().getName()));
       }
     }
@@ -4584,19 +4584,19 @@ public class Script {
   }
 
   /**
-   * Promotes {@code object} to {@code PyTuple} if it's an array, or else returns {@code object}.
+   * Promotes {@code object} to {@code PyjTuple} if it's an array, or else returns {@code object}.
    */
   public static Object promoteArrayToTuple(Object object) {
     if (object.getClass().isArray()) {
       if (object instanceof Object[] objectArray) {
-        return new PyTuple(objectArray);
+        return new PyjTuple(objectArray);
       } else {
         int length = Array.getLength(object);
         Object[] array = new Object[length];
         for (int i = 0; i < length; i++) {
           array[i] = Array.get(object, i);
         }
-        return new PyTuple(array);
+        return new PyjTuple(array);
       }
     } else {
       return object;
@@ -4759,7 +4759,7 @@ public class Script {
         for (var kwarg : kwargs) {
           if (kwarg.name() == null) {
             var packedKwarg = kwarg.value().eval(context);
-            if (packedKwarg instanceof PyDict dict) {
+            if (packedKwarg instanceof PyjDict dict) {
               for (var entry : dict.getJavaMap().entrySet()) {
                 if (entry.getKey() instanceof String name) {
                   kwargsMap.put(name, entry.getValue());
@@ -4860,7 +4860,7 @@ public class Script {
     }
   }
 
-  public static class EnumerateIterable implements Iterable<PyTuple> {
+  public static class EnumerateIterable implements Iterable<PyjTuple> {
     private final Iterable<?> iterable;
     private final int start;
 
@@ -4869,9 +4869,9 @@ public class Script {
       this.start = start;
     }
 
-    public Iterator<PyTuple> iterator() {
+    public Iterator<PyjTuple> iterator() {
       var iter = iterable.iterator();
-      return new Iterator<PyTuple>() {
+      return new Iterator<PyjTuple>() {
         private int pos = start;
 
         @Override
@@ -4880,9 +4880,9 @@ public class Script {
         }
 
         @Override
-        public PyTuple next() {
+        public PyjTuple next() {
           var next = iter.next();
-          return new PyTuple(new Object[] {pos++, next});
+          return new PyjTuple(new Object[] {pos++, next});
         }
       };
     }
@@ -4907,7 +4907,7 @@ public class Script {
     @Override
     public Object call(Environment env, Object... params) {
       Object[] pyObjectMethodResult;
-      if (object instanceof PyObject pyObject
+      if (object instanceof PyjObject pyObject
           && (pyObjectMethodResult = pyObject.callMethod(env, methodName, params)).length == 1) {
         return pyObjectMethodResult[0];
       }
@@ -4965,7 +4965,7 @@ public class Script {
     }
   }
 
-  public class PyStr {
+  public class PyjString {
     public static Optional<MethodInvoker> translateStringMethod(
         boolean isStaticMethod, String methodName, Class<?>[] paramTypes) {
       if (isStaticMethod) {
@@ -5291,7 +5291,7 @@ public class Script {
           .collect(joining(", "));
     }
 
-    private PyStr() {}
+    private PyjString() {}
   }
 
   public static class InterfaceProxy implements InvocationHandler {
@@ -5388,7 +5388,7 @@ public class Script {
     @Override
     public Object eval(Context context) {
       var objectValue = object.eval(context);
-      if (objectValue instanceof PyObject pyObject) {
+      if (objectValue instanceof PyjObject pyObject) {
         if (field.name().equals("__dict__")) {
           return pyObject.__dict__;
         } else if (pyObject.__dict__.__contains__(field.name())) {
@@ -5532,7 +5532,7 @@ public class Script {
 
     void del(String name);
 
-    PyDict vars();
+    PyjDict vars();
 
     List<Statement> globalStatements();
 
@@ -5579,14 +5579,14 @@ public class Script {
       context.set("abs", AbsFunction.INSTANCE);
       context.set("bool", JavaClass.of(Boolean.class));
       context.set("chr", ChrFunction.INSTANCE);
-      context.set("dict", JavaClass.of(PyDict.class));
+      context.set("dict", JavaClass.of(PyjDict.class));
       context.set("enumerate", EnumerateFunction.INSTANCE);
       context.set("float", JavaClass.of(Float.class));
       context.set("globals", GlobalsFunction.INSTANCE);
       context.set("hex", HexFunction.INSTANCE);
       context.set("int", JavaClass.of(Integer.class));
       context.set("len", LenFunction.INSTANCE);
-      context.set("list", JavaClass.of(PyList.class));
+      context.set("list", JavaClass.of(PyjList.class));
       context.set("math", JavaClass.of(math.class));
       context.set("max", MaxFunction.INSTANCE);
       context.set("min", MinFunction.INSTANCE);
@@ -5596,7 +5596,7 @@ public class Script {
       context.set("round", RoundFunction.INSTANCE);
       context.set("str", JavaClass.of(String.class));
       context.set("sum", SumFunction.INSTANCE);
-      context.set("tuple", JavaClass.of(PyTuple.class));
+      context.set("tuple", JavaClass.of(PyjTuple.class));
       context.set("type", TypeFunction.INSTANCE);
       return context;
     }
@@ -5606,7 +5606,7 @@ public class Script {
     }
 
     @Override
-    public PyDict vars() {
+    public PyjDict vars() {
       return vars;
     }
 
@@ -5670,7 +5670,7 @@ public class Script {
     private boolean continuingLoop = false;
 
     protected GlobalContext globals;
-    protected final PyDict vars = new PyDict();
+    protected final PyjDict vars = new PyjDict();
 
     // Default constructor is used only for GlobalContext subclass.
     private Context() {

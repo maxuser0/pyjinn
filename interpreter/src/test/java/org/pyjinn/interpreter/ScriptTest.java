@@ -6107,7 +6107,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(101, 2, 3, "bar")), output);
+    assertEquals(new Script.PyjList(List.of(101, 2, 3, "bar")), output);
   }
 
   @Test
@@ -6129,7 +6129,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(0, 1, 2)), output);
+    assertEquals(new Script.PyjList(List.of(0, 1, 2)), output);
   }
 
   @Test
@@ -6140,7 +6140,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(4, 6, 8)), output);
+    assertEquals(new Script.PyjList(List.of(4, 6, 8)), output);
   }
 
   @Test
@@ -6151,7 +6151,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(0, 1)), output);
+    assertEquals(new Script.PyjList(List.of(0, 1)), output);
   }
 
   @Test
@@ -6162,7 +6162,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of("Integer", "Long", "Float", "Double")), output);
+    assertEquals(new Script.PyjList(List.of("Integer", "Long", "Float", "Double")), output);
   }
 
   @Test
@@ -6173,7 +6173,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(0, 1, 2)), output);
+    assertEquals(new Script.PyjList(List.of(0, 1, 2)), output);
   }
 
   @Test
@@ -6184,7 +6184,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(1)), output);
+    assertEquals(new Script.PyjList(List.of(1)), output);
   }
 
   @Test
@@ -6195,7 +6195,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(true, true, false)), output);
+    assertEquals(new Script.PyjList(List.of(true, true, false)), output);
   }
 
   @Test
@@ -6206,7 +6206,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of("hello", "world", "!")), output);
+    assertEquals(new Script.PyjList(List.of("hello", "world", "!")), output);
   }
 
   @Test
@@ -6217,7 +6217,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyDict(Map.of(1, "one", 2, "two")), output);
+    assertEquals(new Script.PyjDict(Map.of(1, "one", 2, "two")), output);
   }
 
   @Test
@@ -6228,7 +6228,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyTuple(new Object[] {2, 1}), output);
+    assertEquals(new Script.PyjTuple(new Object[] {2, 1}), output);
   }
 
   @Test
@@ -6239,7 +6239,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyTuple(new Object[] {1, 2}), output);
+    assertEquals(new Script.PyjTuple(new Object[] {1, 2}), output);
   }
 
   @Test
@@ -6250,7 +6250,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyList(List.of(10, 20)), output);
+    assertEquals(new Script.PyjList(List.of(10, 20)), output);
   }
 
   @Test
@@ -6283,8 +6283,8 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertTrue(output instanceof Script.PyList);
-    var list = ((Script.PyList) output).getJavaList();
+    assertTrue(output instanceof Script.PyjList);
+    var list = ((Script.PyjList) output).getJavaList();
     assertEquals(5, list.size());
     assertEquals(22. / 7., ((Number) list.get(0)).doubleValue(), 0.000000001); // 22 / 7
     assertEquals(256, list.get(1)); // 2 ** 8
@@ -6324,7 +6324,7 @@ public class ScriptTest {
 
     var output = func.call(script.mainModule().globals());
     assertEquals(
-        new Script.PyList(
+        new Script.PyjList(
             List.of(
                 "Handled exception: java.lang.IllegalArgumentException: Thrown from Python.",
                 "Finally!")),
@@ -6564,8 +6564,8 @@ public class ScriptTest {
 
     var kwargs = env.get("kwargs");
     assertNotNull(kwargs);
-    assertEquals(Script.PyDict.class, kwargs.getClass());
-    var dict = (Script.PyDict) kwargs;
+    assertEquals(Script.PyjDict.class, kwargs.getClass());
+    var dict = (Script.PyjDict) kwargs;
     assertEquals(3, dict.__len__());
     assertEquals(0, dict.get("x"));
     assertEquals(1, dict.get("y"));
@@ -6595,8 +6595,8 @@ public class ScriptTest {
 
     var kwargs = env.get("kwargs");
     assertNotNull(kwargs);
-    assertEquals(Script.PyDict.class, kwargs.getClass());
-    var dict = (Script.PyDict) kwargs;
+    assertEquals(Script.PyjDict.class, kwargs.getClass());
+    var dict = (Script.PyjDict) kwargs;
     assertEquals(1, dict.__len__());
     assertEquals(2, dict.get("z"));
   }
@@ -6606,8 +6606,8 @@ public class ScriptTest {
     env = execute("output = dict()");
     var output = env.get("output");
     assertNotNull(output);
-    assertEquals(Script.PyDict.class, output.getClass());
-    var dict = (Script.PyDict) output;
+    assertEquals(Script.PyjDict.class, output.getClass());
+    var dict = (Script.PyjDict) output;
     assertEquals(0, dict.__len__());
   }
 
@@ -6616,8 +6616,8 @@ public class ScriptTest {
     env = execute("output = dict(x=1, y=2)");
     var output = env.get("output");
     assertNotNull(output);
-    assertEquals(Script.PyDict.class, output.getClass());
-    var dict = (Script.PyDict) output;
+    assertEquals(Script.PyjDict.class, output.getClass());
+    var dict = (Script.PyjDict) output;
     assertEquals(2, dict.__len__());
     assertEquals(1, dict.get("x"));
     assertEquals(2, dict.get("y"));
@@ -6628,8 +6628,8 @@ public class ScriptTest {
     env = execute("output = dict([(1, 2), (3, 4)])");
     var output = env.get("output");
     assertNotNull(output);
-    assertEquals(Script.PyDict.class, output.getClass());
-    var dict = (Script.PyDict) output;
+    assertEquals(Script.PyjDict.class, output.getClass());
+    var dict = (Script.PyjDict) output;
     assertEquals(2, dict.__len__());
     assertEquals(2, dict.get(1));
     assertEquals(4, dict.get(3));
@@ -6646,13 +6646,13 @@ public class ScriptTest {
             """);
     var d1 = env.get("d1");
     assertNotNull(d1);
-    assertEquals(Script.PyDict.class, d1.getClass());
-    var dict1 = (Script.PyDict) d1;
+    assertEquals(Script.PyjDict.class, d1.getClass());
+    var dict1 = (Script.PyjDict) d1;
 
     var d2 = env.get("d2");
     assertNotNull(d2);
-    assertEquals(Script.PyDict.class, d2.getClass());
-    var dict2 = (Script.PyDict) d2;
+    assertEquals(Script.PyjDict.class, d2.getClass());
+    var dict2 = (Script.PyjDict) d2;
 
     assertEquals(2, dict1.__len__());
     assertEquals(3, dict2.__len__());
@@ -6716,9 +6716,9 @@ public class ScriptTest {
     script.exit();
     assertEquals(1, array.length);
     assertNotNull(array[0]);
-    assertEquals(Script.PyDict.class, array[0].getClass());
+    assertEquals(Script.PyjDict.class, array[0].getClass());
 
-    var dict = (Script.PyDict) array[0];
+    var dict = (Script.PyjDict) array[0];
     assertEquals(2, dict.__len__());
     assertEquals("foo", dict.get("x"));
     assertEquals("bar", dict.get("y"));
@@ -6744,15 +6744,15 @@ public class ScriptTest {
     assertEquals(2, array.length);
 
     assertNotNull(array[0]);
-    assertEquals(Script.PyTuple.class, array[0].getClass());
-    var args = (Script.PyTuple) array[0];
+    assertEquals(Script.PyjTuple.class, array[0].getClass());
+    var args = (Script.PyjTuple) array[0];
     assertEquals(2, args.__len__());
     assertEquals(99, args.__getitem__(0));
     assertEquals(100, args.__getitem__(1));
 
     assertNotNull(array[1]);
-    assertEquals(Script.PyDict.class, array[1].getClass());
-    var kwargs = (Script.PyDict) array[1];
+    assertEquals(Script.PyjDict.class, array[1].getClass());
+    var kwargs = (Script.PyjDict) array[1];
     assertEquals(2, kwargs.__len__());
     assertEquals("foo", kwargs.get("x"));
     assertEquals("bar", kwargs.get("y"));
@@ -6806,10 +6806,10 @@ public class ScriptTest {
         y = type(x([1, 2, 3]))
         z = type(tuple([1, 2, 3]))
         """);
-    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "x").type());
-    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "y").type());
-    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "z").type());
-    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "tuple").type());
+    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "x").type());
+    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "y").type());
+    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "z").type());
+    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "tuple").type());
   }
 
   @Test
@@ -6820,10 +6820,10 @@ public class ScriptTest {
         y = type(x((1, 2, 3)))
         z = type(list((1, 2, 3)))
         """);
-    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "x").type());
-    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "y").type());
-    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "z").type());
-    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "list").type());
+    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "x").type());
+    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "y").type());
+    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "z").type());
+    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "list").type());
   }
 
   @Test
@@ -6834,10 +6834,10 @@ public class ScriptTest {
         y = type(x([[1, 2], [3, 4]]))
         z = type(dict([[1, 2], [3, 4]]))
         """);
-    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "x").type());
-    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "y").type());
-    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "z").type());
-    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "dict").type());
+    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "x").type());
+    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "y").type());
+    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "z").type());
+    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "dict").type());
   }
 
   private <T> T getVariable(Class<T> clazz, String variableName) {
