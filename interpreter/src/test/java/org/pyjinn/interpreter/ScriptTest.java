@@ -6798,10 +6798,52 @@ public class ScriptTest {
     assertEquals(3, getVariable(Integer.class, "output"));
   }
 
+  @Test
+  public void tupleConstructor() throws Exception {
+    execute(
+        """
+        x = type((1, 2, 3))
+        y = type(x([1, 2, 3]))
+        z = type(tuple([1, 2, 3]))
+        """);
+    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "x").type());
+    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "y").type());
+    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "z").type());
+    assertEquals(Script.PyTuple.class, getVariable(JavaClass.class, "tuple").type());
+  }
+
+  @Test
+  public void listConstructor() throws Exception {
+    execute(
+        """
+        x = type([1, 2, 3])
+        y = type(x((1, 2, 3)))
+        z = type(list((1, 2, 3)))
+        """);
+    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "x").type());
+    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "y").type());
+    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "z").type());
+    assertEquals(Script.PyList.class, getVariable(JavaClass.class, "list").type());
+  }
+
+  @Test
+  public void dictConstructor() throws Exception {
+    execute(
+        """
+        x = type({1: 2, 3: 4})
+        y = type(x([[1, 2], [3, 4]]))
+        z = type(dict([[1, 2], [3, 4]]))
+        """);
+    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "x").type());
+    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "y").type());
+    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "z").type());
+    assertEquals(Script.PyDict.class, getVariable(JavaClass.class, "dict").type());
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);
-    assertTrue(clazz.isAssignableFrom(object.getClass()));
+    assertInstanceOf(clazz, object);
     return clazz.cast(object);
   }
 

@@ -52,6 +52,18 @@ import org.pyjinn.parser.PyjinnParser;
 
 public class Script {
 
+  static {
+    // Install JavaClass subclasses with custom constructors. These need to be installed before
+    // JavaClass.of(...) is called with the associated types, e.g. String.class, Integer.class, etc.
+    JavaClass.install(new BoolClass());
+    JavaClass.install(new DictClass());
+    JavaClass.install(new FloatClass());
+    JavaClass.install(new IntClass());
+    JavaClass.install(new ListClass());
+    JavaClass.install(new StrClass());
+    JavaClass.install(new TupleClass());
+  }
+
   private record ClassMethodName(String type, String method) {}
 
   private record CallSite(ClassMethodName classMethodName, String filename, int lineno) {
@@ -160,16 +172,6 @@ public class Script {
       versionInfo = VersionInfo.load();
     }
     return versionInfo;
-  }
-
-  // javaClasses is static so that the map, and therefore instances of JavaClass, are shared across
-  // Script instances. If this weren't the case then JavaClass("X") referenced in one script would
-  // compare unequal with JavaClass("X") from another script, which would lead to subtle bugs when
-  // objects are shared across scripts in the same process.
-  private static ConcurrentHashMap<Class<?>, JavaClass> javaClasses = new ConcurrentHashMap<>();
-
-  static JavaClass getJavaClass(Class<?> type) {
-    return javaClasses.computeIfAbsent(type, JavaClass::new);
   }
 
   public interface ModuleHandler {
@@ -3993,29 +3995,7 @@ public class Script {
       } catch (ClassNotFoundException e) {
         throw new IllegalArgumentException(e);
       }
-      return getJavaClass(type);
-    }
-  }
-
-  public record JavaClass(Class<?> type) implements Function {
-    @Override
-    public String toString() {
-      return String.format("JavaClass(\"%s\")", type.getName());
-    }
-
-    @Override
-    public Object call(Environment env, Object... params) {
-      Function function;
-      if ((function = InterfaceProxy.getFunctionPassedToInterface(type, params)) != null) {
-        return InterfaceProxy.promoteFunctionToJavaInterface(env, type, function);
-      }
-
-      ConstructorInvoker ctor = env.findConstructor(type(), params);
-      try {
-        return ctor.newInstance(env, params);
-      } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-        throw new RuntimeException(e);
-      }
+      return JavaClass.of(type);
     }
   }
 
@@ -4097,11 +4077,14 @@ public class Script {
     }
   }
 
-  public static class IntFunction implements Function {
-    public static final IntFunction INSTANCE = new IntFunction();
+  public static class IntClass extends JavaClass {
+    public IntClass() {
+      super(Integer.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
+      // TODO(maxuser): Support optional 2nd arg `base` that defaults to 10.
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof String string) {
@@ -4112,8 +4095,10 @@ public class Script {
     }
   }
 
-  public static class FloatFunction implements Function {
-    public static final FloatFunction INSTANCE = new FloatFunction();
+  public static class FloatClass extends JavaClass {
+    public FloatClass() {
+      super(Float.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4127,8 +4112,10 @@ public class Script {
     }
   }
 
-  public static class StrFunction implements Function {
-    public static final StrFunction INSTANCE = new StrFunction();
+  public static class StrClass extends JavaClass {
+    public StrClass() {
+      super(String.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4176,8 +4163,10 @@ public class Script {
     }
   }
 
-  public static class BoolFunction implements Function {
-    public static final BoolFunction INSTANCE = new BoolFunction();
+  public static class BoolClass extends JavaClass {
+    public BoolClass() {
+      super(Boolean.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4211,8 +4200,10 @@ public class Script {
     }
   }
 
-  public static class TupleFunction implements Function {
-    public static final TupleFunction INSTANCE = new TupleFunction();
+  public static class TupleClass extends JavaClass {
+    public TupleClass() {
+      super(PyTuple.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4226,8 +4217,10 @@ public class Script {
     }
   }
 
-  public static class DictFunction implements Function {
-    public static final DictFunction INSTANCE = new DictFunction();
+  public static class DictClass extends JavaClass {
+    public DictClass() {
+      super(PyDict.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4280,8 +4273,10 @@ public class Script {
     }
   }
 
-  public static class ListFunction implements Function {
-    public static final ListFunction INSTANCE = new ListFunction();
+  public static class ListClass extends JavaClass {
+    public ListClass() {
+      super(PyList.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4361,7 +4356,7 @@ public class Script {
         return pyObject == PyClass.CLASS_TYPE ? PyClass.CLASS_TYPE : pyObject.type;
       } else {
         var type = value.getClass();
-        return getJavaClass(type);
+        return JavaClass.of(type);
       }
     }
   }
@@ -4924,7 +4919,7 @@ public class Script {
         clazz = classId.type();
         var memberAccessor = FieldAccess.getMember(object, methodName, symbolCache);
         if (memberAccessor instanceof SymbolCache.NestedClassAccessor classAccessor) {
-          return getJavaClass(classAccessor.nestedClass()).call(env, params);
+          return JavaClass.of(classAccessor.nestedClass()).call(env, params);
         }
       } else {
         if (object == null) {
@@ -5567,14 +5562,12 @@ public class Script {
       return script.callStack.get();
     }
 
-    private static JavaClass MATH_CLASS = getJavaClass(math.class);
-
     public static GlobalContext create(String moduleFilename, SymbolCache symbolCache) {
       var context = new GlobalContext(moduleFilename, symbolCache);
 
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
-      context.set("Exception", new JavaClass(Exception.class));
+      context.set("Exception", JavaClass.of(Exception.class));
       context.set("JavaArray", JavaArrayFunction.INSTANCE);
       context.set("JavaList", JavaListFunction.INSTANCE);
       context.set("JavaMap", JavaMapFunction.INSTANCE);
@@ -5584,26 +5577,26 @@ public class Script {
       context.set("__exit__", ExitFunction.INSTANCE);
       context.set("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
       context.set("abs", AbsFunction.INSTANCE);
-      context.set("bool", BoolFunction.INSTANCE);
+      context.set("bool", JavaClass.of(Boolean.class));
       context.set("chr", ChrFunction.INSTANCE);
-      context.set("dict", DictFunction.INSTANCE);
+      context.set("dict", JavaClass.of(PyDict.class));
       context.set("enumerate", EnumerateFunction.INSTANCE);
-      context.set("float", FloatFunction.INSTANCE);
+      context.set("float", JavaClass.of(Float.class));
       context.set("globals", GlobalsFunction.INSTANCE);
       context.set("hex", HexFunction.INSTANCE);
-      context.set("int", IntFunction.INSTANCE);
+      context.set("int", JavaClass.of(Integer.class));
       context.set("len", LenFunction.INSTANCE);
-      context.set("list", ListFunction.INSTANCE);
-      context.set("math", MATH_CLASS);
+      context.set("list", JavaClass.of(PyList.class));
+      context.set("math", JavaClass.of(math.class));
       context.set("max", MaxFunction.INSTANCE);
       context.set("min", MinFunction.INSTANCE);
       context.set("ord", OrdFunction.INSTANCE);
       context.set("print", PrintFunction.INSTANCE);
       context.set("range", RangeFunction.INSTANCE);
       context.set("round", RoundFunction.INSTANCE);
-      context.set("str", StrFunction.INSTANCE);
+      context.set("str", JavaClass.of(String.class));
       context.set("sum", SumFunction.INSTANCE);
-      context.set("tuple", TupleFunction.INSTANCE);
+      context.set("tuple", JavaClass.of(PyTuple.class));
       context.set("type", TypeFunction.INSTANCE);
       return context;
     }
