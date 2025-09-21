@@ -5587,7 +5587,6 @@ public class Script {
       context.set("int", JavaClass.of(Integer.class));
       context.set("len", LenFunction.INSTANCE);
       context.set("list", JavaClass.of(PyjList.class));
-      context.set("math", JavaClass.of(math.class));
       context.set("max", MaxFunction.INSTANCE);
       context.set("min", MinFunction.INSTANCE);
       context.set("ord", OrdFunction.INSTANCE);
@@ -5862,21 +5861,6 @@ public class Script {
 
     public Object returnValue() {
       return returnValue;
-    }
-  }
-
-  /** Emulation of Python math module. */
-  public static class math {
-    public static final double pi = Math.PI;
-    public static final double e = Math.E;
-    public static final double tau = Math.TAU;
-
-    public static double sqrt(Number x) {
-      return Math.sqrt(x.doubleValue());
-    }
-
-    public static Number fmod(Number x, Number y) {
-      return Numbers.javaMod(x, y);
     }
   }
 }
