@@ -59,6 +59,7 @@ public class Script {
     JavaClass.install(new DictClass());
     JavaClass.install(new FloatClass());
     JavaClass.install(new IntClass());
+    JavaClass.install(new JavaStringClass());
     JavaClass.install(new ListClass());
     JavaClass.install(new StrClass());
     JavaClass.install(new TupleClass());
@@ -4121,6 +4122,24 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
       return PyjObjects.toString(params[0]);
+    }
+  }
+
+  public static class JavaStringClass extends JavaClass {
+    public JavaStringClass() {
+      super(JavaString.class);
+    }
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      // This implementaiton is a fork of JavaClass::call but drops param support for InterfaceProxy
+      // because String constructors don't have params that are interface types.
+      ConstructorInvoker ctor = env.findConstructor(String.class, params);
+      try {
+        return ctor.newInstance(env, params);
+      } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+        throw new RuntimeException(e);
+      }
     }
   }
 

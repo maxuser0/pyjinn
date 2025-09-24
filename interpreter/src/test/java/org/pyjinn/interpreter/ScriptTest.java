@@ -6228,6 +6228,24 @@ public class ScriptTest {
     assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "dict").type());
   }
 
+  @Test
+  public void javaStringConstructor() throws Exception {
+    execute(
+        """
+        String = JavaClass("org.pyjinn.interpreter.JavaString")
+        Byte = JavaClass("java.lang.Byte")
+        some_bytes = JavaArray(
+            (Byte.valueOf("104"),  # 'h'
+             Byte.valueOf("101"),  # 'e'
+             Byte.valueOf("108"),  # 'l'
+             Byte.valueOf("108"),  # 'l'
+             Byte.valueOf("111")), # 'o'
+            Byte.TYPE)
+        output = String(some_bytes)  # String(byte[])
+        """);
+    assertEquals("hello", getVariable(String.class, "output"));
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);
