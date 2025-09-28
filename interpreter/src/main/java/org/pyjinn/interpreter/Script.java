@@ -63,6 +63,7 @@ public class Script {
     JavaClass.install(new ListClass());
     JavaClass.install(new StrClass());
     JavaClass.install(new TupleClass());
+    JavaClass.install(new TypeClass());
   }
 
   private record ClassMethodName(String type, String method) {}
@@ -1616,6 +1617,16 @@ public class Script {
     private static final PyjClass MODULE_TYPE =
         new PyjClass(
             "module",
+            (env, params) -> null,
+            false,
+            Map.of(),
+            Map.of(),
+            Optional.empty(),
+            Optional.empty());
+
+    private static final PyjClass NONE_TYPE =
+        new PyjClass(
+            "NoneType",
             (env, params) -> null,
             false,
             Map.of(),
@@ -4078,6 +4089,43 @@ public class Script {
     }
   }
 
+  public static class IsinstanceFunction implements Function {
+    public static final IsinstanceFunction INSTANCE = new IsinstanceFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 2);
+      Object object = params[0];
+      if (params[1] instanceof PyjTuple tuple) {
+        for (var type : tuple) {
+          if (isInstance(object, type)) {
+            return true;
+          }
+        }
+        return false;
+      } else {
+        return isInstance(object, params[1]);
+      }
+    }
+
+    private static boolean isInstance(Object object, Object type) {
+      if (type instanceof Class<?> clazz) {
+        return clazz.isInstance(object);
+      } else if (type instanceof JavaClass javaClass) {
+        return javaClass.type().isInstance(object);
+      } else if (type instanceof PyjClass pyjClass) {
+        if (object == null) {
+          return pyjClass == PyjClass.NONE_TYPE;
+        } else {
+          return object instanceof PyjObject pyjObject && pyjObject.type == pyjClass;
+        }
+      }
+      throw new IllegalArgumentException(
+          "isinstance() arg 2 must be a type or tuple of types but got '%s'"
+              .formatted(type == null ? "None" : type.getClass()));
+    }
+  }
+
   public static class IntClass extends JavaClass {
     public IntClass() {
       super(Integer.class);
@@ -4362,8 +4410,10 @@ public class Script {
     }
   }
 
-  public record TypeFunction() implements Function {
-    public static final TypeFunction INSTANCE = new TypeFunction();
+  public static class TypeClass extends JavaClass {
+    public TypeClass() {
+      super(PyjClass.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -4373,6 +4423,8 @@ public class Script {
         return classId.type();
       } else if (value instanceof PyjObject pyObject) {
         return pyObject == PyjClass.CLASS_TYPE ? PyjClass.CLASS_TYPE : pyObject.type;
+      } else if (value == null) {
+        return PyjClass.NONE_TYPE;
       } else {
         var type = value.getClass();
         return JavaClass.of(type);
@@ -5603,6 +5655,7 @@ public class Script {
       context.set("float", JavaClass.of(Float.class));
       context.set("globals", GlobalsFunction.INSTANCE);
       context.set("hex", HexFunction.INSTANCE);
+      context.set("isinstance", IsinstanceFunction.INSTANCE);
       context.set("int", JavaClass.of(Integer.class));
       context.set("len", LenFunction.INSTANCE);
       context.set("list", JavaClass.of(PyjList.class));
@@ -5615,7 +5668,7 @@ public class Script {
       context.set("str", JavaClass.of(String.class));
       context.set("sum", SumFunction.INSTANCE);
       context.set("tuple", JavaClass.of(PyjTuple.class));
-      context.set("type", TypeFunction.INSTANCE);
+      context.set("type", JavaClass.of(PyjClass.class));
       return context;
     }
 

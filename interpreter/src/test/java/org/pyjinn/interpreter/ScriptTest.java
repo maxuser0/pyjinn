@@ -6246,6 +6246,46 @@ public class ScriptTest {
     assertEquals("hello", getVariable(String.class, "output"));
   }
 
+  @Test
+  public void isinstance() throws Exception {
+    execute(
+        """
+        @dataclass
+        class Foo:
+          x: int = 0
+
+        @dataclass
+        class Bar:
+          x: int = 0
+
+        foo = Foo()
+        test1 = isinstance(foo, Foo)
+        test2 = isinstance(foo, Bar)
+
+        none_type = type(None)
+        test3 = isinstance(None, none_type)
+
+        test4 = isinstance(0, int)
+        test5 = isinstance(0, float)
+        test6 = isinstance(True, bool)
+        test7 = isinstance(True, str)
+        test8 = isinstance("foo", str)
+        test9 = isinstance("foo", Foo)
+        test10 = isinstance(None, str)
+        """);
+    assertEquals("NoneType", getVariable(Script.PyjClass.class, "none_type").name);
+    assertTrue(getVariable(Boolean.class, "test1"));
+    assertFalse(getVariable(Boolean.class, "test2"));
+    assertTrue(getVariable(Boolean.class, "test3"));
+    assertTrue(getVariable(Boolean.class, "test4"));
+    assertFalse(getVariable(Boolean.class, "test5"));
+    assertTrue(getVariable(Boolean.class, "test6"));
+    assertFalse(getVariable(Boolean.class, "test7"));
+    assertTrue(getVariable(Boolean.class, "test8"));
+    assertFalse(getVariable(Boolean.class, "test9"));
+    assertFalse(getVariable(Boolean.class, "test10"));
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);
