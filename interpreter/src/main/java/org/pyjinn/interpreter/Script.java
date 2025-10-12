@@ -2719,6 +2719,14 @@ public class Script {
             newList.__iadd__(rhsList);
             return newList;
           }
+          if (lhsValue instanceof PyjTuple lhsTuple && rhsValue instanceof PyjTuple rhsTuple) {
+            int lhsLen = lhsTuple.__len__();
+            int rhsLen = rhsTuple.__len__();
+            Object[] array = new Object[lhsLen + rhsLen];
+            System.arraycopy(lhsTuple.getJavaArray(), 0, array, 0, lhsLen);
+            System.arraycopy(rhsTuple.getJavaArray(), 0, array, lhsLen, rhsLen);
+            return new PyjTuple(array);
+          }
           break;
         case SUB:
           return Numbers.subtract((Number) lhsValue, (Number) rhsValue);

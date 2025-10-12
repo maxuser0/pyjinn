@@ -6286,6 +6286,17 @@ public class ScriptTest {
     assertFalse(getVariable(Boolean.class, "test10"));
   }
 
+  @Test
+  public void addTuples() throws Exception {
+    execute("output = (2, 4) + (6, 8)");
+    var tuple = getVariable(Script.PyjTuple.class, "output");
+    assertEquals(4, tuple.__len__());
+    assertEquals(2, tuple.__getitem__(0));
+    assertEquals(4, tuple.__getitem__(1));
+    assertEquals(6, tuple.__getitem__(2));
+    assertEquals(8, tuple.__getitem__(3));
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);
