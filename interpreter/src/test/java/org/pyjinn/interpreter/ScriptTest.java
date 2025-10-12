@@ -6297,6 +6297,28 @@ public class ScriptTest {
     assertEquals(8, tuple.__getitem__(3));
   }
 
+  @Test
+  public void starExpansionInTupleLiteral() throws Exception {
+    execute("output = (*(2, 4), *(6, 8))");
+    var tuple = getVariable(Script.PyjTuple.class, "output");
+    assertEquals(4, tuple.__len__());
+    assertEquals(2, tuple.__getitem__(0));
+    assertEquals(4, tuple.__getitem__(1));
+    assertEquals(6, tuple.__getitem__(2));
+    assertEquals(8, tuple.__getitem__(3));
+  }
+
+  @Test
+  public void starExpansionInListLiteral() throws Exception {
+    execute("output = [*(2, 4), *[6, 8]]");
+    var list = getVariable(Script.PyjList.class, "output");
+    assertEquals(4, list.__len__());
+    assertEquals(2, list.__getitem__(0));
+    assertEquals(4, list.__getitem__(1));
+    assertEquals(6, list.__getitem__(2));
+    assertEquals(8, list.__getitem__(3));
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);

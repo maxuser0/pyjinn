@@ -2254,6 +2254,61 @@ class PyjinnParserTest {
     assertName("keyword_test", keywordValue);
   }
 
+  @Test
+  void starExpansionInTuple() throws Exception {
+    var parserOutput = parseTrees("(*(2, 4), *(6, 8))");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var tuple = expr.get("value").getAsJsonObject();
+    assertEquals("Tuple", tuple.get("type").getAsString());
+
+    var elts = tuple.get("elts").getAsJsonArray();
+    assertEquals(2, elts.size());
+
+    // First starred element: *(2, 4)
+    var starred1 = elts.get(0).getAsJsonObject();
+    assertEquals("Starred", starred1.get("type").getAsString());
+
+    var starredValue1 = starred1.get("value").getAsJsonObject();
+    assertEquals("Tuple", starredValue1.get("type").getAsString());
+
+    var tupleElts1 = starredValue1.get("elts").getAsJsonArray();
+    assertEquals(2, tupleElts1.size());
+
+    var const1 = tupleElts1.get(0).getAsJsonObject();
+    assertEquals("Constant", const1.get("type").getAsString());
+    assertEquals(2, const1.get("value").getAsInt());
+    assertEquals("int", const1.get("typename").getAsString());
+
+    var const2 = tupleElts1.get(1).getAsJsonObject();
+    assertEquals("Constant", const2.get("type").getAsString());
+    assertEquals(4, const2.get("value").getAsInt());
+    assertEquals("int", const2.get("typename").getAsString());
+
+    // Second starred element: *(6, 8)
+    var starred2 = elts.get(1).getAsJsonObject();
+    assertEquals("Starred", starred2.get("type").getAsString());
+
+    var starredValue2 = starred2.get("value").getAsJsonObject();
+    assertEquals("Tuple", starredValue2.get("type").getAsString());
+
+    var tupleElts2 = starredValue2.get("elts").getAsJsonArray();
+    assertEquals(2, tupleElts2.size());
+
+    var const3 = tupleElts2.get(0).getAsJsonObject();
+    assertEquals("Constant", const3.get("type").getAsString());
+    assertEquals(6, const3.get("value").getAsInt());
+    assertEquals("int", const3.get("typename").getAsString());
+
+    var const4 = tupleElts2.get(1).getAsJsonObject();
+    assertEquals("Constant", const4.get("type").getAsString());
+    assertEquals(8, const4.get("value").getAsInt());
+    assertEquals("int", const4.get("typename").getAsString());
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());

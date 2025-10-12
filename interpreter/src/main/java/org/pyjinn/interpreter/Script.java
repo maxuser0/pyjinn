@@ -3475,7 +3475,17 @@ public class Script {
   public record TupleLiteral(List<Expression> elements) implements Expression {
     @Override
     public Object eval(Context context) {
-      return new PyjTuple(elements.stream().map(e -> e.eval(context)).toArray());
+      return new PyjTuple(
+          elements.stream()
+              .mapMulti(
+                  (expr, downstream) -> {
+                    if (expr instanceof StarredExpression starredExpr) {
+                      getIterable(starredExpr.value().eval(context)).forEach(downstream);
+                    } else {
+                      downstream.accept(expr.eval(context));
+                    }
+                  })
+              .toArray());
     }
 
     @Override
@@ -3490,7 +3500,17 @@ public class Script {
     @Override
     public Object eval(Context context) {
       // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
-      return new PyjList(elements.stream().map(e -> e.eval(context)).collect(toList()));
+      return new PyjList(
+          elements.stream()
+              .mapMulti(
+                  (expr, downstream) -> {
+                    if (expr instanceof StarredExpression starredExpr) {
+                      getIterable(starredExpr.value().eval(context)).forEach(downstream);
+                    } else {
+                      downstream.accept(expr.eval(context));
+                    }
+                  })
+              .collect(toList()));
     }
 
     @Override

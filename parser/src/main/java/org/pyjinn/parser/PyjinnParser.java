@@ -1286,7 +1286,15 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitStar_named_expression(PythonParser.Star_named_expressionContext ctx) {
-    return visitNamed_expression(ctx.named_expression());
+    if (ctx.named_expression() != null) {
+      return visitNamed_expression(ctx.named_expression());
+    }
+    if (ctx.bitwise_or() != null) {
+      var node = createNode(ctx.bitwise_or(), "Starred");
+      node.add("value", visitBitwise_or(ctx.bitwise_or()));
+      return node;
+    }
+    return defaultResult(ctx);
   }
 
   @Override
