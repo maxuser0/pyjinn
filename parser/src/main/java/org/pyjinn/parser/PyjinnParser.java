@@ -455,7 +455,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
     if (ctx.star_expressions() != null) {
       var node = createNode(ctx, "Expr");
-      node.add("value", maybeSingleton(visitStar_expressions(ctx.star_expressions())));
+      node.add("value", singletonOrTuple(visitStar_expressions(ctx.star_expressions())));
       return node;
     }
     return defaultResult(ctx);
@@ -509,7 +509,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     var returnNode = createNode(ctx, "Return");
 
     if (ctx.star_expressions() != null) { // Check if there's a return value
-      returnNode.add("value", maybeSingleton(visit(ctx.star_expressions())));
+      returnNode.add("value", singletonOrTuple(visit(ctx.star_expressions())));
     } else {
       returnNode.add("value", JsonNull.INSTANCE);
     }

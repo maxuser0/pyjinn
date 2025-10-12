@@ -2309,6 +2309,31 @@ class PyjinnParserTest {
     assertEquals("int", const4.get("typename").getAsString());
   }
 
+  @Test
+  void multipleValuesAsTuple() throws Exception {
+    var parserOutput = parseTrees("1, 2");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var tuple = expr.get("value").getAsJsonObject();
+    assertEquals("Tuple", tuple.get("type").getAsString());
+
+    var elts = tuple.get("elts").getAsJsonArray();
+    assertEquals(2, elts.size());
+
+    var const1 = elts.get(0).getAsJsonObject();
+    assertEquals("Constant", const1.get("type").getAsString());
+    assertEquals(1, const1.get("value").getAsInt());
+    assertEquals("int", const1.get("typename").getAsString());
+
+    var const2 = elts.get(1).getAsJsonObject();
+    assertEquals("Constant", const2.get("type").getAsString());
+    assertEquals(2, const2.get("value").getAsInt());
+    assertEquals("int", const2.get("typename").getAsString());
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());

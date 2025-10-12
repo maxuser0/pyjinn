@@ -6319,6 +6319,19 @@ public class ScriptTest {
     assertEquals(8, list.__getitem__(3));
   }
 
+  @Test
+  public void returnMultipleValues() throws Exception {
+    execute(
+        """
+        def foo(): return 1, 2
+        output = foo()
+        """);
+    var tuple = getVariable(Script.PyjTuple.class, "output");
+    assertEquals(2, tuple.__len__());
+    assertEquals(1, tuple.__getitem__(0));
+    assertEquals(2, tuple.__getitem__(1));
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);
