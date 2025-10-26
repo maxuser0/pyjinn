@@ -244,72 +244,6 @@ public class Numbers {
     }
   }
 
-  public static boolean lessThan(Number x, Number y) {
-    if (x instanceof Double d) {
-      return d < y.doubleValue();
-    } else if (y instanceof Double d) {
-      return x.doubleValue() < d;
-    } else if (x instanceof Float f) {
-      return f < y.floatValue();
-    } else if (y instanceof Float f) {
-      return x.floatValue() < f;
-    } else if (x instanceof Long l) {
-      return l < y.longValue();
-    } else if (y instanceof Long l) {
-      return x.longValue() < l;
-    } else if (x instanceof Integer i) {
-      return i < y.intValue();
-    } else if (y instanceof Integer i) {
-      return x.intValue() < i;
-    } else if (x instanceof Short s) {
-      return s < y.shortValue();
-    } else if (y instanceof Short s) {
-      return x.shortValue() < s;
-    } else if (x instanceof Byte b) {
-      return b < y.byteValue();
-    } else if (y instanceof Byte b) {
-      return x.byteValue() < b;
-    } else {
-      throw new IllegalArgumentException(
-          String.format(
-              "Unable to compare numbers: %s < %s (%s < %s)",
-              x, y, x.getClass().getName(), y.getClass().getName()));
-    }
-  }
-
-  public static boolean lessThanOrEquals(Number x, Number y) {
-    if (x instanceof Double d) {
-      return d <= y.doubleValue();
-    } else if (y instanceof Double d) {
-      return x.doubleValue() <= d;
-    } else if (x instanceof Float f) {
-      return f <= y.floatValue();
-    } else if (y instanceof Float f) {
-      return x.floatValue() <= f;
-    } else if (x instanceof Long l) {
-      return l <= y.longValue();
-    } else if (y instanceof Long l) {
-      return x.longValue() <= l;
-    } else if (x instanceof Integer i) {
-      return i <= y.intValue();
-    } else if (y instanceof Integer i) {
-      return x.intValue() <= i;
-    } else if (x instanceof Short s) {
-      return s <= y.shortValue();
-    } else if (y instanceof Short s) {
-      return x.shortValue() <= s;
-    } else if (x instanceof Byte b) {
-      return b <= y.byteValue();
-    } else if (y instanceof Byte b) {
-      return x.byteValue() <= b;
-    } else {
-      throw new IllegalArgumentException(
-          String.format(
-              "Unable to compare numbers: %s <= %s (%s <= %s)",
-              x, y, x.getClass().getName(), y.getClass().getName()));
-    }
-  }
-
   public static boolean equals(Number x, Number y) {
     if (x instanceof Double d) {
       return d == y.doubleValue();
@@ -343,68 +277,35 @@ public class Numbers {
     }
   }
 
-  public static boolean greaterThanOrEquals(Number x, Number y) {
+  public static int compare(Number x, Number y) {
     if (x instanceof Double d) {
-      return d >= y.doubleValue();
+      return Double.compare(d, y.doubleValue());
     } else if (y instanceof Double d) {
-      return x.doubleValue() >= d;
+      return Double.compare(x.doubleValue(), d);
     } else if (x instanceof Float f) {
-      return f >= y.floatValue();
+      return Float.compare(f, y.floatValue());
     } else if (y instanceof Float f) {
-      return x.floatValue() >= f;
+      return Float.compare(x.floatValue(), f);
     } else if (x instanceof Long l) {
-      return l >= y.longValue();
+      return Long.compare(l, y.longValue());
     } else if (y instanceof Long l) {
-      return x.longValue() >= l;
+      return Long.compare(x.longValue(), l);
     } else if (x instanceof Integer i) {
-      return i >= y.intValue();
+      return Integer.compare(i, y.intValue());
     } else if (y instanceof Integer i) {
-      return x.intValue() >= i;
+      return Integer.compare(x.intValue(), i);
     } else if (x instanceof Short s) {
-      return s >= y.shortValue();
+      return Short.compare(s, y.shortValue());
     } else if (y instanceof Short s) {
-      return x.shortValue() >= s;
+      return Short.compare(x.shortValue(), s);
     } else if (x instanceof Byte b) {
-      return b >= y.byteValue();
+      return Byte.compare(b, y.byteValue());
     } else if (y instanceof Byte b) {
-      return x.byteValue() >= b;
+      return Byte.compare(x.byteValue(), b);
     } else {
       throw new IllegalArgumentException(
           String.format(
-              "Unable to compare numbers: %s >= %s (%s >= %s)",
-              x, y, x.getClass().getName(), y.getClass().getName()));
-    }
-  }
-
-  public static boolean greaterThan(Number x, Number y) {
-    if (x instanceof Double d) {
-      return d > y.doubleValue();
-    } else if (y instanceof Double d) {
-      return x.doubleValue() > d;
-    } else if (x instanceof Float f) {
-      return f > y.floatValue();
-    } else if (y instanceof Float f) {
-      return x.floatValue() > f;
-    } else if (x instanceof Long l) {
-      return l > y.longValue();
-    } else if (y instanceof Long l) {
-      return x.longValue() > l;
-    } else if (x instanceof Integer i) {
-      return i > y.intValue();
-    } else if (y instanceof Integer i) {
-      return x.intValue() > i;
-    } else if (x instanceof Short s) {
-      return s > y.shortValue();
-    } else if (y instanceof Short s) {
-      return x.shortValue() > s;
-    } else if (x instanceof Byte b) {
-      return b > y.byteValue();
-    } else if (y instanceof Byte b) {
-      return x.byteValue() > b;
-    } else {
-      throw new IllegalArgumentException(
-          String.format(
-              "Unable to compare numbers: %s > %s (%s > %s)",
+              "Unable to compare numbers %s vs %s (%s vs %s)",
               x, y, x.getClass().getName(), y.getClass().getName()));
     }
   }

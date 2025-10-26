@@ -6332,6 +6332,50 @@ public class ScriptTest {
     assertEquals(2, tuple.__getitem__(1));
   }
 
+  @Test
+  public void compareTuples() throws Exception {
+    execute(
+        """
+        a = (1, 2, 3) > (1, 2)
+        b = (1, 2, 3) >= (1, 2)
+        c = (1, 2, 4) < (1, 2, 4)
+        d = (1, 2, 4) <= (1, 2, 4)
+        e = (1, 2) >= (1, 2, 3)
+        """);
+    boolean a = getVariable(Boolean.class, "a");
+    boolean b = getVariable(Boolean.class, "b");
+    boolean c = getVariable(Boolean.class, "c");
+    boolean d = getVariable(Boolean.class, "d");
+    boolean e = getVariable(Boolean.class, "e");
+    assertTrue(a);
+    assertTrue(b);
+    assertFalse(c);
+    assertTrue(d);
+    assertFalse(e);
+  }
+
+  @Test
+  public void compareLists() throws Exception {
+    execute(
+        """
+        a = [1, 2, 3] > [1, 2]
+        b = [1, 2, 3] >= [1, 2]
+        c = [1, 2, 4] < [1, 2, 4]
+        d = [1, 2, 4] <= [1, 2, 4]
+        e = [1, 2] >= [1, 2, 3]
+        """);
+    boolean a = getVariable(Boolean.class, "a");
+    boolean b = getVariable(Boolean.class, "b");
+    boolean c = getVariable(Boolean.class, "c");
+    boolean d = getVariable(Boolean.class, "d");
+    boolean e = getVariable(Boolean.class, "e");
+    assertTrue(a);
+    assertTrue(b);
+    assertFalse(c);
+    assertTrue(d);
+    assertFalse(e);
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);

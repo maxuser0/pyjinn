@@ -2375,6 +2375,32 @@ public class Script {
 
   public record StarredExpression(Expression value) implements Expression {}
 
+  private static int pyjCompare(Object lhsValue, Object rhsValue) {
+    return pyjCompare(lhsValue, rhsValue, null);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static int pyjCompare(Object lhsValue, Object rhsValue, String op) {
+    if (lhsValue == rhsValue || lhsValue.equals(rhsValue)) {
+      return 0;
+    }
+    if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
+      return Numbers.compare(lhsNumber, rhsNumber);
+    } else if (lhsValue instanceof Comparable lhsComp
+        && rhsValue != null
+        && lhsValue.getClass() == rhsValue.getClass()) {
+      return lhsComp.compareTo(rhsValue);
+    }
+    throw new UnsupportedOperationException(
+        "%s not supported between %s (%s) and %s (%s)"
+            .formatted(
+                op == null ? "Comparison" : "'%s'".formatted(op),
+                lhsValue == null ? "NoneType" : lhsValue.getClass().getName(),
+                PyjObjects.toRepr(lhsValue),
+                rhsValue == null ? "NoneType" : rhsValue.getClass().getName(),
+                PyjObjects.toRepr(rhsValue)));
+  }
+
   public record Comparison(Expression lhs, Op op, Expression rhs) implements Expression {
     public enum Op {
       IS("is"),
@@ -2437,49 +2463,17 @@ public class Script {
         case IS_NOT:
           return lhsValue != rhsValue;
         case EQ:
-          if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
-            return Numbers.equals(lhsNumber, rhsNumber);
-          } else {
-            return lhsValue.equals(rhsValue);
-          }
+          return pyjCompare(lhsValue, rhsValue, op.symbol()) == 0;
         case LT:
-          if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
-            return Numbers.lessThan(lhsNumber, rhsNumber);
-          } else if (lhsValue instanceof Comparable lhsComp
-              && rhsValue instanceof Comparable rhsComp
-              && lhsValue.getClass() == rhsValue.getClass()) {
-            return lhsComp.compareTo(rhsComp) < 0;
-          }
+          return pyjCompare(lhsValue, rhsValue, op.symbol()) < 0;
         case LT_EQ:
-          if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
-            return Numbers.lessThanOrEquals(lhsNumber, rhsNumber);
-          } else if (lhsValue instanceof Comparable lhsComp
-              && rhsValue instanceof Comparable rhsComp
-              && lhsValue.getClass() == rhsValue.getClass()) {
-            return lhsComp.compareTo(rhsComp) <= 0;
-          }
+          return pyjCompare(lhsValue, rhsValue, op.symbol()) <= 0;
         case GT:
-          if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
-            return Numbers.greaterThan(lhsNumber, rhsNumber);
-          } else if (lhsValue instanceof Comparable lhsComp
-              && rhsValue instanceof Comparable rhsComp
-              && lhsValue.getClass() == rhsValue.getClass()) {
-            return lhsComp.compareTo(rhsComp) > 0;
-          }
+          return pyjCompare(lhsValue, rhsValue, op.symbol()) > 0;
         case GT_EQ:
-          if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
-            return Numbers.greaterThanOrEquals(lhsNumber, rhsNumber);
-          } else if (lhsValue instanceof Comparable lhsComp
-              && rhsValue instanceof Comparable rhsComp
-              && lhsValue.getClass() == rhsValue.getClass()) {
-            return lhsComp.compareTo(rhsComp) >= 0;
-          }
+          return pyjCompare(lhsValue, rhsValue, op.symbol()) >= 0;
         case NOT_EQ:
-          if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
-            return !Numbers.equals(lhsNumber, rhsNumber);
-          } else {
-            return !lhsValue.equals(rhsValue);
-          }
+          return pyjCompare(lhsValue, rhsValue, op.symbol()) != 0;
         case IN:
           {
             var result = isIn(lhsValue, rhsValue);
@@ -3543,7 +3537,8 @@ public class Script {
     void __delitem__(Object key);
   }
 
-  public static class PyjList implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
+  public static class PyjList
+      implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter, Comparable<PyjList> {
     private final List<Object> list;
 
     public PyjList() {
@@ -3562,6 +3557,25 @@ public class Script {
     @Override
     public boolean equals(Object value) {
       return value instanceof PyjList pyList && this.list.equals(pyList.list);
+    }
+
+    @Override
+    public int compareTo(PyjList other) {
+      if (this.list == other.list) {
+        return 0;
+      }
+      int minLength = Math.min(this.list.size(), other.list.size());
+      for (int i = 0; i < minLength; ++i) {
+        var thisElement = this.list.get(i);
+        var otherElement = other.list.get(i);
+        if (thisElement != otherElement) {
+          int elementComparison = pyjCompare(thisElement, otherElement);
+          if (elementComparison != 0) {
+            return elementComparison;
+          }
+        }
+      }
+      return this.list.size() - other.list.size();
     }
 
     @Override
@@ -3710,7 +3724,7 @@ public class Script {
 
   // TODO(maxuser): Enforce immutability of tuples despite getJavaArray() returning array with
   // mutable elements.
-  public static class PyjTuple implements ItemGetter, ItemContainer {
+  public static class PyjTuple implements ItemGetter, ItemContainer, Comparable<PyjTuple> {
     private final Object[] array;
 
     public PyjTuple(Object[] array) {
@@ -3730,6 +3744,11 @@ public class Script {
     @Override
     public int hashCode() {
       return Arrays.hashCode(array);
+    }
+
+    @Override
+    public int compareTo(PyjTuple other) {
+      return Arrays.compare(array, other.array, Script::pyjCompare);
     }
 
     @Override
@@ -4746,7 +4765,7 @@ public class Script {
       var currentMin = (Number) params[0];
       for (var value : params) {
         var num = (Number) value;
-        if (Numbers.lessThan(num, currentMin)) {
+        if (Numbers.compare(num, currentMin) < 0) {
           currentMin = num;
         }
       }
@@ -4765,7 +4784,7 @@ public class Script {
       var currentMax = (Number) params[0];
       for (var value : params) {
         var num = (Number) value;
-        if (Numbers.greaterThan(num, currentMax)) {
+        if (Numbers.compare(num, currentMax) > 0) {
           currentMax = num;
         }
       }
