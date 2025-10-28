@@ -1170,8 +1170,13 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
           number.addProperty("value", Integer.parseInt(numberText));
           number.addProperty("typename", "int");
         } catch (NumberFormatException e) {
-          number.addProperty("value", Double.parseDouble(numberText));
-          number.addProperty("typename", "float");
+          try {
+            number.addProperty("value", Long.parseLong(numberText));
+            number.addProperty("typename", "int");
+          } catch (NumberFormatException e2) {
+            number.addProperty("value", Double.parseDouble(numberText));
+            number.addProperty("typename", "float");
+          }
         }
       }
       return number;

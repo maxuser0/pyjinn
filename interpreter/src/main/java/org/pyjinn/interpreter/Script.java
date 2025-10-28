@@ -2334,16 +2334,6 @@ public class Script {
     }
   }
 
-  public static Number parseFloatingPointValue(Number value) {
-    double d = value.doubleValue();
-    float f = (float) d;
-    if (d == f) {
-      return f;
-    } else {
-      return d;
-    }
-  }
-
   public record ConstantExpression(Object value) implements Expression {
     public static ConstantExpression parse(String typename, JsonElement value) {
       switch (typename) {
@@ -2352,7 +2342,7 @@ public class Script {
         case "int":
           return new ConstantExpression(parseIntegralValue(value.getAsNumber()));
         case "float":
-          return new ConstantExpression(parseFloatingPointValue(value.getAsNumber()));
+          return new ConstantExpression(value.getAsNumber().doubleValue());
         case "str":
           return new ConstantExpression(value.getAsString());
         case "NoneType":
@@ -3019,7 +3009,7 @@ public class Script {
       return types;
     }
 
-    public static Object unwrapJavaString(Object object) {
+    private static Object unwrapJavaString(Object object) {
       if (object instanceof JavaString jstring) {
         return jstring.string();
       } else {
@@ -3027,10 +3017,19 @@ public class Script {
       }
     }
 
-    public static void unwrapJavaStrings(Object[] objects) {
+    private static void unwrapJavaStrings(Object[] objects) {
       for (int i = 0; i < objects.length; ++i) {
         if (objects[i] instanceof JavaString jstring) {
           objects[i] = jstring.string();
+        }
+      }
+    }
+
+    /** Convert numeric params to float for formal float params. */
+    private static void convertFloatParams(List<Integer> floatParamIndices, Object[] objects) {
+      for (int index : floatParamIndices) {
+        if (objects[index] instanceof Number number) {
+          objects[index] = number.floatValue();
         }
       }
     }
@@ -3110,6 +3109,21 @@ public class Script {
         }
       }
 
+      List<Integer> floatParams = null;
+      if (bestMethod.isPresent()) {
+        Method m = bestMethod.get();
+        Class<?>[] formalParams = m.getParameterTypes();
+        for (int i = 0; i < formalParams.length; ++i) {
+          if (formalParams[i] == float.class || formalParams[i] == Float.class) {
+            if (floatParams == null) {
+              floatParams = new ArrayList<>();
+            }
+            floatParams.add(i);
+          }
+        }
+      }
+      final List<Integer> floatParamIndices = floatParams;
+
       return bestMethod.map(
           method -> {
             // Compute hasFunctionalParams before this invoker gets inserted into the cache.
@@ -3123,6 +3137,9 @@ public class Script {
               }
               if (hasAnyJavaStringParams) {
                 unwrapJavaStrings(params);
+              }
+              if (floatParamIndices != null) {
+                convertFloatParams(floatParamIndices, params);
               }
               return method.invoke(isStaticMethod ? null : object, params);
             };
@@ -3290,9 +3307,11 @@ public class Script {
     /**
      * Computes a score for how well {@code paramValues} matches the {@code formalParamTypes}.
      *
-     * <p>Add 1 point for a param requiring conversion, 2 points for a param that's an exact match.
-     * Return value of 0 indicates that {@code paramValues} are incompatible with {@code
-     * formalParamTypes}.
+     * <p>Add 1 point for a param requiring narrowing floating-point conversion (double to float), 2
+     * points for a param requiring widening numeric conversion or integer conversion to floating
+     * point (int to long, int or long to float or double, or float to double), 3 points for a param
+     * that's an exact match. Return value of 0 indicates that {@code paramValues} are incompatible
+     * with {@code formalParamTypes}.
      */
     private static int getTypeCheckScore(Class<?>[] formalParamTypes, Class<?>[] paramTypes) {
       if (formalParamTypes.length != paramTypes.length) {
@@ -3311,26 +3330,32 @@ public class Script {
             return 0;
           }
           if (formalType.isArray()) {
-            score += 1;
-          } else {
             score += 2;
+          } else {
+            score += 3;
           }
           continue;
         }
         if (actualType == formalType) {
-          score += 2;
+          score += 3;
           continue;
         }
         if (actualType == JavaString.class && formalType.isAssignableFrom(String.class)) {
           // JavaString auto-converts to String.
-          score += 2;
+          score += 3;
+          continue;
+        }
+        if (actualType == Double.class && formalType == Float.class) {
+          score += 1;
           continue;
         }
         if (Number.class.isAssignableFrom(formalType)
-            && Number.class.isAssignableFrom(actualType)
-            && numericTypeIsConvertible(actualType, formalType)) {
-          score += 1;
-          continue;
+            && Number.class.isAssignableFrom(actualType)) {
+          int numericConversionScore = getNumericConversionScore(actualType, formalType);
+          if (numericConversionScore > 0) {
+            score += numericConversionScore;
+            continue;
+          }
         }
         // Allow implementations of Function to be passed to params expecting an interface, but
         // don't boost the score for this iffy conversion.
@@ -3362,20 +3387,48 @@ public class Script {
       }
     }
 
-    private static boolean numericTypeIsConvertible(Class<?> from, Class<?> to) {
-      if (to == Double.class) {
-        return true;
+    private static int getNumericConversionScore(Class<?> from, Class<?> to) {
+      // Add 1 point for a param requiring narrowing float-point conversion (double to float) 2
+      // points for a param requiring widening numeric conversion or integer conversion to floating
+      // point (int to long, int or long to float or double, or float to double), 3 points for a
+      // param that's an exact match. Return value of 0 indicates that there's no viable conversion
+      // from floating point to integral type.
+      int fromTypeId = getNumericTypeId(from);
+      int toTypeId = getNumericTypeId(to);
+      if (fromTypeId == toTypeId) {
+        return 3;
+      } else if (fromTypeId < toTypeId) {
+        return 2;
+      } else if (toTypeId >= FLOAT_TYPE_ID) {
+        return 1;
+      } else {
+        return 0;
       }
-      if (to == Float.class) {
-        return from != Double.class;
+    }
+
+    private static final int BYTE_TYPE_ID = 1;
+    private static final int SHORT_TYPE_ID = 2;
+    private static final int INT_TYPE_ID = 3;
+    private static final int LONG_TYPE_ID = 4;
+    private static final int FLOAT_TYPE_ID = 5;
+    private static final int DOUBLE_TYPE_ID = 6;
+
+    private static int getNumericTypeId(Class<?> type) {
+      if (type == Double.class || type == double.class) {
+        return DOUBLE_TYPE_ID;
+      } else if (type == Float.class || type == float.class) {
+        return FLOAT_TYPE_ID;
+      } else if (type == Long.class || type == long.class) {
+        return LONG_TYPE_ID;
+      } else if (type == Integer.class || type == int.class) {
+        return INT_TYPE_ID;
+      } else if (type == Short.class || type == short.class) {
+        return SHORT_TYPE_ID;
+      } else if (type == Byte.class || type == byte.class) {
+        return BYTE_TYPE_ID;
+      } else {
+        return 0;
       }
-      if (to == Long.class) {
-        return from == Integer.class || from == Long.class;
-      }
-      if (to == Integer.class) {
-        return from == Integer.class;
-      }
-      return false;
     }
 
     public String getDebugMethodCallString(
@@ -4193,7 +4246,7 @@ public class Script {
 
   public static class FloatClass extends JavaClass {
     public FloatClass() {
-      super(Float.class);
+      super(Double.class);
     }
 
     @Override
@@ -4201,9 +4254,9 @@ public class Script {
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof String string) {
-        return parseFloatingPointValue(Double.parseDouble(string));
+        return Double.parseDouble(string);
       } else {
-        return parseFloatingPointValue((Number) value);
+        return ((Number) value).doubleValue();
       }
     }
   }
@@ -4611,6 +4664,40 @@ public class Script {
         throw new IllegalArgumentException(
             "JavaArray() requires a tuple object (PyjTuple) but got '%s'"
                 .formatted(params[0].getClass().getName()));
+      }
+    }
+  }
+
+  public record JavaIntFunction() implements Function {
+    public static final JavaIntFunction INSTANCE = new JavaIntFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+      if (value instanceof Number number) {
+        return number.intValue();
+      } else {
+        throw new IllegalArgumentException(
+            "JavaInt() requires a numeric param but got '%s'"
+                .formatted(value.getClass().getName()));
+      }
+    }
+  }
+
+  public record JavaFloatFunction() implements Function {
+    public static final JavaFloatFunction INSTANCE = new JavaFloatFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+      if (value instanceof Number number) {
+        return number.floatValue();
+      } else {
+        throw new IllegalArgumentException(
+            "JavaFloat() requires a numeric param but got '%s'"
+                .formatted(value.getClass().getName()));
       }
     }
   }
@@ -5687,6 +5774,8 @@ public class Script {
       // globals.
       context.set("Exception", JavaClass.of(Exception.class));
       context.set("JavaArray", JavaArrayFunction.INSTANCE);
+      context.set("JavaFloat", JavaFloatFunction.INSTANCE);
+      context.set("JavaInt", JavaIntFunction.INSTANCE);
       context.set("JavaList", JavaListFunction.INSTANCE);
       context.set("JavaMap", JavaMapFunction.INSTANCE);
       context.set("JavaString", JavaStringFunction.INSTANCE);
@@ -5699,7 +5788,7 @@ public class Script {
       context.set("chr", ChrFunction.INSTANCE);
       context.set("dict", JavaClass.of(PyjDict.class));
       context.set("enumerate", EnumerateFunction.INSTANCE);
-      context.set("float", JavaClass.of(Float.class));
+      context.set("float", JavaClass.of(Double.class));
       context.set("globals", GlobalsFunction.INSTANCE);
       context.set("hex", HexFunction.INSTANCE);
       context.set("isinstance", IsinstanceFunction.INSTANCE);

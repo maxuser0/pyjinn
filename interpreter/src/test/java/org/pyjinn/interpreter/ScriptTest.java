@@ -5550,7 +5550,7 @@ public class ScriptTest {
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
-    assertEquals(new Script.PyjList(List.of("Integer", "Long", "Float", "Double")), output);
+    assertEquals(new Script.PyjList(List.of("Integer", "Long", "Double", "Double")), output);
   }
 
   @Test
@@ -6374,6 +6374,52 @@ public class ScriptTest {
     assertFalse(c);
     assertTrue(d);
     assertFalse(e);
+  }
+
+  public static int numberMethod(int x) {
+    return x;
+  }
+
+  public static long numberMethod(long x) {
+    return x;
+  }
+
+  public static float numberMethod(float x) {
+    return x;
+  }
+
+  public static double numberMethod(double x) {
+    return x;
+  }
+
+  public static float floatMethod(float x) {
+    return x;
+  }
+
+  @Test
+  public void numericConversions() throws Exception {
+    execute(
+        """
+        ScriptTest = JavaClass("org.pyjinn.interpreter.ScriptTest")
+        a = ScriptTest.numberMethod(1234)
+        b = ScriptTest.numberMethod(12345678901)
+        c = ScriptTest.numberMethod(JavaFloat(3.14))
+        d = ScriptTest.numberMethod(3.14)
+        e = ScriptTest.floatMethod(3.14)
+        f = ScriptTest.numberMethod(JavaInt(12345678901))
+        """);
+    var a = getVariable(Integer.class, "a");
+    var b = getVariable(Long.class, "b");
+    var c = getVariable(Float.class, "c");
+    var d = getVariable(Double.class, "d");
+    var e = getVariable(Float.class, "e");
+    var f = getVariable(Integer.class, "f");
+    assertEquals(1234, a);
+    assertEquals(12345678901L, b);
+    assertEquals(3.14f, c);
+    assertEquals(3.14, d);
+    assertEquals(3.14f, e);
+    assertEquals((int) 12345678901L, f);
   }
 
   private <T> T getVariable(Class<T> clazz, String variableName) {
