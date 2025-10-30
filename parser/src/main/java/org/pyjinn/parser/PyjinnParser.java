@@ -1145,8 +1145,6 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
   }
 
-  private static final long MAX_UNSIGNED_32_BIT_INTEGER = 0xFFFFFFFFL;
-
   @Override
   public JsonElement visitAtom(PythonParser.AtomContext ctx) {
     if (ctx.NAME() != null) {
@@ -1156,28 +1154,17 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     } else if (ctx.NUMBER() != null) {
       var number = createNode(ctx, "Constant");
       String numberText = ctx.NUMBER().getText();
-      if (numberText.startsWith("0x")) {
-        String hexDigits = numberText.substring(2);
-        Long longValue = Long.parseLong(hexDigits, 16);
-        if (longValue > MAX_UNSIGNED_32_BIT_INTEGER) {
-          number.addProperty("value", longValue);
-        } else {
-          number.addProperty("value", longValue.intValue());
-        }
-        number.addProperty("typename", "int");
-      } else {
-        try {
-          number.addProperty("value", Integer.parseInt(numberText));
+      switch (NumberParser.getFormat(numberText)) {
+        case INT:
+          number.addProperty("value", NumberParser.parseAsLong(numberText));
           number.addProperty("typename", "int");
-        } catch (NumberFormatException e) {
-          try {
-            number.addProperty("value", Long.parseLong(numberText));
-            number.addProperty("typename", "int");
-          } catch (NumberFormatException e2) {
-            number.addProperty("value", Double.parseDouble(numberText));
-            number.addProperty("typename", "float");
-          }
-        }
+          break;
+        case FLOAT:
+          number.addProperty("value", Double.parseDouble(numberText));
+          number.addProperty("typename", "float");
+          break;
+        default:
+          throw new NumberFormatException("Unable to parse numeric literal: " + numberText);
       }
       return number;
     } else if (ctx.strings() != null) {

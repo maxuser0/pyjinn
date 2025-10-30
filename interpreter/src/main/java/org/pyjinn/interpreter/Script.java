@@ -48,6 +48,7 @@ import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import org.pyjinn.parser.NumberParser;
 import org.pyjinn.parser.PyjinnParser;
 
 public class Script {
@@ -2324,7 +2325,7 @@ public class Script {
     }
   }
 
-  public static Number parseIntegralValue(Number value) {
+  public static Number fitIntegralValue(Number value) {
     long l = value.longValue();
     int i = (int) l;
     if (l == i) {
@@ -2340,7 +2341,7 @@ public class Script {
         case "bool":
           return new ConstantExpression(value.getAsBoolean());
         case "int":
-          return new ConstantExpression(parseIntegralValue(value.getAsNumber()));
+          return new ConstantExpression(fitIntegralValue(value.getAsNumber()));
         case "float":
           return new ConstantExpression(value.getAsNumber().doubleValue());
         case "str":
@@ -4233,13 +4234,34 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
-      // TODO(maxuser): Support optional 2nd arg `base` that defaults to 10.
-      expectNumParams(params, 1);
+      expectMinParams(params, 1);
+      expectMaxParams(params, 2);
       var value = params[0];
       if (value instanceof String string) {
-        return parseIntegralValue(Long.parseLong(string));
+        if (params.length == 1) {
+          return fitIntegralValue(NumberParser.parseAsLongWithBase(string, 10));
+        } else if (params[1] instanceof Integer base) {
+          return fitIntegralValue(NumberParser.parseAsLongWithBase(string, base));
+        } else if (params[1] instanceof KeywordArgs kwargs
+            && kwargs.size() == 1
+            && kwargs.containsKey("base")) {
+          var base = kwargs.get("base");
+          if (base instanceof Integer intBase) {
+            return fitIntegralValue(NumberParser.parseAsLongWithBase(string, intBase));
+          } else {
+            throw new IllegalArgumentException(
+                "Expected 'base' keyword arg to int() to be int but got %s (%s)"
+                    .formatted(base, base == null ? "None" : base.getClass().getName()));
+          }
+        } else {
+          throw new IllegalArgumentException(
+              "Expected second arg to int() to be int but got %s (%s)"
+                  .formatted(
+                      params[1], params[1] == null ? "None" : params[1].getClass().getName()));
+        }
       } else {
-        return parseIntegralValue((Number) value);
+        expectNumParams(params, 1);
+        return fitIntegralValue((Number) value);
       }
     }
   }

@@ -6422,6 +6422,65 @@ public class ScriptTest {
     assertEquals((int) 12345678901L, f);
   }
 
+  @Test
+  public void intLiterals() throws Exception {
+    execute(
+        """
+        a = 123
+        b = 0x123
+        c = 12_345_678_901
+        d = 0x123_4567_8901
+        e = 0b111
+        f = 0b11110000_11110000_11110000_11110000_11110000
+        """);
+    var a = getVariable(Integer.class, "a");
+    var b = getVariable(Integer.class, "b");
+    var c = getVariable(Long.class, "c");
+    var d = getVariable(Long.class, "d");
+    var e = getVariable(Integer.class, "e");
+    var f = getVariable(Long.class, "f");
+    assertEquals(123, a);
+    assertEquals(0x123, b);
+    assertEquals(12345678901L, c);
+    assertEquals(0x12345678901L, d);
+    assertEquals(0b111, e);
+    assertEquals(0b1111000011110000111100001111000011110000L, f);
+  }
+
+  @Test
+  public void intConstructor() throws Exception {
+    execute(
+        """
+        a = int(123)
+        b = int("1_23")
+        c = int("1_23", 16)
+        d = int(12_345_678_901)
+        e = int("123_4567_8901", base=16)
+        f = int("123", 0)
+        g = int("0x123", 0)
+        h = int("0b111", 0)
+        i = int("1111000011110000111100001111000011110000", 2)
+        """);
+    var a = getVariable(Integer.class, "a");
+    var b = getVariable(Integer.class, "b");
+    var c = getVariable(Integer.class, "c");
+    var d = getVariable(Long.class, "d");
+    var e = getVariable(Long.class, "e");
+    var f = getVariable(Integer.class, "f");
+    var g = getVariable(Integer.class, "g");
+    var h = getVariable(Integer.class, "h");
+    var i = getVariable(Long.class, "i");
+    assertEquals(123, a);
+    assertEquals(123, b);
+    assertEquals(0x123, c);
+    assertEquals(12345678901L, d);
+    assertEquals(0x12345678901L, e);
+    assertEquals(123, f);
+    assertEquals(0x123, g);
+    assertEquals(0b111, h);
+    assertEquals(0b1111000011110000111100001111000011110000L, i);
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);
