@@ -2736,8 +2736,8 @@ public class Script {
         case POW:
           if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
             double d = Math.pow(lhsNum.doubleValue(), rhsNum.doubleValue());
-            int i = (int) d;
-            return i == d ? (Number) i : (Number) d;
+            long l = (long) d;
+            return l == d ? fitIntegralValue(l) : (Number) d;
           }
           break;
         case MOD:
@@ -2755,9 +2755,10 @@ public class Script {
             break;
           }
         case LSHIFT:
-          return convertLongToIntIfFits(checkNumberAsLong(lhsValue) << checkNumberAsLong(rhsValue));
+          return convertLongToUnsignedIntIfFits(
+              checkNumberAsLong(lhsValue) << checkNumberAsLong(rhsValue));
         case RSHIFT:
-          return convertLongToIntIfFits(
+          return convertLongToUnsignedIntIfFits(
               checkNumberAsLong(lhsValue) >>> checkNumberAsLong(rhsValue));
       }
       throw new UnsupportedOperationException(
@@ -2778,7 +2779,7 @@ public class Script {
       }
     }
 
-    private static Number convertLongToIntIfFits(Long longValue) {
+    private static Number convertLongToUnsignedIntIfFits(Long longValue) {
       if (longValue > MAX_UNSIGNED_32_BIT_INTEGER || longValue < Integer.MIN_VALUE) {
         return longValue;
       } else {

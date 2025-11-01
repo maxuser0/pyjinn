@@ -862,7 +862,16 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitPower(PythonParser.PowerContext ctx) {
-    return visit(ctx.await_primary());
+    if (ctx.getChildCount() == 3 && ctx.DOUBLESTAR() != null) { // binary op: left ** right
+      var node = createNode(ctx, "BinOp");
+      node.add("left", visit(ctx.getChild(0))); // left operand
+      final JsonObject op = createOp("Pow");
+      node.add("op", op);
+      node.add("right", visit(ctx.getChild(2))); // right operand
+      return node;
+    } else {
+      return visit(ctx.await_primary());
+    }
   }
 
   @Override

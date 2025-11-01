@@ -6481,6 +6481,43 @@ public class ScriptTest {
     assertEquals(0b1111000011110000111100001111000011110000L, i);
   }
 
+  @Test
+  public void pow() throws Exception {
+    execute(
+        """
+        a = 2 ** 0
+        b = 2 ** 2
+        c = 2 ** 8
+        d = 3 ** 2
+        e = 6 ** 3
+        f = 2 ** 30
+        g = 2 ** 31
+        h = 2 ** 32
+        i = 2 ** 60
+        j = 2 ** 64
+        """);
+    var a = getVariable(Integer.class, "a");
+    var b = getVariable(Integer.class, "b");
+    var c = getVariable(Integer.class, "c");
+    var d = getVariable(Integer.class, "d");
+    var e = getVariable(Integer.class, "e");
+    var f = getVariable(Integer.class, "f");
+    var g = getVariable(Long.class, "g");
+    var h = getVariable(Long.class, "h");
+    var i = getVariable(Long.class, "i");
+    var j = getVariable(Double.class, "j");
+    assertEquals(1, a);
+    assertEquals(4, b);
+    assertEquals(256, c);
+    assertEquals(9, d);
+    assertEquals(216, e);
+    assertEquals(1073741824, f);
+    assertEquals(2147483648L, g);
+    assertEquals(4294967296L, h);
+    assertEquals(1152921504606846976L, i);
+    assertEquals(1.8446744073709552E19, j);
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);
