@@ -677,6 +677,7 @@ public class ScriptTest {
         d = ScriptTest.numberMethod(3.14)
         e = ScriptTest.floatMethod(3.14)
         f = ScriptTest.numberMethod(JavaInt(12345678901))
+        g = isinstance(JavaFloat(3.14), JavaFloat)
         """);
     var a = getVariable(Integer.class, "a");
     var b = getVariable(Long.class, "b");
@@ -684,12 +685,14 @@ public class ScriptTest {
     var d = getVariable(Double.class, "d");
     var e = getVariable(Float.class, "e");
     var f = getVariable(Integer.class, "f");
+    var g = getVariable(Boolean.class, "g");
     assertEquals(1234, a);
     assertEquals(12345678901L, b);
     assertEquals(3.14f, c);
     assertEquals(3.14, d);
     assertEquals(3.14f, e);
     assertEquals((int) 12345678901L, f);
+    assertTrue(g);
   }
 
   @Test

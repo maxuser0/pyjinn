@@ -60,6 +60,7 @@ public class Script {
     JavaClass.install(new DictClass());
     JavaClass.install(new FloatClass());
     JavaClass.install(new IntClass());
+    JavaClass.install(new JavaFloatClass());
     JavaClass.install(new JavaStringClass());
     JavaClass.install(new ListClass());
     JavaClass.install(new StrClass());
@@ -4708,8 +4709,10 @@ public class Script {
     }
   }
 
-  public record JavaFloatFunction() implements Function {
-    public static final JavaFloatFunction INSTANCE = new JavaFloatFunction();
+  public static class JavaFloatClass extends JavaClass {
+    public JavaFloatClass() {
+      super(Float.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -5797,7 +5800,7 @@ public class Script {
       // globals.
       context.set("Exception", JavaClass.of(Exception.class));
       context.set("JavaArray", JavaArrayFunction.INSTANCE);
-      context.set("JavaFloat", JavaFloatFunction.INSTANCE);
+      context.set("JavaFloat", JavaClass.of(Float.class));
       context.set("JavaInt", JavaIntFunction.INSTANCE);
       context.set("JavaList", JavaListFunction.INSTANCE);
       context.set("JavaMap", JavaMapFunction.INSTANCE);
