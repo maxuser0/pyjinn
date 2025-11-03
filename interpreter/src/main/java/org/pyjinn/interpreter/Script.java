@@ -4235,7 +4235,7 @@ public class Script {
   }
 
   /** Pseudo superclass for Integer and Long in Pyjinn type system. */
-  record PyjInt() {}
+  private interface PyjInt {}
 
   public static class IntClass extends JavaClass {
     public IntClass() {
