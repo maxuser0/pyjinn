@@ -4244,6 +4244,10 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
+      if (params.length == 0) {
+        return 0;
+      }
+
       expectMinParams(params, 1);
       expectMaxParams(params, 2);
       var value = params[0];
@@ -4283,6 +4287,10 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
+      if (params.length == 0) {
+        return 0.0;
+      }
+
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof String string) {
@@ -4300,6 +4308,10 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
+      if (params.length == 0) {
+        return "";
+      }
+
       expectNumParams(params, 1);
       return PyjObjects.toString(params[0]);
     }
@@ -4707,6 +4719,10 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
+      if (params.length == 0) {
+        return 0;
+      }
+
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof Number number) {
@@ -4726,6 +4742,10 @@ public class Script {
 
     @Override
     public Object call(Environment env, Object... params) {
+      if (params.length == 0) {
+        return 0.0f;
+      }
+
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof Number number) {

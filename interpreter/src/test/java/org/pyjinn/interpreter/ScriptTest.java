@@ -711,6 +711,28 @@ public class ScriptTest {
   }
 
   @Test
+  public void primitiveDefaults() throws Exception {
+    execute(
+        """
+        a = float()
+        b = int()
+        c = str()
+        d = JavaFloat()
+        e = JavaInt()
+        """);
+    var a = getVariable(Double.class, "a");
+    var b = getVariable(Integer.class, "b");
+    var c = getVariable(String.class, "c");
+    var d = getVariable(Float.class, "d");
+    var e = getVariable(Integer.class, "e");
+    assertEquals(0.0, a);
+    assertEquals(0, b);
+    assertEquals("", c);
+    assertEquals(0.0f, d);
+    assertEquals(0, e);
+  }
+
+  @Test
   public void intLiterals() throws Exception {
     execute(
         """
