@@ -61,6 +61,7 @@ public class Script {
     JavaClass.install(new FloatClass());
     JavaClass.install(new IntClass());
     JavaClass.install(new JavaFloatClass());
+    JavaClass.install(new JavaIntClass());
     JavaClass.install(new JavaStringClass());
     JavaClass.install(new ListClass());
     JavaClass.install(new StrClass());
@@ -4215,7 +4216,11 @@ public class Script {
       if (type instanceof Class<?> clazz) {
         return clazz.isInstance(object);
       } else if (type instanceof JavaClass javaClass) {
-        return javaClass.type().isInstance(object);
+        if (javaClass.type() == PyjInt.class) {
+          return object instanceof Integer || object instanceof Long;
+        } else {
+          return javaClass.type().isInstance(object);
+        }
       } else if (type instanceof PyjClass pyjClass) {
         if (object == null) {
           return pyjClass == PyjClass.NONE_TYPE;
@@ -4229,9 +4234,12 @@ public class Script {
     }
   }
 
+  /** Pseudo superclass for Integer and Long in Pyjinn type system. */
+  record PyjInt() {}
+
   public static class IntClass extends JavaClass {
     public IntClass() {
-      super(Integer.class);
+      super(PyjInt.class);
     }
 
     @Override
@@ -4692,8 +4700,10 @@ public class Script {
     }
   }
 
-  public record JavaIntFunction() implements Function {
-    public static final JavaIntFunction INSTANCE = new JavaIntFunction();
+  public static class JavaIntClass extends JavaClass {
+    public JavaIntClass() {
+      super(Integer.class);
+    }
 
     @Override
     public Object call(Environment env, Object... params) {
@@ -5801,7 +5811,7 @@ public class Script {
       context.set("Exception", JavaClass.of(Exception.class));
       context.set("JavaArray", JavaArrayFunction.INSTANCE);
       context.set("JavaFloat", JavaClass.of(Float.class));
-      context.set("JavaInt", JavaIntFunction.INSTANCE);
+      context.set("JavaInt", JavaClass.of(Integer.class));
       context.set("JavaList", JavaListFunction.INSTANCE);
       context.set("JavaMap", JavaMapFunction.INSTANCE);
       context.set("JavaString", JavaStringFunction.INSTANCE);
@@ -5818,7 +5828,7 @@ public class Script {
       context.set("globals", GlobalsFunction.INSTANCE);
       context.set("hex", HexFunction.INSTANCE);
       context.set("isinstance", IsinstanceFunction.INSTANCE);
-      context.set("int", JavaClass.of(Integer.class));
+      context.set("int", JavaClass.of(PyjInt.class));
       context.set("len", LenFunction.INSTANCE);
       context.set("list", JavaClass.of(PyjList.class));
       context.set("max", MaxFunction.INSTANCE);

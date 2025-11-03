@@ -678,6 +678,11 @@ public class ScriptTest {
         e = ScriptTest.floatMethod(3.14)
         f = ScriptTest.numberMethod(JavaInt(12345678901))
         g = isinstance(JavaFloat(3.14), JavaFloat)
+        h = isinstance(123, JavaInt)
+        i = isinstance(JavaInt(123), JavaInt)
+        j = isinstance(JavaInt(123), int)
+        k = isinstance(12_345_678_901, int)
+        l = isinstance(12_345_678_901, JavaInt)
         """);
     var a = getVariable(Integer.class, "a");
     var b = getVariable(Long.class, "b");
@@ -686,6 +691,11 @@ public class ScriptTest {
     var e = getVariable(Float.class, "e");
     var f = getVariable(Integer.class, "f");
     var g = getVariable(Boolean.class, "g");
+    var h = getVariable(Boolean.class, "h");
+    var i = getVariable(Boolean.class, "i");
+    var j = getVariable(Boolean.class, "j");
+    var k = getVariable(Boolean.class, "k");
+    var l = getVariable(Boolean.class, "l");
     assertEquals(1234, a);
     assertEquals(12345678901L, b);
     assertEquals(3.14f, c);
@@ -693,6 +703,11 @@ public class ScriptTest {
     assertEquals(3.14f, e);
     assertEquals((int) 12345678901L, f);
     assertTrue(g);
+    assertTrue(h);
+    assertTrue(i);
+    assertTrue(j);
+    assertTrue(k);
+    assertFalse(l);
   }
 
   @Test
