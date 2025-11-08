@@ -2334,6 +2334,26 @@ class PyjinnParserTest {
     assertEquals("int", const2.get("typename").getAsString());
   }
 
+  @Test
+  void walrusOperator() throws Exception {
+    var parserOutput = parseTrees("(x := 99)");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var namedExpr = expr.get("value").getAsJsonObject();
+    assertEquals("NamedExpr", namedExpr.get("type").getAsString());
+
+    var target = namedExpr.get("target").getAsJsonObject();
+    assertName("x", target);
+
+    var value = namedExpr.get("value").getAsJsonObject();
+    assertEquals("Constant", value.get("type").getAsString());
+    assertEquals(99, value.get("value").getAsInt());
+    assertEquals("int", value.get("typename").getAsString());
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());

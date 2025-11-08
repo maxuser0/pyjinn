@@ -828,6 +828,15 @@ public class ScriptTest {
     assertEquals(1.8446744073709552E19, j);
   }
 
+  @Test
+  public void walrusOperator() throws Exception {
+    execute("y = (x := 2) + 1");
+    var x = getVariable(Integer.class, "x");
+    var y = getVariable(Integer.class, "y");
+    assertEquals(2, x);
+    assertEquals(3, y);
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);

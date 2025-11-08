@@ -933,6 +933,12 @@ public class Script {
                               ? parseExpression(getAttr(v, "value"))
                               : parseExpression(v))
                   .toList());
+
+        case "NamedExpr":
+          {
+            return new WalrusExpression(
+                getId(getAttr(element, "target")), parseExpression(getAttr(element, "value")));
+          }
       }
       throw new IllegalArgumentException("Unknown expression type: " + element.toString());
     }
@@ -2026,6 +2032,15 @@ public class Script {
   public static class FrozenInstanceError extends RuntimeException {
     public FrozenInstanceError(String message) {
       super(message);
+    }
+  }
+
+  public record WalrusExpression(Identifier identifier, Expression rhs) implements Expression {
+    @Override
+    public Object eval(Context context) {
+      var value = rhs.eval(context);
+      context.setVariable(identifier, value);
+      return value;
     }
   }
 

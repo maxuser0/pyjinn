@@ -1036,7 +1036,15 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitNamed_expression(PythonParser.Named_expressionContext ctx) {
-    if (ctx.expression() != null) {
+    if (ctx.assignment_expression() != null) {
+      var assignment = ctx.assignment_expression();
+      var namedExpr = createNode(ctx, "NamedExpr");
+      var target = createNode("Name");
+      target.addProperty("id", assignment.NAME().getText());
+      namedExpr.add("target", target);
+      namedExpr.add("value", visitExpression(assignment.expression()));
+      return namedExpr;
+    } else if (ctx.expression() != null) {
       return visitExpression(ctx.expression());
     }
     return defaultResult(ctx);
