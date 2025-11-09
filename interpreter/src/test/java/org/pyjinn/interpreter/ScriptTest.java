@@ -837,6 +837,29 @@ public class ScriptTest {
     assertEquals(3, y);
   }
 
+  @Test
+  public void noneComparisons() throws Exception {
+    execute(
+        """
+        a = (None is None)
+        b = (None == None)
+        c = (None is 0)
+        d = (None == 0)
+        e = (None != None)
+        f = (None is not None)
+        g = (None != 0)
+        h = (None is not 0)
+        """);
+    assertTrue(getVariable(Boolean.class, "a"));
+    assertTrue(getVariable(Boolean.class, "b"));
+    assertFalse(getVariable(Boolean.class, "c"));
+    assertFalse(getVariable(Boolean.class, "d"));
+    assertFalse(getVariable(Boolean.class, "e"));
+    assertFalse(getVariable(Boolean.class, "f"));
+    assertTrue(getVariable(Boolean.class, "g"));
+    assertTrue(getVariable(Boolean.class, "h"));
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);

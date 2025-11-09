@@ -2387,26 +2387,36 @@ public class Script {
     return pyjCompare(lhsValue, rhsValue, null);
   }
 
+  private static boolean pyjEquals(Object lhs, Object rhs) {
+    if (lhs == rhs) {
+      return true;
+    } else if (lhs == null || rhs == null) {
+      return false;
+    } else {
+      return lhs.equals(rhs);
+    }
+  }
+
   @SuppressWarnings("unchecked")
-  private static int pyjCompare(Object lhsValue, Object rhsValue, String op) {
-    if (lhsValue == rhsValue || lhsValue.equals(rhsValue)) {
+  private static int pyjCompare(Object lhs, Object rhs, String op) {
+    if (pyjEquals(lhs, rhs)) {
       return 0;
     }
-    if (lhsValue instanceof Number lhsNumber && rhsValue instanceof Number rhsNumber) {
+    if (lhs instanceof Number lhsNumber && rhs instanceof Number rhsNumber) {
       return Numbers.compare(lhsNumber, rhsNumber);
-    } else if (lhsValue instanceof Comparable lhsComp
-        && rhsValue != null
-        && lhsValue.getClass() == rhsValue.getClass()) {
-      return lhsComp.compareTo(rhsValue);
+    } else if (lhs instanceof Comparable lhsComp
+        && rhs != null
+        && lhs.getClass() == rhs.getClass()) {
+      return lhsComp.compareTo(rhs);
     }
     throw new UnsupportedOperationException(
         "%s not supported between %s (%s) and %s (%s)"
             .formatted(
                 op == null ? "Comparison" : "'%s'".formatted(op),
-                lhsValue == null ? "NoneType" : lhsValue.getClass().getName(),
-                PyjObjects.toRepr(lhsValue),
-                rhsValue == null ? "NoneType" : rhsValue.getClass().getName(),
-                PyjObjects.toRepr(rhsValue)));
+                lhs == null ? "NoneType" : lhs.getClass().getName(),
+                PyjObjects.toRepr(lhs),
+                rhs == null ? "NoneType" : rhs.getClass().getName(),
+                PyjObjects.toRepr(rhs)));
   }
 
   public record Comparison(Expression lhs, Op op, Expression rhs) implements Expression {
@@ -2471,7 +2481,7 @@ public class Script {
         case IS_NOT:
           return lhsValue != rhsValue;
         case EQ:
-          return pyjCompare(lhsValue, rhsValue, op.symbol()) == 0;
+          return pyjEquals(lhsValue, rhsValue);
         case LT:
           return pyjCompare(lhsValue, rhsValue, op.symbol()) < 0;
         case LT_EQ:
@@ -2481,7 +2491,7 @@ public class Script {
         case GT_EQ:
           return pyjCompare(lhsValue, rhsValue, op.symbol()) >= 0;
         case NOT_EQ:
-          return pyjCompare(lhsValue, rhsValue, op.symbol()) != 0;
+          return !pyjEquals(lhsValue, rhsValue);
         case IN:
           {
             var result = isIn(lhsValue, rhsValue);
