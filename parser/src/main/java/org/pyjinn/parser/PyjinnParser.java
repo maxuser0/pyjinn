@@ -1294,6 +1294,15 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   }
 
   @Override
+  public JsonElement visitSet(PythonParser.SetContext ctx) {
+    JsonArray elements = new JsonArray();
+    if (ctx.star_named_expressions() != null) {
+      elements = visitStar_named_expressions(ctx.star_named_expressions()).getAsJsonArray();
+    }
+    return elements;
+  }
+
+  @Override
   public JsonElement visitStar_named_expression(PythonParser.Star_named_expressionContext ctx) {
     if (ctx.named_expression() != null) {
       return visitNamed_expression(ctx.named_expression());

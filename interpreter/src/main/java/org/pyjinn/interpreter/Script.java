@@ -64,6 +64,7 @@ public class Script {
     JavaClass.install(new JavaIntClass());
     JavaClass.install(new JavaStringClass());
     JavaClass.install(new ListClass());
+    JavaClass.install(new SetClass());
     JavaClass.install(new StrClass());
     JavaClass.install(new TupleClass());
     JavaClass.install(new TypeClass());
@@ -902,6 +903,12 @@ public class Script {
 
         case "List":
           return new ListLiteral(
+              StreamSupport.stream(getAttr(element, "elts").getAsJsonArray().spliterator(), false)
+                  .map(this::parseExpression)
+                  .toList());
+
+        case "Set":
+          return new SetLiteral(
               StreamSupport.stream(getAttr(element, "elts").getAsJsonArray().spliterator(), false)
                   .map(this::parseExpression)
                   .toList());
@@ -3595,6 +3602,33 @@ public class Script {
     }
   }
 
+  public record SetLiteral(List<Expression> elements) implements Expression {
+    @Override
+    public Object eval(Context context) {
+      // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
+      return new PyjSet(
+          elements.stream()
+              .mapMulti(
+                  (expr, downstream) -> {
+                    if (expr instanceof StarredExpression starredExpr) {
+                      getIterable(starredExpr.value().eval(context)).forEach(downstream);
+                    } else {
+                      downstream.accept(expr.eval(context));
+                    }
+                  })
+              .collect(toSet()));
+    }
+
+    @Override
+    public String toString() {
+      if (elements.isEmpty()) {
+        return "set()";
+      } else {
+        return elements.stream().map(Object::toString).collect(joining(", ", "{", "}"));
+      }
+    }
+  }
+
   public interface Lengthable extends Iterable<Object> {
     int __len__();
   }
@@ -3801,6 +3835,225 @@ public class Script {
 
     public void sort() {
       list.sort(null);
+    }
+  }
+
+  public static class PyjSet implements ItemContainer, Lengthable {
+    private Set<Object> set;
+
+    public PyjSet() {
+      set = new HashSet<>();
+    }
+
+    public PyjSet(Set<Object> set) {
+      this.set = set;
+    }
+
+    // Package-private for access from JavaSet().
+    Set<Object> getJavaSet() {
+      return set;
+    }
+
+    @Override
+    public boolean equals(Object value) {
+      return value instanceof PyjSet pyjSet && this.set.equals(pyjSet.set);
+    }
+
+    @Override
+    public boolean __contains__(Object element) {
+      return set.contains(element);
+    }
+
+    @Override
+    public int __len__() {
+      return set.size();
+    }
+
+    @Override
+    public Iterator<Object> iterator() {
+      return set.iterator();
+    }
+
+    public void add(Object element) {
+      this.set.add(element);
+    }
+
+    /** Removes all elements from the set. */
+    public void clear() {
+      this.set.clear();
+    }
+
+    /** Removes the specified element from the set if it is present. */
+    public void discard(Object element) {
+      this.set.remove(element);
+    }
+
+    /**
+     * Removes and returns an arbitrary element from the set. Throws a NoSuchElementException if the
+     * set is empty.
+     */
+    public Object pop() {
+      if (this.set.isEmpty()) {
+        throw new java.util.NoSuchElementException("pop from an empty set");
+      }
+      // Iterate to get an arbitrary element to remove (Java sets don't have a direct pop())
+      java.util.Iterator<Object> iterator = this.set.iterator();
+      Object element = iterator.next();
+      iterator.remove();
+      return element;
+    }
+
+    /**
+     * Removes the specified element from the set. Unlike discard(), this might throw an exception
+     * if the element is not found, adhering strictly to the 'signature' requirement mimicking
+     * Python's KeyError, although standard Java Set.remove() just returns false. (We will stick to
+     * standard Java behavior here for simplicity.)
+     */
+    public void remove(Object element) {
+      boolean existed = this.set.remove(element);
+      if (!existed) {
+        throw new RuntimeException("KeyError: Element not found in set.");
+      }
+    }
+
+    /** Adds elements from an iterable to the current set (in-place union). */
+    public void update(Iterable<?> others) {
+      others.forEach(this.set::add);
+    }
+
+    /**
+     * Returns a new set containing elements present in the original set but not in the other
+     * specified collection(s).
+     */
+    public PyjSet difference(Iterable<?> other) {
+      Set<Object> result = new HashSet<>(this.set);
+      other.forEach(result::remove);
+      return new PyjSet(result);
+    }
+
+    /**
+     * Updates the current set by removing all elements found in the other collection(s) (in-place
+     * difference).
+     */
+    public void difference_update(Iterable<?> other) {
+      other.forEach(this.set::remove);
+    }
+
+    /**
+     * Returns a new set containing only the elements common to the current set and the other
+     * collection(s).
+     */
+    public PyjSet intersection(Iterable<?> other) {
+      var resultSet = new HashSet<Object>();
+      for (Object item : other) {
+        if (this.set.contains(item)) {
+          resultSet.add(item);
+        }
+      }
+      return new PyjSet(resultSet);
+    }
+
+    /**
+     * Updates the current set with only the common elements found in the other collection(s)
+     * (in-place intersection).
+     */
+    public void intersection_update(Iterable<?> other) {
+      var resultSet = new HashSet<Object>();
+      for (Object item : other) {
+        if (this.set.contains(item)) {
+          resultSet.add(item);
+        }
+      }
+      this.set = resultSet;
+    }
+
+    /** Returns a new set with elements that are in either set but not in both. */
+    public PyjSet symmetric_difference(Iterable<?> other) {
+      Set<Object> workingSet = new HashSet<>(this.set);
+      other.forEach(workingSet::add);
+      for (var element : other) {
+        if (this.set.contains(element)) {
+          workingSet.remove(element);
+        }
+      }
+      return new PyjSet(workingSet);
+    }
+
+    /**
+     * Updates the current set with the symmetric difference of itself and another set (in-place
+     * symmetric difference).
+     */
+    public void symmetric_difference_update(Iterable<?> other) {
+      other.forEach(this.set::add);
+      for (var element : other) {
+        if (this.set.contains(element)) {
+          this.set.remove(element);
+        }
+      }
+    }
+
+    /** Returns a new set containing all unique elements from all specified collections (union). */
+    public PyjSet union(Iterable<?> other) {
+      Set<Object> workingSet = new HashSet<>(this.set);
+      other.forEach(workingSet::add);
+      return new PyjSet(workingSet);
+    }
+
+    /** Returns a shallow copy of the set. */
+    public PyjSet copy() {
+      return new PyjSet(new HashSet<>(this.set));
+    }
+
+    /** Returns true if two sets have no common elements. */
+    public boolean isdisjoint(Iterable<?> other) {
+      for (Object element : other) {
+        if (this.set.contains(element)) {
+          return false; // Found a common element
+        }
+      }
+      return true; // No common elements found
+    }
+
+    /** Returns true if all elements of the current set are present in the other collection. */
+    public boolean issubset(Object other) {
+      if (other instanceof Collection<?> collection) {
+        return collection.containsAll(this.set);
+      } else if (other instanceof Iterable<?> iterable) {
+        var workingSet = new HashSet<Object>(this.set);
+        iterable.forEach(workingSet::remove);
+        return workingSet.isEmpty();
+      } else {
+        throw new IllegalArgumentException(
+            "'%s' object is not iterable"
+                .formatted(other == null ? "NoneType" : other.getClass().getName()));
+      }
+    }
+
+    /** Returns true if all elements of the other collection are present in the current set. */
+    public boolean issuperset(Object other) {
+      if (other instanceof Collection<?> collection) {
+        return this.set.containsAll(collection);
+      } else if (other instanceof Iterable<?> iterable) {
+        for (var e : iterable) {
+          if (!this.set.contains(e)) {
+            return false;
+          }
+        }
+        return true;
+      } else {
+        throw new IllegalArgumentException(
+            "'%s' object is not iterable"
+                .formatted(other == null ? "NoneType" : other.getClass().getName()));
+      }
+    }
+
+    @Override
+    public String toString() {
+      if (this.set.isEmpty()) {
+        return "set()";
+      } else {
+        return this.set.stream().map(PyjObjects::toString).collect(joining(", ", "{", "}"));
+      }
     }
   }
 
@@ -4529,6 +4782,24 @@ public class Script {
     }
   }
 
+  public static class SetClass extends JavaClass {
+    public SetClass() {
+      super(PyjSet.class);
+    }
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectMaxParams(params, 1);
+      if (params.length == 0) {
+        return new PyjSet();
+      } else {
+        @SuppressWarnings("unchecked")
+        Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
+        return new PyjSet(StreamSupport.stream(iterable.spliterator(), false).collect(toSet()));
+      }
+    }
+  }
+
   public static class TracebackFormatStackFunction implements Function {
     public static final TracebackFormatStackFunction INSTANCE = new TracebackFormatStackFunction();
 
@@ -4799,6 +5070,23 @@ public class Script {
       } else {
         throw new IllegalArgumentException(
             "JavaList() requires a list object (PyjList) but got '%s'"
+                .formatted(value.getClass().getName()));
+      }
+    }
+  }
+
+  public record JavaSetFunction() implements Function {
+    public static final JavaSetFunction INSTANCE = new JavaSetFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var value = params[0];
+      if (value instanceof PyjSet pyjSet) {
+        return pyjSet.getJavaSet();
+      } else {
+        throw new IllegalArgumentException(
+            "JavaSet() requires a set object (PyjSet) but got '%s'"
                 .formatted(value.getClass().getName()));
       }
     }
@@ -5859,6 +6147,7 @@ public class Script {
       context.set("JavaInt", JavaClass.of(Integer.class));
       context.set("JavaList", JavaListFunction.INSTANCE);
       context.set("JavaMap", JavaMapFunction.INSTANCE);
+      context.set("JavaSet", JavaSetFunction.INSTANCE);
       context.set("JavaString", JavaStringFunction.INSTANCE);
       context.set("__atexit_register__", AtexitRegsisterFunction.INSTANCE);
       context.set("__atexit_unregister__", AtexitUnregsisterFunction.INSTANCE);
@@ -5882,6 +6171,7 @@ public class Script {
       context.set("print", PrintFunction.INSTANCE);
       context.set("range", RangeFunction.INSTANCE);
       context.set("round", RoundFunction.INSTANCE);
+      context.set("set", JavaClass.of(PyjSet.class));
       context.set("str", JavaClass.of(String.class));
       context.set("sum", SumFunction.INSTANCE);
       context.set("tuple", JavaClass.of(PyjTuple.class));

@@ -5,6 +5,7 @@ package org.pyjinn.interpreter;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.pyjinn.parser.PyjinnParser;
 
@@ -858,6 +859,46 @@ public class ScriptTest {
     assertFalse(getVariable(Boolean.class, "f"));
     assertTrue(getVariable(Boolean.class, "g"));
     assertTrue(getVariable(Boolean.class, "h"));
+  }
+
+  @Test
+  public void set() throws Exception {
+    execute(
+        """
+        s1 = {1, 2, 9, "foo", "bar"}
+        s2 = set([2, 4, 6, "bar"])
+        b1 = 9 in s1  # True
+        b2 = 7 in s1  # False
+        b3 = s1.issubset(s2)  # False
+        b4 = s2.issubset(["bar", "baz", 0, 2, 4, 6])  # True
+        s3 = s1.union(s2)
+        s4 = s1.intersection(s2)
+        s5 = s1.difference(s2)
+        s6 = s1.symmetric_difference(s2)
+        """);
+
+    var s1 = getVariable(Script.PyjSet.class, "s1");
+    assertEquals(s1.getJavaSet(), Set.of(1, 2, 9, "foo", "bar"));
+
+    var s2 = getVariable(Script.PyjSet.class, "s2");
+    assertEquals(s2.getJavaSet(), Set.of(2, 4, 6, "bar"));
+
+    assertTrue(getVariable(Boolean.class, "b1"));
+    assertFalse(getVariable(Boolean.class, "b2"));
+    assertFalse(getVariable(Boolean.class, "b3"));
+    assertTrue(getVariable(Boolean.class, "b4"));
+
+    var s3 = getVariable(Script.PyjSet.class, "s3"); // union
+    assertEquals(s3.getJavaSet(), Set.of(1, 2, 9, "foo", "bar", 4, 6));
+
+    var s4 = getVariable(Script.PyjSet.class, "s4"); // intersection
+    assertEquals(s4.getJavaSet(), Set.of(2, "bar"));
+
+    var s5 = getVariable(Script.PyjSet.class, "s5"); // difference
+    assertEquals(s5.getJavaSet(), Set.of(1, 9, "foo"));
+
+    var s6 = getVariable(Script.PyjSet.class, "s6"); // symmetric_difference
+    assertEquals(s6.getJavaSet(), Set.of(1, 9, "foo", 4, 6));
   }
 
   private <T> T getVariable(Class<T> clazz, String variableName) {
