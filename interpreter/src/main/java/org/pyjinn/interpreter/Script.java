@@ -57,17 +57,12 @@ public class Script {
     // Install JavaClass subclasses with custom constructors. These need to be installed before
     // JavaClass.of(...) is called with the associated types, e.g. String.class, Integer.class, etc.
     JavaClass.install(new BoolClass());
-    JavaClass.install(new DictClass());
     JavaClass.install(new FloatClass());
     JavaClass.install(new IntClass());
     JavaClass.install(new JavaFloatClass());
     JavaClass.install(new JavaIntClass());
     JavaClass.install(new JavaStringClass());
-    JavaClass.install(new ListClass());
-    JavaClass.install(new SetClass());
     JavaClass.install(new StrClass());
-    JavaClass.install(new TupleClass());
-    JavaClass.install(new TypeClass());
   }
 
   private record ClassMethodName(String type, String method) {}
@@ -1440,7 +1435,7 @@ public class Script {
                     var fieldName = field.identifier().name();
                     return "%s=%s".formatted(fieldName, dataObject.__dict__.__getitem__(fieldName));
                   })
-              .collect(joining(", ", dataObject.type.name + "(", ")"));
+              .collect(joining(", ", dataObject.__class__.name + "(", ")"));
     }
 
     @Override
@@ -1489,15 +1484,16 @@ public class Script {
   }
 
   public static class PyjObject implements Function {
-    public final PyjClass type;
+    public final PyjClass __class__;
     public final PyjDict __dict__;
+    private static final Object[] EMPTY_ARRAY = new Object[] {};
 
     public PyjObject(PyjClass type) {
       this(type, new PyjDict());
     }
 
     public PyjObject(PyjClass type, PyjDict dict) {
-      this.type = type;
+      this.__class__ = type;
       this.__dict__ = dict;
     }
 
@@ -1511,12 +1507,16 @@ public class Script {
      * @return return value wrapped in an array of 1 element, or empty array if no matching method
      */
     public Object[] callMethod(Environment env, String methodName, Object... params) {
+      if (__dict__ == null) {
+        return EMPTY_ARRAY;
+      }
+
       var field = __dict__.get(methodName);
       if (field != null && field instanceof Function function) {
         return new Object[] {function.call(env, params)};
       }
 
-      var method = type.instanceMethods.get(methodName);
+      var method = __class__.instanceMethods.get(methodName);
       if (method != null) {
         Object[] methodParams = new Object[params.length + 1];
         methodParams[0] = this;
@@ -1524,14 +1524,14 @@ public class Script {
         return new Object[] {method.call(env, methodParams)};
       }
 
-      return new Object[] {};
+      return EMPTY_ARRAY;
     }
 
     @Override
     public Object call(Environment env, Object... params) {
       Object[] result = callMethod(env, "__call__", params);
       if (result.length == 0) {
-        throw new IllegalArgumentException("'%s' object is not callable".formatted(type.name));
+        throw new IllegalArgumentException("'%s' object is not callable".formatted(__class__.name));
       }
       return result[0];
     }
@@ -1539,9 +1539,9 @@ public class Script {
     @Override
     public boolean equals(Object other) {
       if (other instanceof PyjObject pyOther
-          && type == pyOther.type
-          && type.isFrozen
-          && type.hashMethod.isPresent()) {
+          && __class__ == pyOther.__class__
+          && __class__.isFrozen
+          && __class__.hashMethod.isPresent()) {
         return hashCode() == other.hashCode();
       } else {
         return super.equals(other);
@@ -1550,8 +1550,8 @@ public class Script {
 
     @Override
     public int hashCode() {
-      if (type.hashMethod.isPresent()) {
-        return type.hashMethod.get().apply(this);
+      if (__class__.hashMethod.isPresent()) {
+        return __class__.hashMethod.get().apply(this);
       } else {
         return System.identityHashCode(this);
       }
@@ -1559,10 +1559,10 @@ public class Script {
 
     @Override
     public String toString() {
-      if (type.strMethod.isPresent()) {
-        return type.strMethod.get().apply(this);
+      if (__class__.strMethod.isPresent()) {
+        return __class__.strMethod.get().apply(this);
       } else {
-        return "<%s object at 0x%x>".formatted(type.name, System.identityHashCode(this));
+        return "<%s object at 0x%x>".formatted(__class__.name, System.identityHashCode(this));
       }
     }
   }
@@ -1620,35 +1620,42 @@ public class Script {
     public final Optional<java.util.function.Function<PyjObject, Integer>> hashMethod;
     public final Optional<java.util.function.Function<PyjObject, String>> strMethod;
 
-    public static final PyjClass CLASS_TYPE =
+    static final PyjClass TYPE =
         new PyjClass(
             "type",
-            (env, params) -> null,
-            false,
-            Map.of(),
-            Map.of(),
-            Optional.empty(),
-            Optional.empty());
-
-    private static final PyjClass MODULE_TYPE =
-        new PyjClass(
-            "module",
-            (env, params) -> null,
-            false,
-            Map.of(),
-            Map.of(),
-            Optional.empty(),
-            Optional.empty());
+            /* ctor= */ (Environment env, Object... params) -> {
+              Function.expectNumParams(params, 1, "type");
+              var value = params[0];
+              if (value instanceof JavaClass classId) {
+                return classId.type();
+              } else if (value instanceof PyjObject pyObject) {
+                return pyObject == PyjClass.TYPE ? PyjClass.TYPE : pyObject.__class__;
+              } else if (value == null) {
+                return PyjClass.NONE_TYPE;
+              } else {
+                var type = value.getClass();
+                return JavaClass.of(type);
+              }
+            });
 
     private static final PyjClass NONE_TYPE =
         new PyjClass(
             "NoneType",
-            (env, params) -> null,
-            false,
-            Map.of(),
-            Map.of(),
-            Optional.empty(),
-            Optional.empty());
+            (env, params) -> {
+              Function.expectNumParams(params, 0, "NoneType()");
+              return null;
+            });
+
+    private static final PyjClass MODULE_TYPE =
+        new PyjClass(
+            "module",
+            (env, params) -> {
+              throw new UnsupportedOperationException();
+            });
+
+    public PyjClass(String name, Function ctor) {
+      this(name, ctor, false, Map.of(), Map.of(), Optional.empty(), Optional.empty());
+    }
 
     public PyjClass(
         String name,
@@ -1658,7 +1665,7 @@ public class Script {
         Map<String, ClassLevelMethod> classLevelMethods,
         Optional<java.util.function.Function<PyjObject, Integer>> hashMethod,
         Optional<java.util.function.Function<PyjObject, String>> strMethod) {
-      super(CLASS_TYPE);
+      super(TYPE);
       this.name = name;
       this.ctor = ctor;
       this.isFrozen = isFrozen;
@@ -1677,7 +1684,7 @@ public class Script {
     public Object[] callMethod(Environment env, String methodName, Object... params) {
       var method = classLevelMethods.get(methodName);
       if (method == null) {
-        return new Object[] {};
+        return PyjObject.EMPTY_ARRAY;
       }
       final Object[] methodParams;
       if (method.isClassmethod()) {
@@ -1899,7 +1906,7 @@ public class Script {
           if (exceptionType.isEmpty()
               || (exceptionType.get() instanceof PyjClass declaredType
                   && exception instanceof PyjObject thrownObject
-                  && thrownObject.type == declaredType)
+                  && thrownObject.__class__ == declaredType)
               || (exceptionType.get() instanceof JavaClass javaClassId
                   && javaClassId.type().isAssignableFrom(exception.getClass()))) {
             handler
@@ -2099,10 +2106,10 @@ public class Script {
         var lhsObject = lhsFieldAccess.object().eval(context);
         if (lhsObject instanceof PyjObject pyObject) {
           String fieldName = lhsFieldAccess.field().name();
-          if (pyObject.type.isFrozen) {
+          if (pyObject.__class__.isFrozen) {
             throw new FrozenInstanceError(
                 "cannot assign to field '%s' of type '%s'"
-                    .formatted(fieldName, pyObject.type.name));
+                    .formatted(fieldName, pyObject.__class__.name));
           }
           pyObject.__dict__.__setitem__(fieldName, rhsValue);
           return;
@@ -2247,10 +2254,10 @@ public class Script {
         var lhsObject = lhsFieldAccess.object().eval(context);
         if (lhsObject instanceof PyjObject pyObject) {
           String fieldName = lhsFieldAccess.field().name();
-          if (pyObject.type.isFrozen) {
+          if (pyObject.__class__.isFrozen) {
             throw new FrozenInstanceError(
                 "cannot assign to field '%s' of type '%s'"
-                    .formatted(fieldName, pyObject.type.name));
+                    .formatted(fieldName, pyObject.__class__.name));
           }
           var oldValue = pyObject.__dict__.__getitem__(fieldName);
           pyObject.__dict__.__setitem__(fieldName, op.apply(oldValue, rhsValue));
@@ -3162,10 +3169,12 @@ public class Script {
 
       return bestMethod.map(
           method -> {
-            // Compute hasFunctionalParams before this invoker gets inserted into the cache.
-            boolean hasFunctionalParams = InterfaceProxy.hasFunctionalParams(method, paramTypes);
+            // Compute requiresFunctionalParamPromotion before this invoker gets inserted into the
+            // cache.
+            boolean requiresFunctionalParamPromotion =
+                InterfaceProxy.requiresFunctionalParamPromotion(method, paramTypes);
             return (Environment env, Object object, Object[] params) -> {
-              if (env != null && hasFunctionalParams) {
+              if (env != null && requiresFunctionalParamPromotion) {
                 InterfaceProxy.promoteFunctionalParams(env, method, params);
               }
               if (isObjectJavaStringWrapper) {
@@ -3224,10 +3233,12 @@ public class Script {
 
       return bestCtor.map(
           ctor -> {
-            // Compute hasFunctionalParams before this invoker gets inserted into the cache.
-            boolean hasFunctionalParams = InterfaceProxy.hasFunctionalParams(ctor, paramTypes);
+            // Compute requiresFunctionalParamPromotion before this invoker gets inserted into the
+            // cache.
+            boolean requiresFunctionalParamPromotion =
+                InterfaceProxy.requiresFunctionalParamPromotion(ctor, paramTypes);
             return (Environment env, Object[] params) -> {
-              if (env != null && hasFunctionalParams) {
+              if (env != null && requiresFunctionalParamPromotion) {
                 InterfaceProxy.promoteFunctionalParams(env, ctor, params);
               }
               if (hasAnyJavaStringParams) {
@@ -3653,15 +3664,33 @@ public class Script {
     void __delitem__(Object key);
   }
 
-  public static class PyjList
+  public static class PyjList extends PyjObject
       implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter, Comparable<PyjList> {
     private final List<Object> list;
 
+    static final PyjClass TYPE =
+        new PyjClass(
+            "list",
+            /* ctor= */ (Environment env, Object... params) -> {
+              Function.expectMaxParams(params, 1, "list");
+              if (params.length == 0) {
+                return new PyjList();
+              } else {
+                @SuppressWarnings("unchecked")
+                Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
+                // Stream.toList() returns immutable list, so using Stream.collect(toList()) for
+                // mutable List.
+                return new PyjList(
+                    StreamSupport.stream(iterable.spliterator(), false).collect(toList()));
+              }
+            });
+
     public PyjList() {
-      list = new ArrayList<>();
+      this(new ArrayList<>());
     }
 
     public PyjList(List<Object> list) {
+      super(TYPE, PyjDict.EMPTY);
       this.list = list;
     }
 
@@ -3838,14 +3867,30 @@ public class Script {
     }
   }
 
-  public static class PyjSet implements ItemContainer, Lengthable {
+  public static class PyjSet extends PyjObject implements ItemContainer, Lengthable {
     private Set<Object> set;
 
+    static final PyjClass TYPE =
+        new PyjClass(
+            "set",
+            /* ctor= */ (Environment env, Object... params) -> {
+              Function.expectMaxParams(params, 1, "set");
+              if (params.length == 0) {
+                return new PyjSet();
+              } else {
+                @SuppressWarnings("unchecked")
+                Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
+                return new PyjSet(
+                    StreamSupport.stream(iterable.spliterator(), false).collect(toSet()));
+              }
+            });
+
     public PyjSet() {
-      set = new HashSet<>();
+      this(new HashSet<>());
     }
 
     public PyjSet(Set<Object> set) {
+      super(TYPE, PyjDict.EMPTY);
       this.set = set;
     }
 
@@ -4059,10 +4104,25 @@ public class Script {
 
   // TODO(maxuser): Enforce immutability of tuples despite getJavaArray() returning array with
   // mutable elements.
-  public static class PyjTuple implements ItemGetter, ItemContainer, Comparable<PyjTuple> {
+  public static class PyjTuple extends PyjObject
+      implements ItemGetter, ItemContainer, Comparable<PyjTuple> {
     private final Object[] array;
 
+    static final PyjClass TYPE =
+        new PyjClass(
+            "tuple",
+            /* ctor= */ (Environment env, Object... params) -> {
+              Function.expectMaxParams(params, 1, "tuple");
+              if (params.length == 0) {
+                return new PyjTuple(PyjObject.EMPTY_ARRAY);
+              } else {
+                Iterable<?> iterable = getIterable(params[0]);
+                return new PyjTuple(StreamSupport.stream(iterable.spliterator(), false).toArray());
+              }
+            });
+
     public PyjTuple(Object[] array) {
+      super(TYPE, PyjDict.EMPTY);
       this.array = array;
     }
 
@@ -4259,15 +4319,71 @@ public class Script {
     }
   }
 
-  public static class PyjDict implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
+  public static class PyjDict extends PyjObject
+      implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter {
     private static final Object NOT_FOUND = new Object();
     private final Map<Object, Object> map;
 
+    private static final PyjDict EMPTY = new PyjDict(Map.of());
+
+    static final PyjClass TYPE =
+        new PyjClass(
+            "dict",
+            /* ctor= */ (Environment env, Object... params) -> {
+              if (params.length == 0) {
+                return new PyjDict();
+              }
+
+              if (params.length != 1) {
+                throw new IllegalArgumentException(
+                    "dict() takes 0 args, keywords args, dict, or an iterable of pairs but got %d args"
+                        .formatted(params.length));
+              }
+
+              if (params[0] instanceof PyjDict dict) {
+                return new PyjDict(new HashMap<>(dict.getJavaMap()));
+              }
+
+              if (params[0] instanceof KeywordArgs kwargs) {
+                var dict = new PyjDict();
+                dict.getJavaMap().putAll(kwargs);
+                return dict;
+              }
+
+              if (params[0] instanceof Iterable<?> iterableElements) {
+                var dict = new PyjDict();
+                int i = -1;
+                for (var element : iterableElements) {
+                  ++i;
+                  if (element instanceof Iterable<?> iterable) {
+                    List<?> list = StreamSupport.stream(iterable.spliterator(), false).toList();
+                    if (list.size() == 2) {
+                      dict.__setitem__(list.get(0), list.get(1));
+                    } else {
+                      throw new IllegalArgumentException(
+                          "dictionary sequence element #%d has length %d; 2 is required"
+                              .formatted(i, list.size()));
+                    }
+                  } else {
+                    throw new IllegalArgumentException(
+                        "dictionary sequence element #%d is not iterable: %s"
+                            .formatted(i, element == null ? "null" : element.getClass()));
+                  }
+                }
+                return dict;
+              }
+
+              throw new IllegalArgumentException(
+                  "dict() takes 0 args, keywords args, or 1 iterable of pairs but got 1 arg of type %s"
+                      .formatted(params[0] == null ? "null" : params[0].getClass()));
+            });
+
     public PyjDict() {
-      map = new HashMap<>();
+      this(new HashMap<>());
     }
 
     public PyjDict(Map<Object, Object> map) {
+      super(TYPE, PyjDict.EMPTY);
       this.map = map;
     }
 
@@ -4404,30 +4520,34 @@ public class Script {
       }
     }
 
-    default void expectMinParams(Object[] params, int n) {
+    static void expectMinParams(Object[] params, int n, Object message) {
       if (params.length < n) {
         throw new IllegalArgumentException(
             String.format(
                 "Expected at least %d param%s but got %d for function: %s",
-                n, n == 1 ? "" : "s", params.length, this));
+                n, n == 1 ? "" : "s", params.length, message));
       }
     }
 
-    default void expectMaxParams(Object[] params, int n) {
+    static void expectMaxParams(Object[] params, int n, Object message) {
       if (params.length > n) {
         throw new IllegalArgumentException(
             String.format(
                 "Expected at most %d param%s but got %d for function: %s",
-                n, n == 1 ? "" : "s", params.length, this));
+                n, n == 1 ? "" : "s", params.length, message));
       }
     }
 
+    default void expectMinParams(Object[] params, int n) {
+      expectMinParams(params, n, this);
+    }
+
+    default void expectMaxParams(Object[] params, int n) {
+      expectMaxParams(params, n, this);
+    }
+
     default void expectNumParams(Object[] params, int n) {
-      if (params.length != n) {
-        throw new IllegalArgumentException(
-            String.format(
-                "Expected %d params but got %d for function: %s", n, params.length, this));
-      }
+      expectNumParams(params, n, this);
     }
   }
 
@@ -4503,7 +4623,7 @@ public class Script {
         if (object == null) {
           return pyjClass == PyjClass.NONE_TYPE;
         } else {
-          return object instanceof PyjObject pyjObject && pyjObject.type == pyjClass;
+          return object instanceof PyjObject pyjObject && pyjObject.__class__ == pyjClass;
         }
       }
       throw new IllegalArgumentException(
@@ -4689,117 +4809,6 @@ public class Script {
     }
   }
 
-  public static class TupleClass extends JavaClass {
-    public TupleClass() {
-      super(PyjTuple.class);
-    }
-
-    @Override
-    public Object call(Environment env, Object... params) {
-      expectMaxParams(params, 1);
-      if (params.length == 0) {
-        return new PyjTuple(new Object[] {});
-      } else {
-        Iterable<?> iterable = getIterable(params[0]);
-        return new PyjTuple(StreamSupport.stream(iterable.spliterator(), false).toArray());
-      }
-    }
-  }
-
-  public static class DictClass extends JavaClass {
-    public DictClass() {
-      super(PyjDict.class);
-    }
-
-    @Override
-    public Object call(Environment env, Object... params) {
-      if (params.length == 0) {
-        return new PyjDict();
-      }
-
-      if (params.length != 1) {
-        throw new IllegalArgumentException(
-            "dict() takes 0 args, keywords args, dict, or an iterable of pairs but got %d args"
-                .formatted(params.length));
-      }
-
-      if (params[0] instanceof PyjDict dict) {
-        return new PyjDict(new HashMap<>(dict.getJavaMap()));
-      }
-
-      if (params[0] instanceof KeywordArgs kwargs) {
-        var dict = new PyjDict();
-        dict.getJavaMap().putAll(kwargs);
-        return dict;
-      }
-
-      if (params[0] instanceof Iterable<?> iterableElements) {
-        var dict = new PyjDict();
-        int i = -1;
-        for (var element : iterableElements) {
-          ++i;
-          if (element instanceof Iterable<?> iterable) {
-            List<?> list = StreamSupport.stream(iterable.spliterator(), false).toList();
-            if (list.size() == 2) {
-              dict.__setitem__(list.get(0), list.get(1));
-            } else {
-              throw new IllegalArgumentException(
-                  "dictionary sequence element #%d has length %d; 2 is required"
-                      .formatted(i, list.size()));
-            }
-          } else {
-            throw new IllegalArgumentException(
-                "dictionary sequence element #%d is not iterable: %s"
-                    .formatted(i, element == null ? "null" : element.getClass()));
-          }
-        }
-        return dict;
-      }
-
-      throw new IllegalArgumentException(
-          "dict() takes 0 args, keywords args, or 1 iterable of pairs but got 1 arg of type %s"
-              .formatted(params[0] == null ? "null" : params[0].getClass()));
-    }
-  }
-
-  public static class ListClass extends JavaClass {
-    public ListClass() {
-      super(PyjList.class);
-    }
-
-    @Override
-    public Object call(Environment env, Object... params) {
-      expectMaxParams(params, 1);
-      if (params.length == 0) {
-        return new PyjList();
-      } else {
-        @SuppressWarnings("unchecked")
-        Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
-        // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable
-        // List.
-        return new PyjList(StreamSupport.stream(iterable.spliterator(), false).collect(toList()));
-      }
-    }
-  }
-
-  public static class SetClass extends JavaClass {
-    public SetClass() {
-      super(PyjSet.class);
-    }
-
-    @Override
-    public Object call(Environment env, Object... params) {
-      expectMaxParams(params, 1);
-      if (params.length == 0) {
-        return new PyjSet();
-      } else {
-        @SuppressWarnings("unchecked")
-        Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
-        return new PyjSet(StreamSupport.stream(iterable.spliterator(), false).collect(toSet()));
-      }
-    }
-  }
-
   public static class TracebackFormatStackFunction implements Function {
     public static final TracebackFormatStackFunction INSTANCE = new TracebackFormatStackFunction();
 
@@ -4847,28 +4856,6 @@ public class Script {
             Arrays.stream(params, 0, numParams).map(PyjObjects::toString).collect(joining(" ")));
       }
       return null;
-    }
-  }
-
-  public static class TypeClass extends JavaClass {
-    public TypeClass() {
-      super(PyjClass.class);
-    }
-
-    @Override
-    public Object call(Environment env, Object... params) {
-      expectNumParams(params, 1);
-      var value = params[0];
-      if (value instanceof JavaClass classId) {
-        return classId.type();
-      } else if (value instanceof PyjObject pyObject) {
-        return pyObject == PyjClass.CLASS_TYPE ? PyjClass.CLASS_TYPE : pyObject.type;
-      } else if (value == null) {
-        return PyjClass.NONE_TYPE;
-      } else {
-        var type = value.getClass();
-        return JavaClass.of(type);
-      }
     }
   }
 
@@ -5906,14 +5893,16 @@ public class Script {
       }
     }
 
-    public static boolean hasFunctionalParams(Executable executable, Class<?>[] paramTypes) {
+    public static boolean requiresFunctionalParamPromotion(
+        Executable executable, Class<?>[] paramTypes) {
+      Class<?>[] formalParamTypes = executable.getParameterTypes();
       for (int i = 0; i < paramTypes.length; ++i) {
-        var paramType = paramTypes[i];
-        Class<?> functionalParamType;
-        if (paramType != null
-            && Function.class.isAssignableFrom(paramType)
-            && (functionalParamType = executable.getParameterTypes()[i]).isInterface()
-            && functionalParamType != Function.class) {
+        var actualParamType = paramTypes[i];
+        Class<?> formalParamType = formalParamTypes[i];
+        if (actualParamType != null
+            && formalParamType.isInterface()
+            && !formalParamType.isAssignableFrom(actualParamType)
+            && Function.class.isAssignableFrom(actualParamType)) {
           return true;
         }
       }
@@ -5922,13 +5911,14 @@ public class Script {
 
     public static void promoteFunctionalParams(
         Environment env, Executable executable, Object[] params) {
+      Class<?>[] formalParamTypes = executable.getParameterTypes();
       for (int i = 0; i < params.length; ++i) {
-        var param = params[i];
-        Class<?> functionalParamType;
-        if (param instanceof Function function
-            && (functionalParamType = executable.getParameterTypes()[i]).isInterface()
-            && functionalParamType != Function.class) {
-          params[i] = implement(env, functionalParamType, function);
+        var actualParam = params[i];
+        Class<?> formalParamType = formalParamTypes[i];
+        if (formalParamType.isInterface()
+            && !formalParamType.isInstance(actualParam)
+            && actualParam instanceof Function function) {
+          params[i] = implement(env, formalParamType, function);
         }
       }
     }
@@ -5963,17 +5953,20 @@ public class Script {
     public Object eval(Context context) {
       var objectValue = object.eval(context);
       if (objectValue instanceof PyjObject pyObject) {
-        if (field.name().equals("__dict__")) {
+        if (field.name().equals("__class__")) {
+          return pyObject.__class__;
+        } else if (field.name().equals("__dict__")) {
           return pyObject.__dict__;
         } else if (pyObject.__dict__.__contains__(field.name())) {
           return pyObject.__dict__.__getitem__(field.name());
-        } else if (pyObject.type.__dict__.__contains__(field.name())) {
-          return pyObject.type.__dict__.__getitem__(field.name());
-        } else if (pyObject.type.instanceMethods.containsKey(field.name())) {
+        } else if (pyObject.__class__.__dict__.__contains__(field.name())) {
+          return pyObject.__class__.__dict__.__getitem__(field.name());
+        } else if (pyObject.__class__.instanceMethods.containsKey(field.name())) {
           return new BoundMethod(pyObject, field.name(), symbolCache, object);
         } else {
           throw new NoSuchElementException(
-              "Type %s has no field or method named `%s`".formatted(pyObject.type.name, field));
+              "Type %s has no field or method named `%s`"
+                  .formatted(pyObject.__class__.name, field));
         }
       }
 
@@ -6156,7 +6149,7 @@ public class Script {
       context.set("abs", AbsFunction.INSTANCE);
       context.set("bool", JavaClass.of(Boolean.class));
       context.set("chr", ChrFunction.INSTANCE);
-      context.set("dict", JavaClass.of(PyjDict.class));
+      context.set("dict", PyjDict.TYPE);
       context.set("enumerate", EnumerateFunction.INSTANCE);
       context.set("float", JavaClass.of(Double.class));
       context.set("globals", GlobalsFunction.INSTANCE);
@@ -6164,18 +6157,18 @@ public class Script {
       context.set("isinstance", IsinstanceFunction.INSTANCE);
       context.set("int", JavaClass.of(PyjInt.class));
       context.set("len", LenFunction.INSTANCE);
-      context.set("list", JavaClass.of(PyjList.class));
+      context.set("list", PyjList.TYPE);
       context.set("max", MaxFunction.INSTANCE);
       context.set("min", MinFunction.INSTANCE);
       context.set("ord", OrdFunction.INSTANCE);
       context.set("print", PrintFunction.INSTANCE);
       context.set("range", RangeFunction.INSTANCE);
       context.set("round", RoundFunction.INSTANCE);
-      context.set("set", JavaClass.of(PyjSet.class));
+      context.set("set", PyjSet.TYPE);
       context.set("str", JavaClass.of(String.class));
       context.set("sum", SumFunction.INSTANCE);
-      context.set("tuple", JavaClass.of(PyjTuple.class));
-      context.set("type", JavaClass.of(PyjClass.class));
+      context.set("tuple", PyjTuple.TYPE);
+      context.set("type", PyjClass.TYPE);
       return context;
     }
 

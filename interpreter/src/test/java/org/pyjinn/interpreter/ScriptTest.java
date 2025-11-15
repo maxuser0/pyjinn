@@ -465,10 +465,10 @@ public class ScriptTest {
         y = type(x([1, 2, 3]))
         z = type(tuple([1, 2, 3]))
         """);
-    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "x").type());
-    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "y").type());
-    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "z").type());
-    assertEquals(Script.PyjTuple.class, getVariable(JavaClass.class, "tuple").type());
+    assertEquals("tuple", getVariable(Script.PyjClass.class, "x").name);
+    assertEquals("tuple", getVariable(Script.PyjClass.class, "y").name);
+    assertEquals("tuple", getVariable(Script.PyjClass.class, "z").name);
+    assertEquals(Script.PyjTuple.TYPE, getVariable(Script.PyjClass.class, "tuple"));
   }
 
   @Test
@@ -479,10 +479,10 @@ public class ScriptTest {
         y = type(x((1, 2, 3)))
         z = type(list((1, 2, 3)))
         """);
-    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "x").type());
-    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "y").type());
-    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "z").type());
-    assertEquals(Script.PyjList.class, getVariable(JavaClass.class, "list").type());
+    assertEquals("list", getVariable(Script.PyjClass.class, "x").name);
+    assertEquals("list", getVariable(Script.PyjClass.class, "y").name);
+    assertEquals("list", getVariable(Script.PyjClass.class, "z").name);
+    assertEquals(Script.PyjList.TYPE, getVariable(Script.PyjClass.class, "list"));
   }
 
   @Test
@@ -493,10 +493,10 @@ public class ScriptTest {
         y = type(x([[1, 2], [3, 4]]))
         z = type(dict([[1, 2], [3, 4]]))
         """);
-    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "x").type());
-    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "y").type());
-    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "z").type());
-    assertEquals(Script.PyjDict.class, getVariable(JavaClass.class, "dict").type());
+    assertEquals("dict", getVariable(Script.PyjClass.class, "x").name);
+    assertEquals("dict", getVariable(Script.PyjClass.class, "y").name);
+    assertEquals("dict", getVariable(Script.PyjClass.class, "z").name);
+    assertEquals(Script.PyjDict.TYPE, getVariable(Script.PyjClass.class, "dict"));
   }
 
   @Test
@@ -899,6 +899,8 @@ public class ScriptTest {
 
     var s6 = getVariable(Script.PyjSet.class, "s6"); // symmetric_difference
     assertEquals(s6.getJavaSet(), Set.of(1, 9, "foo", 4, 6));
+
+    assertEquals(Script.PyjSet.TYPE, getVariable(Script.PyjClass.class, "set"));
   }
 
   private <T> T getVariable(Class<T> clazz, String variableName) {
