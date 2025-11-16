@@ -1486,7 +1486,10 @@ public class Script {
   public static class PyjObject implements Function {
     public final PyjClass __class__;
     public final PyjDict __dict__;
-    private static final Object[] EMPTY_ARRAY = new Object[] {};
+
+    // Special value that indicates that callMethod() has an undefined return value, distinct from
+    // null/None.
+    public static final Object UNDEFINED_RESULT = new Object();
 
     public PyjObject(PyjClass type) {
       this(type, new PyjDict());
@@ -1500,20 +1503,20 @@ public class Script {
     /**
      * Calls PyjObject method named {@code methodName} with {@code params}.
      *
-     * <p>Return type is an array rather than Optional because Optional cannot store null.
+     * <p>Returns UNDEFINED_RESULT if no appropriate method could be found.
      *
      * @param methodName name of PyjObject method to call
      * @param params arguments passed to PyjObject method
      * @return return value wrapped in an array of 1 element, or empty array if no matching method
      */
-    public Object[] callMethod(Environment env, String methodName, Object... params) {
+    public Object callMethod(Environment env, String methodName, Object... params) {
       if (__dict__ == null) {
-        return EMPTY_ARRAY;
+        return UNDEFINED_RESULT;
       }
 
       var field = __dict__.get(methodName);
       if (field != null && field instanceof Function function) {
-        return new Object[] {function.call(env, params)};
+        return function.call(env, params);
       }
 
       var method = __class__.instanceMethods.get(methodName);
@@ -1521,19 +1524,19 @@ public class Script {
         Object[] methodParams = new Object[params.length + 1];
         methodParams[0] = this;
         System.arraycopy(params, 0, methodParams, 1, params.length);
-        return new Object[] {method.call(env, methodParams)};
+        return method.call(env, methodParams);
       }
 
-      return EMPTY_ARRAY;
+      return UNDEFINED_RESULT;
     }
 
     @Override
     public Object call(Environment env, Object... params) {
-      Object[] result = callMethod(env, "__call__", params);
-      if (result.length == 0) {
+      Object result = callMethod(env, "__call__", params);
+      if (result == UNDEFINED_RESULT) {
         throw new IllegalArgumentException("'%s' object is not callable".formatted(__class__.name));
       }
-      return result[0];
+      return result;
     }
 
     @Override
@@ -1681,10 +1684,10 @@ public class Script {
     }
 
     @Override
-    public Object[] callMethod(Environment env, String methodName, Object... params) {
+    public Object callMethod(Environment env, String methodName, Object... params) {
       var method = classLevelMethods.get(methodName);
       if (method == null) {
-        return PyjObject.EMPTY_ARRAY;
+        return UNDEFINED_RESULT;
       }
       final Object[] methodParams;
       if (method.isClassmethod()) {
@@ -1694,7 +1697,7 @@ public class Script {
       } else {
         methodParams = params;
       }
-      return new Object[] {method.function().call(env, methodParams)};
+      return method.function().call(env, methodParams);
     }
 
     @Override
@@ -4107,6 +4110,7 @@ public class Script {
   public static class PyjTuple extends PyjObject
       implements ItemGetter, ItemContainer, Comparable<PyjTuple> {
     private final Object[] array;
+    private static final Object[] EMPTY_ARRAY = new Object[] {};
 
     static final PyjClass TYPE =
         new PyjClass(
@@ -4114,7 +4118,7 @@ public class Script {
             /* ctor= */ (Environment env, Object... params) -> {
               Function.expectMaxParams(params, 1, "tuple");
               if (params.length == 0) {
-                return new PyjTuple(PyjObject.EMPTY_ARRAY);
+                return new PyjTuple(EMPTY_ARRAY);
               } else {
                 Iterable<?> iterable = getIterable(params[0]);
                 return new PyjTuple(StreamSupport.stream(iterable.spliterator(), false).toArray());
@@ -5467,10 +5471,11 @@ public class Script {
       implements Function {
     @Override
     public Object call(Environment env, Object... params) {
-      Object[] pyObjectMethodResult;
+      Object pyjObjectMethodResult;
       if (object instanceof PyjObject pyObject
-          && (pyObjectMethodResult = pyObject.callMethod(env, methodName, params)).length == 1) {
-        return pyObjectMethodResult[0];
+          && (pyjObjectMethodResult = pyObject.callMethod(env, methodName, params))
+              != PyjObject.UNDEFINED_RESULT) {
+        return pyjObjectMethodResult;
       }
 
       final boolean isStaticMethod;
