@@ -903,6 +903,90 @@ public class ScriptTest {
     assertEquals(Script.PyjSet.TYPE, getVariable(Script.PyjClass.class, "set"));
   }
 
+  @Test
+  public void overloadedOperators() throws Exception {
+    execute(
+        """
+        class Thing:
+          def __init__(self, value):
+            self.value = value
+            self.setitem = None
+
+          def __add__(self, rhs): return f"{self.value} + {rhs.value}"
+          def __sub__(self, rhs): return f"{self.value} - {rhs.value}"
+          def __mul__(self, rhs): return f"{self.value} * {rhs.value}"
+          def __truediv__(self, rhs): return f"{self.value} / {rhs.value}"
+          def __floordiv__(self, rhs): return f"{self.value} // {rhs.value}"
+          def __pow__(self, rhs): return f"{self.value} ** {rhs.value}"
+          def __mod__(self, rhs): return f"{self.value} % {rhs.value}"
+          def __lshift__(self, rhs): return f"{self.value} << {rhs.value}"
+          def __rshift__(self, rhs): return f"{self.value} >> {rhs.value}"
+
+          def __eq__(self, rhs): return f"{self.value} == {rhs.value}"
+          def __lt__(self, rhs): return f"{self.value} < {rhs.value}"
+          def __le__(self, rhs): return f"{self.value} <= {rhs.value}"
+          def __gt__(self, rhs): return f"{self.value} > {rhs.value}"
+          def __ge__(self, rhs): return f"{self.value} >= {rhs.value}"
+          def __ne__(self, rhs): return f"{self.value} != {rhs.value}"
+          def __contains__(self, rhs): return f"{rhs.value} in {self.value}"
+
+          def __len__(self): return f"len({self.value})"
+          def __getitem__(self, key): return f"{self.value}[{key}]"
+          def __setitem__(self, key, value): self.setitem = f"{self.value}[{key}] = {value}"
+          def __call__(self, *args): return f"{self.value}({', '.join([str(x) for x in args])})"
+
+        x = Thing("x")
+        y = Thing("y")
+
+        add = x + y
+        sub = x - y
+        mul = x * y
+        truediv = x / y
+        floordiv = x // y
+        pow = x ** y
+        mod = x % y
+        lshift = x << y
+        rshift = x >> y
+        eq = x == y
+        lt = x < y
+        le = x <= y
+        gt = x > y
+        ge = x >= y
+        ne = x != y
+        contains = x in y
+        length = len(x)
+        getitem = x["y"]
+        x["y"] = "z"
+        setitem = x.setitem
+        call = x("y", "z", 1, 2, 3)
+        """);
+
+    assertEquals(getVariable("add"), "x + y");
+    assertEquals(getVariable("sub"), "x - y");
+    assertEquals(getVariable("mul"), "x * y");
+    assertEquals(getVariable("truediv"), "x / y");
+    assertEquals(getVariable("floordiv"), "x // y");
+    assertEquals(getVariable("pow"), "x ** y");
+    assertEquals(getVariable("mod"), "x % y");
+    assertEquals(getVariable("lshift"), "x << y");
+    assertEquals(getVariable("rshift"), "x >> y");
+    assertEquals(getVariable("eq"), "x == y");
+    assertEquals(getVariable("lt"), "x < y");
+    assertEquals(getVariable("le"), "x <= y");
+    assertEquals(getVariable("gt"), "x > y");
+    assertEquals(getVariable("ge"), "x >= y");
+    assertEquals(getVariable("ne"), "x != y");
+    assertEquals(getVariable("contains"), "y in x");
+    assertEquals(getVariable("length"), "len(x)");
+    assertEquals(getVariable("getitem"), "x[y]");
+    assertEquals(getVariable("setitem"), "x[y] = z");
+    assertEquals(getVariable("call"), "x(y, z, 1, 2, 3)");
+  }
+
+  private Object getVariable(String variableName) {
+    return getVariable(Object.class, variableName);
+  }
+
   private <T> T getVariable(Class<T> clazz, String variableName) {
     Object object = env.get(variableName);
     assertNotNull(object);

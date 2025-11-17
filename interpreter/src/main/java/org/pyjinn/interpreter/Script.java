@@ -2135,13 +2135,19 @@ public class Script {
         } else if (array instanceof Map map) {
           map.put(index, rhsValue);
           return;
+        } else if (array instanceof PyjObject pyjObject) {
+          var result =
+              pyjObject.callMethod(context.globals, "__setitem__", new Object[] {index, rhsValue});
+          if (result != PyjObject.UNDEFINED_RESULT) {
+            return;
+          }
         }
         throw new IllegalArgumentException(
-            "Unsupported subscript assignment to %s (%s)"
-                .formatted(array, array.getClass().getSimpleName()));
+            "'%s' object does not support item assignment: %s = %s"
+                .formatted(getSimpleTypeName(array), lhs, rhs));
       }
       throw new IllegalArgumentException(
-          "Unsupported expression type for lhs of assignment: `%s` (%s)"
+          "Unsupported expression type for lhs of assignment: '%s' (%s)"
               .formatted(lhs, lhs.getClass().getSimpleName()));
     }
 
@@ -2427,13 +2433,9 @@ public class Script {
       return lhsComp.compareTo(rhs);
     }
     throw new UnsupportedOperationException(
-        "%s not supported between %s (%s) and %s (%s)"
-            .formatted(
-                op == null ? "Comparison" : "'%s'".formatted(op),
-                lhs == null ? "NoneType" : lhs.getClass().getName(),
-                PyjObjects.toRepr(lhs),
-                rhs == null ? "NoneType" : rhs.getClass().getName(),
-                PyjObjects.toRepr(rhs)));
+        String.format(
+            "Comparison op not implemented for types: %s %s %s",
+            getSimpleTypeName(lhs), op, getSimpleTypeName(rhs)));
   }
 
   public record Comparison(Expression lhs, Op op, Expression rhs) implements Expression {
@@ -2498,19 +2500,61 @@ public class Script {
         case IS_NOT:
           return lhsValue != rhsValue;
         case EQ:
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__eq__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          }
           return pyjEquals(lhsValue, rhsValue);
         case LT:
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__lt__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          }
           return pyjCompare(lhsValue, rhsValue, op.symbol()) < 0;
         case LT_EQ:
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__le__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          }
           return pyjCompare(lhsValue, rhsValue, op.symbol()) <= 0;
         case GT:
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__gt__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          }
           return pyjCompare(lhsValue, rhsValue, op.symbol()) > 0;
         case GT_EQ:
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__ge__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          }
           return pyjCompare(lhsValue, rhsValue, op.symbol()) >= 0;
         case NOT_EQ:
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__ne__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          }
           return !pyjEquals(lhsValue, rhsValue);
         case IN:
           {
+            if (lhsValue instanceof PyjObject pyjObject) {
+              var result = pyjObject.callMethod(context.globals, "__contains__", rhsValue);
+              if (result != PyjObject.UNDEFINED_RESULT) {
+                return result;
+              }
+            }
             var result = isIn(lhsValue, rhsValue);
             if (result.isPresent()) {
               return result.get();
@@ -2518,6 +2562,12 @@ public class Script {
           }
         case NOT_IN:
           {
+            if (lhsValue instanceof PyjObject pyjObject) {
+              var result = pyjObject.callMethod(context.globals, "__contains__", rhsValue);
+              if (result != PyjObject.UNDEFINED_RESULT && result instanceof Boolean contains) {
+                return !contains;
+              }
+            }
             var result = isIn(lhsValue, rhsValue);
             if (result.isPresent()) {
               return !result.get();
@@ -2748,6 +2798,12 @@ public class Script {
             newList.__iadd__(rhsList);
             return newList;
           }
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__add__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          }
           if (lhsValue instanceof PyjTuple lhsTuple && rhsValue instanceof PyjTuple rhsTuple) {
             int lhsLen = lhsTuple.__len__();
             int rhsLen = rhsTuple.__len__();
@@ -2758,60 +2814,103 @@ public class Script {
           }
           break;
         case SUB:
-          return Numbers.subtract((Number) lhsValue, (Number) rhsValue);
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__sub__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          } else {
+            return Numbers.subtract((Number) lhsValue, (Number) rhsValue);
+          }
         case MUL:
           if (lhsValue instanceof String lhsString && rhsValue instanceof Integer rhsInt) {
             return lhsString.repeat(rhsInt);
           } else if (lhsValue instanceof Integer lhsInt && rhsValue instanceof String rhsString) {
             return rhsString.repeat(lhsInt);
+          } else if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__mul__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
           } else {
             return Numbers.multiply((Number) lhsValue, (Number) rhsValue);
           }
         case DIV:
-          if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__truediv__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          } else if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
             return Numbers.divide(lhsNum, rhsNum);
           }
           break;
         case FLOOR_DIV:
-          if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__floordiv__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          } else if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
             return Numbers.floorDiv(lhsNum, rhsNum);
           }
           break;
         case POW:
-          if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__pow__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          } else if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
             double d = Math.pow(lhsNum.doubleValue(), rhsNum.doubleValue());
             long l = (long) d;
             return l == d ? fitIntegralValue(l) : (Number) d;
           }
           break;
         case MOD:
-          {
-            if (lhsValue instanceof String lhsString) {
-              if (rhsValue instanceof PyjTuple tuple) {
-                return String.format(
-                    lhsString, StreamSupport.stream(tuple.spliterator(), false).toArray());
-              } else {
-                return String.format(lhsString, rhsValue);
-              }
-            } else if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
-              return Numbers.pyMod(lhsNum, rhsNum);
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__mod__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
             }
-            break;
+          } else if (lhsValue instanceof String lhsString) {
+            if (rhsValue instanceof PyjTuple tuple) {
+              return String.format(
+                  lhsString, StreamSupport.stream(tuple.spliterator(), false).toArray());
+            } else {
+              return String.format(lhsString, rhsValue);
+            }
+          } else if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
+            return Numbers.pyMod(lhsNum, rhsNum);
           }
+          break;
         case LSHIFT:
-          return convertLongToUnsignedIntIfFits(
-              checkNumberAsLong(lhsValue) << checkNumberAsLong(rhsValue));
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__lshift__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          } else {
+            return convertLongToUnsignedIntIfFits(
+                checkNumberAsLong(lhsValue) << checkNumberAsLong(rhsValue));
+          }
+          break;
         case RSHIFT:
-          return convertLongToUnsignedIntIfFits(
-              checkNumberAsLong(lhsValue) >>> checkNumberAsLong(rhsValue));
+          if (lhsValue instanceof PyjObject pyjObject) {
+            var result = pyjObject.callMethod(context.globals, "__rshift__", rhsValue);
+            if (result != PyjObject.UNDEFINED_RESULT) {
+              return result;
+            }
+          } else {
+            return convertLongToUnsignedIntIfFits(
+                checkNumberAsLong(lhsValue) >>> checkNumberAsLong(rhsValue));
+          }
+          break;
       }
       throw new UnsupportedOperationException(
           String.format(
               "Binary op not implemented for types `%s %s %s`: %s",
-              lhsValue.getClass().getSimpleName(),
-              op.symbol(),
-              rhsValue.getClass().getSimpleName(),
-              this));
+              getSimpleTypeName(lhsValue), op.symbol(), getSimpleTypeName(rhsValue), this));
     }
 
     private static long checkNumberAsLong(Object value) {
@@ -2834,6 +2933,16 @@ public class Script {
     @Override
     public String toString() {
       return String.format("(%s %s %s)", lhs, op.symbol(), rhs);
+    }
+  }
+
+  private static String getSimpleTypeName(Object value) {
+    if (value == null) {
+      return "NoneType";
+    } else if (value instanceof PyjObject pyjObject) {
+      return pyjObject.__class__.name;
+    } else {
+      return value.getClass().getSimpleName();
     }
   }
 
@@ -2936,13 +3045,17 @@ public class Script {
           int intKey = SliceValue.resolveIndex(((Number) indexValue).intValue(), jsonArray.size());
           return unboxJsonPrimitive(jsonArray.get(intKey));
         }
+      } else if (arrayValue instanceof PyjObject pyjObject) {
+        var result = pyjObject.callMethod(context.globals, "__getitem__", indexValue);
+        if (result != PyjObject.UNDEFINED_RESULT) {
+          return result;
+        }
       }
 
       throw new IllegalArgumentException(
           String.format(
-              "Eval for ArrayIndex expression not supported for types: %s[%s] (evaluated as:"
-                  + " %s[%s])",
-              array, index, arrayValue, indexValue));
+              "'%s' object is not subscriptable: %s[%s]",
+              getSimpleTypeName(arrayValue), array, index));
     }
 
     @Override
@@ -4807,9 +4920,14 @@ public class Script {
         return str.length();
       } else if (value instanceof JsonArray arr) {
         return arr.size();
+      } else if (value instanceof PyjObject pyjObject) {
+        var result = pyjObject.callMethod(env, "__len__");
+        if (result != PyjObject.UNDEFINED_RESULT) {
+          return result;
+        }
       }
       throw new IllegalArgumentException(
-          String.format("Object of type '%s' has no len(): %s", value.getClass().getName(), this));
+          String.format("Object of type '%s' has no len() operator", getSimpleTypeName(value)));
     }
   }
 
