@@ -1660,6 +1660,10 @@ public class Script {
       this(name, ctor, false, Map.of(), Map.of(), Optional.empty(), Optional.empty());
     }
 
+    public PyjClass(String name, Function ctor, Map<String, Function> instanceMethods) {
+      this(name, ctor, false, instanceMethods, Map.of(), Optional.empty(), Optional.empty());
+    }
+
     public PyjClass(
         String name,
         Function ctor,
@@ -3989,17 +3993,65 @@ public class Script {
     static final PyjClass TYPE =
         new PyjClass(
             "set",
-            /* ctor= */ (Environment env, Object... params) -> {
+            /* ctor= */ (env, params) -> {
               Function.expectMaxParams(params, 1, "set");
               if (params.length == 0) {
                 return new PyjSet();
               } else {
-                @SuppressWarnings("unchecked")
-                Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
+                var iterable = (Iterable<?>) getIterable(params[0]);
                 return new PyjSet(
                     StreamSupport.stream(iterable.spliterator(), false).collect(toSet()));
               }
-            });
+            },
+            /* instanceMethods= */ Map.of(
+                "__lt__",
+                (env, params) -> {
+                  Function.expectNumParams(params, 2, "set.__lt__");
+                  var lhs = (PyjSet) params[0];
+                  var rhs = params[1];
+                  if (!(rhs instanceof PyjSet || rhs instanceof Set<?>)) {
+                    throw new IllegalArgumentException(
+                        "'<' not supported between instances of 'set' and '%s'"
+                            .formatted(getSimpleTypeName(rhs)));
+                  }
+                  return !lhs.equals(rhs) && lhs.issubset(rhs);
+                },
+                "__le__",
+                (env, params) -> {
+                  Function.expectNumParams(params, 2, "set.__le__");
+                  var lhs = (PyjSet) params[0];
+                  var rhs = params[1];
+                  if (!(rhs instanceof PyjSet || rhs instanceof Set<?>)) {
+                    throw new IllegalArgumentException(
+                        "'<=' not supported between instances of 'set' and '%s'"
+                            .formatted(getSimpleTypeName(rhs)));
+                  }
+                  return lhs.issubset(rhs);
+                },
+                "__gt__",
+                (env, params) -> {
+                  Function.expectNumParams(params, 2, "set.__gt__");
+                  var lhs = (PyjSet) params[0];
+                  var rhs = params[1];
+                  if (!(rhs instanceof PyjSet || rhs instanceof Set<?>)) {
+                    throw new IllegalArgumentException(
+                        "'>' not supported between instances of 'set' and '%s'"
+                            .formatted(getSimpleTypeName(rhs)));
+                  }
+                  return !lhs.equals(rhs) && lhs.issuperset(rhs);
+                },
+                "__ge__",
+                (env, params) -> {
+                  Function.expectNumParams(params, 2, "set.__ge__");
+                  var lhs = (PyjSet) params[0];
+                  var rhs = params[1];
+                  if (!(rhs instanceof PyjSet || rhs instanceof Set<?>)) {
+                    throw new IllegalArgumentException(
+                        "'>=' not supported between instances of 'set' and '%s'"
+                            .formatted(getSimpleTypeName(rhs)));
+                  }
+                  return lhs.issuperset(rhs);
+                }));
 
     public PyjSet() {
       this(new HashSet<>());
@@ -4017,7 +4069,13 @@ public class Script {
 
     @Override
     public boolean equals(Object value) {
-      return value instanceof PyjSet pyjSet && this.set.equals(pyjSet.set);
+      if (value instanceof PyjSet pyjSet) {
+        return this.set.equals(pyjSet.set);
+      }
+      if (value instanceof Set<?> other) {
+        return this.set.equals(other);
+      }
+      return false;
     }
 
     @Override

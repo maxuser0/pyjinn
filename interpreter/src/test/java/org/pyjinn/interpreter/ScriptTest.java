@@ -875,6 +875,17 @@ public class ScriptTest {
         s4 = s1.intersection(s2)
         s5 = s1.difference(s2)
         s6 = s1.symmetric_difference(s2)
+        s7 = {1, 2} < {1, 2}  # False
+        s8 = {1, 2} <= {1, 2}  # True
+        s9 = {1, 2, 4} <= {1, 2, 3}  # False
+        s10 = {1, 2, 3} >= {1, 2, 3}  # True
+        s11 = {1, 2, 3} > {1, 2, 3}  # False
+        s12 = 1 in {1, 2, 3}  # True
+        s13 = 1 in {2, 4, 6}  # False
+        s14 = 1 not in {1, 2, 3}  # False
+        s15 = 1 not in {2, 4, 6}  # True
+        s16 = {1, 2} == {1, 2}  # True
+        s17 = {1, 2} == {1, 2, 3}  # False
         """);
 
     var s1 = getVariable(Script.PyjSet.class, "s1");
@@ -899,6 +910,18 @@ public class ScriptTest {
 
     var s6 = getVariable(Script.PyjSet.class, "s6"); // symmetric_difference
     assertEquals(s6.getJavaSet(), Set.of(1, 9, "foo", 4, 6));
+
+    assertFalse(getVariable(Boolean.class, "s7"));
+    assertTrue(getVariable(Boolean.class, "s8"));
+    assertFalse(getVariable(Boolean.class, "s9"));
+    assertTrue(getVariable(Boolean.class, "s10"));
+    assertFalse(getVariable(Boolean.class, "s11"));
+    assertTrue(getVariable(Boolean.class, "s12"));
+    assertFalse(getVariable(Boolean.class, "s13"));
+    assertFalse(getVariable(Boolean.class, "s14"));
+    assertTrue(getVariable(Boolean.class, "s15"));
+    assertTrue(getVariable(Boolean.class, "s16"));
+    assertFalse(getVariable(Boolean.class, "s17"));
 
     assertEquals(Script.PyjSet.TYPE, getVariable(Script.PyjClass.class, "set"));
   }
