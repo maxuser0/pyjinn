@@ -2007,7 +2007,8 @@ public class Script {
       if (context.skipStatement()) {
         return;
       }
-      eval(context);
+      // Set $expr variable for interactive interpreter to print result of expression statements.
+      context.set("$expr", eval(context));
     }
 
     default JsonElement astNode() {
