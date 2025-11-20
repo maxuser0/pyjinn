@@ -118,7 +118,7 @@ public class App {
         if (isCodeIncomplete && !line.isEmpty()) {
           continue;
         }
-        if (line.stripTrailing().matches(".*[:(\\[]")) {
+        if (line.stripTrailing().matches(".*[:(\\[\\\\]")) {
           isCodeIncomplete = true;
           continue;
         }
