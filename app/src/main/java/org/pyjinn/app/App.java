@@ -89,10 +89,10 @@ public class App {
     var script = new Script();
     try (var scanner = new Scanner(System.in)) {
       String stdinString = "";
-      boolean startOfBlockElement = false;
+      boolean isCodeIncomplete = false;
       while (true) {
-        boolean isFirstParseLine = stdinString.isEmpty();
-        if (isFirstParseLine) {
+        boolean isFirstLine = stdinString.isEmpty();
+        if (isFirstLine) {
           System.out.printf(">>> ");
         } else {
           stdinString += "\n";
@@ -107,14 +107,19 @@ public class App {
           return;
         }
 
-        if (isFirstParseLine) {
-          startOfBlockElement = line.matches("^(for|while|if|def|class|with) .*");
+        if (isFirstLine) {
+          isCodeIncomplete =
+              line.startsWith("@") || line.matches("^(for|while|if|def|class|with) .*");
         }
         stdinString += line;
-        if (stdinString.trim().isEmpty()) {
+        if (stdinString.strip().isEmpty()) {
           continue;
         }
-        if (startOfBlockElement && !line.isEmpty()) {
+        if (isCodeIncomplete && !line.isEmpty()) {
+          continue;
+        }
+        if (line.stripTrailing().matches(".*[:(\\[]")) {
+          isCodeIncomplete = true;
           continue;
         }
 
