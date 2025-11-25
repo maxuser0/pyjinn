@@ -5,6 +5,7 @@
 build
 
 .vscode
+.DS_Store
 
 app/bin
 grammar/bin
