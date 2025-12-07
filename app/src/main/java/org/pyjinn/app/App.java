@@ -9,8 +9,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
 import java.util.Set;
@@ -20,10 +22,16 @@ import org.pyjinn.parser.PyjinnParser;
 
 public class App {
   public static void main(String[] args) throws Exception {
-    Set<String> argsSet = new HashSet<>(Arrays.asList(args));
+    List<String> argsList = new ArrayList<>(Arrays.asList(args));
+    Set<String> argsSet = new HashSet<>(argsList);
+    boolean compile = argsSet.contains("-c");
+    if (compile) {
+      argsSet.remove("-c");
+      argsList.remove("-c");
+    }
 
-    if (argsSet.equals(Set.of("-i"))) {
-      repl();
+    if (argsSet.contains("-i")) {
+      repl(compile);
       return;
     }
 
@@ -68,10 +76,13 @@ public class App {
     var script = new Script();
     try {
       script.parse(jsonAst);
+      if (compile) {
+        script.compile();
+      }
       script.exec();
 
-      if (args.length == 1) {
-        var func = script.getFunction(args[0]);
+      if (argsList.size() == 1) {
+        var func = script.getFunction(argsList.get(0));
         System.out.println(func);
         var returnValue = func.call(script.mainModule().globals());
         System.out.println(returnValue);
@@ -81,7 +92,7 @@ public class App {
     }
   }
 
-  public static void repl() throws Exception {
+  public static void repl(boolean compile) throws Exception {
     var version = Script.versionInfo();
     System.out.printf("Pyjinn %s\n", version.pyjinnVersion());
     System.out.printf("[Java %s]\n", version.javaVersion());
@@ -126,6 +137,9 @@ public class App {
         try {
           JsonElement jsonAst = PyjinnParser.parse("<stdin>", stdinString);
           script.parse(jsonAst);
+          if (compile) {
+            script.compile();
+          }
           script.exec();
           var expr = script.mainModule().globals().vars().get("$expr");
           if (expr != null) {

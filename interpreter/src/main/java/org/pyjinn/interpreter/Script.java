@@ -141,6 +141,10 @@ public class Script {
       }
     }
 
+    public void compile() {
+      globals.compileGlobalStatements();
+    }
+
     public void exec() {
       if (globals.get("__script__") instanceof Script script) {
         script.moduleHandler.onExecModule(this);
@@ -356,6 +360,11 @@ public class Script {
 
   public Script parse(JsonElement element, String scriptFilename) {
     mainModule().parse(element, scriptFilename);
+    return this;
+  }
+
+  public Script compile() {
+    mainModule().compile();
     return this;
   }
 
@@ -1039,6 +1048,7 @@ public class Script {
       FunctionDef function,
       Context enclosingContext,
       List<Object> defaults,
+      List<Instruction> instructions,
       AtomicInteger zombieCounter)
       implements Function {
     public BoundFunction(FunctionDef function, Context enclosingContext) {
@@ -1046,11 +1056,31 @@ public class Script {
           function,
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
+          /* instructions= */ null,
+          new AtomicInteger());
+    }
+
+    public BoundFunction(
+        FunctionDef function, Context enclosingContext, List<Instruction> instructions) {
+      this(
+          function,
+          enclosingContext,
+          function.evalArgDefaults(enclosingContext),
+          instructions,
           new AtomicInteger());
     }
 
     @Override
     public Object call(Environment env, Object... params) {
+      if (isHalted()) {
+        return null;
+      }
+      var localContext = initLocalContext(env, params);
+      localContext.exec(function.body);
+      return localContext.returnValue();
+    }
+
+    boolean isHalted() {
       if (enclosingContext.env().halted()) {
         // TODO(maxuser): Clear function's internal state to avoid memory leak of the entire script.
         var script = (Script) enclosingContext.env().get("__script__");
@@ -1058,8 +1088,16 @@ public class Script {
             script.mainModule().filename(),
             "function '%s'".formatted(function.identifier().name()),
             zombieCounter.incrementAndGet());
-        return null;
+        return true;
+      } else {
+        return false;
       }
+    }
+
+    Context initLocalContext(Environment env, Object... params) {
+      var localContext =
+          enclosingContext.createLocalContext(
+              function.enclosingClassName, function.identifier.name());
 
       final List<FunctionArg> args = function.args;
       int numParams = params.length;
@@ -1070,10 +1108,6 @@ public class Script {
 
       Set<String> assignedArgs = new HashSet<String>();
       Set<String> unassignedArgs = args.stream().map(a -> a.identifier().name()).collect(toSet());
-
-      var localContext =
-          enclosingContext.createLocalContext(
-              function.enclosingClassName, function.identifier.name());
 
       // Assign additional args to vararg if there is one.
       if (function.vararg().isPresent()) {
@@ -1161,9 +1195,7 @@ public class Script {
             "%s() missing %d positional arguments: %s"
                 .formatted(function.identifier.name(), unassignedArgs.size(), unassignedArgs));
       }
-
-      localContext.exec(function.body);
-      return localContext.returnValue();
+      return localContext;
     }
   }
 
@@ -2784,6 +2816,10 @@ public class Script {
     public Object eval(Context context) {
       var lhsValue = lhs.eval(context);
       var rhsValue = rhs.eval(context);
+      return doOp(context, op, lhsValue, rhsValue);
+    }
+
+    static Object doOp(Context context, Op op, Object lhsValue, Object rhsValue) {
       switch (op) {
         case ADD:
           if (lhsValue instanceof Number lhsNum && rhsValue instanceof Number rhsNum) {
@@ -2914,11 +2950,11 @@ public class Script {
       }
       throw new UnsupportedOperationException(
           String.format(
-              "Binary op not implemented for types `%s %s %s`: %s",
-              getSimpleTypeName(lhsValue), op.symbol(), getSimpleTypeName(rhsValue), this));
+              "Binary op not implemented for types `%s %s %s`",
+              getSimpleTypeName(lhsValue), op.symbol(), getSimpleTypeName(rhsValue)));
     }
 
-    private static long checkNumberAsLong(Object value) {
+    static long checkNumberAsLong(Object value) {
       if (value instanceof Number number && (number instanceof Long || number instanceof Integer)) {
         return number.longValue();
       } else {
@@ -2927,7 +2963,7 @@ public class Script {
       }
     }
 
-    private static Number convertLongToUnsignedIntIfFits(Long longValue) {
+    static Number convertLongToUnsignedIntIfFits(Long longValue) {
       if (longValue > MAX_UNSIGNED_32_BIT_INTEGER || longValue < Integer.MIN_VALUE) {
         return longValue;
       } else {
@@ -2941,7 +2977,7 @@ public class Script {
     }
   }
 
-  private static String getSimpleTypeName(Object value) {
+  static String getSimpleTypeName(Object value) {
     if (value == null) {
       return "NoneType";
     } else if (value instanceof PyjObject pyjObject) {
@@ -5455,7 +5491,7 @@ public class Script {
     }
   }
 
-  private record KeywordArg(String name, Expression value) {}
+  record KeywordArg(String name, Expression value) {}
 
   /**
    * Trivial subclass of HashMap for keyword args.
@@ -5475,7 +5511,6 @@ public class Script {
     @Override
     public Object eval(Context context) {
       var caller = method.eval(context);
-      // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
       List<Object> paramValues = new ArrayList<>();
       for (Expression param : params) {
         if (param instanceof StarredExpression starred) {
@@ -6369,12 +6404,39 @@ public class Script {
     }
 
     /**
+     * Compiles statements added via {@code addGlobalStatement} since last call to {@code
+     * compileGlobalStatements}.
+     */
+    public void compileGlobalStatements() {
+      if (instructions == null) {
+        instructions = new ArrayList<Instruction>();
+      }
+      for (var statement : globalStatements) {
+        Compiler.compile(statement, instructions);
+      }
+      globalStatements.clear();
+    }
+
+    /**
      * Executes statements added via {@code addGlobalStatement} since last call to {@code
      * execGlobalStatements}.
      */
     public void execGlobalStatements() {
-      for (var statement : globalStatements) {
-        globals.exec(statement);
+      if (instructions == null) {
+        for (var statement : globalStatements) {
+          globals.exec(statement);
+        }
+      } else {
+        // TODO(maxuser): Refactor instruction execution loop into a VirtualMachine class?
+        Context context = this;
+        while (true) {
+          int ip = context.ip;
+          var instructions = context.instructions;
+          if (ip >= instructions.size()) {
+            break;
+          }
+          context = instructions.get(ip).execute(context);
+        }
       }
       globalStatements.clear();
     }
@@ -6409,7 +6471,7 @@ public class Script {
     }
   }
 
-  private static class Context {
+  static class Context {
     private static final Object NOT_FOUND = new Object();
 
     private final Context enclosingContext;
@@ -6424,6 +6486,10 @@ public class Script {
 
     protected GlobalContext globals;
     protected final PyjDict vars = new PyjDict();
+
+    Deque<Object> dataStack = new ArrayDeque<>();
+    List<Instruction> instructions = null;
+    int ip = 0; // instruction pointer
 
     // Default constructor is used only for GlobalContext subclass.
     private Context() {
