@@ -13,7 +13,7 @@ sealed interface Instruction {
   record PushData(Object value) implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.dataStack.push(value);
+      context.pushData(value);
       ++context.ip;
       return context;
     }
@@ -28,7 +28,7 @@ sealed interface Instruction {
     public Context execute(Context context) {
       Object[] params = new Object[numArgs];
       for (int i = 0; i < numArgs; ++i) {
-        Object value = context.dataStack.pop();
+        Object value = context.popData();
         if (value instanceof Script.KeywordArg arg) {
           params[i] = new KeywordArg(arg.name(), arg.value().eval(context));
         } else if (value instanceof StarredExpression expr) {
@@ -37,7 +37,7 @@ sealed interface Instruction {
           params[i] = value;
         }
       }
-      var function = context.dataStack.pop();
+      var function = context.popData();
       return call(context, function, params);
     }
 
@@ -95,7 +95,7 @@ sealed interface Instruction {
         Function function;
         if ((function = InterfaceProxy.getFunctionPassedToInterface(type, paramValues.toArray()))
             != null) {
-          context.dataStack.push(
+          context.pushData(
               InterfaceProxy.promoteFunctionToJavaInterface(context.env(), type, function));
           ++context.ip;
           return context;
@@ -110,7 +110,7 @@ sealed interface Instruction {
         } else {
           context.enterFunction(filename, lineno);
           var localContext = binding.initLocalContext(context.env(), paramValues.toArray());
-          localContext.dataStack.push(context);
+          localContext.pushData(context);
           localContext.instructions = binding.instructions();
           return localContext;
         }
@@ -119,7 +119,7 @@ sealed interface Instruction {
       if (caller instanceof Function function) {
         try {
           context.enterFunction(filename, lineno);
-          context.dataStack.push(nullable(function.call(context.env(), paramValues.toArray())));
+          context.pushData(function.call(context.env(), paramValues.toArray()));
           ++context.ip;
           return context;
         } finally {
@@ -137,20 +137,12 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       context.leaveFunction();
-      var callingContext = (Context) context.dataStack.pop();
-      Object returnValue = null; // TODO(maxuser)! supply return value
-      callingContext.dataStack.push(nullable(returnValue));
+      var returnValue = context.popData();
+      var callingContext = (Context) context.popData();
+      callingContext.pushData(returnValue);
       ++callingContext.ip;
       return callingContext;
     }
-  }
-
-  static class NoneType {}
-
-  static final NoneType NONE = new NoneType();
-
-  private static Object nullable(Object value) {
-    return value == null ? NONE : value;
   }
 
   record BindFunction(FunctionDef function, List<Instruction> instructions) implements Instruction {
@@ -165,7 +157,7 @@ sealed interface Instruction {
   record Identifier(String name) implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.dataStack.push(context.get(name));
+      context.pushData(context.get(name));
       ++context.ip;
       return context;
     }
@@ -174,7 +166,7 @@ sealed interface Instruction {
   record Constant(Object value) implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.dataStack.push(value);
+      context.pushData(value);
       ++context.ip;
       return context;
     }
@@ -183,9 +175,9 @@ sealed interface Instruction {
   record BinaryOp(Script.BinaryOp.Op op) implements Instruction {
     @Override
     public Context execute(Context context) {
-      var rhs = context.dataStack.pop();
-      var lhs = context.dataStack.pop();
-      context.dataStack.push(Script.BinaryOp.doOp(context, op, lhs, rhs));
+      var rhs = context.popData();
+      var lhs = context.popData();
+      context.pushData(Script.BinaryOp.doOp(context, op, lhs, rhs));
       ++context.ip;
       return context;
     }
@@ -194,8 +186,8 @@ sealed interface Instruction {
   record Star() implements Instruction {
     @Override
     public Context execute(Context context) {
-      var value = context.dataStack.pop();
-      context.dataStack.push(new StarredValue(value));
+      var value = context.popData();
+      context.pushData(new StarredValue(value));
       ++context.ip;
       return context;
     }
@@ -204,7 +196,7 @@ sealed interface Instruction {
   record AssignVariable(String varName) implements Instruction {
     @Override
     public Context execute(Context context) {
-      var value = context.dataStack.pop();
+      var value = context.popData();
       context.set(varName, value);
       ++context.ip;
       return context;
@@ -222,7 +214,7 @@ sealed interface Instruction {
   record PopData() implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.dataStack.pop();
+      context.popData();
       ++context.ip;
       return context;
     }

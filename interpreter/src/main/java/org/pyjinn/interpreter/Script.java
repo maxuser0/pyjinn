@@ -6487,9 +6487,21 @@ public class Script {
     protected GlobalContext globals;
     protected final PyjDict vars = new PyjDict();
 
-    Deque<Object> dataStack = new ArrayDeque<>();
+    private Deque<Object> dataStack = new ArrayDeque<>();
     List<Instruction> instructions = null;
     int ip = 0; // instruction pointer
+
+    // NULL_INSTANCE stands in for null in dataStack since Deque cannot store nulls directly.
+    private static final Object NULL_INSTANCE = new Object();
+
+    public void pushData(Object data) {
+      dataStack.push(data == null ? NULL_INSTANCE : data);
+    }
+
+    public Object popData() {
+      var data = dataStack.pop();
+      return data == NULL_INSTANCE ? null : data;
+    }
 
     // Default constructor is used only for GlobalContext subclass.
     private Context() {

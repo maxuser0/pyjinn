@@ -24,6 +24,8 @@ class Compiler {
       compileAssignment(assign, instructions);
     } else if (statement instanceof FunctionDef function) {
       compileFunctionDef(function, instructions);
+    } else if (statement instanceof ReturnStatement returnStatement) {
+      compileReturnStatement(returnStatement, instructions);
     } else {
       throw new IllegalArgumentException("Unsupported statement type: " + statement.getClass());
     }
@@ -47,8 +49,19 @@ class Compiler {
   private static void compileFunctionDef(FunctionDef function, List<Instruction> instructions) {
     var functionInstructions = new ArrayList<Instruction>();
     compile(function.body(), functionInstructions);
+
+    // Add trailing null return in case there are no earlier returns or earlier returns don't cover
+    // all code paths.
+    instructions.add(new Instruction.PushData(null));
     functionInstructions.add(new Instruction.FunctionReturn());
+
     instructions.add(new Instruction.BindFunction(function, functionInstructions));
+  }
+
+  private static void compileReturnStatement(
+      ReturnStatement returnStatement, List<Instruction> instructions) {
+    compileExpression(returnStatement.returnValue(), instructions);
+    instructions.add(new Instruction.FunctionReturn());
   }
 
   private static void compileFunctionCall(FunctionCall call, List<Instruction> instructions) {
