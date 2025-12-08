@@ -2526,11 +2526,14 @@ public class Script {
       }
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public Object eval(Context context) {
       var lhsValue = lhs.eval(context);
       var rhsValue = rhs.eval(context);
+      return doOp(context, op, lhsValue, rhsValue);
+    }
+
+    static Object doOp(Context context, Op op, Object lhsValue, Object rhsValue) {
       switch (op) {
         case IS:
           return lhsValue == rhsValue;
@@ -2612,7 +2615,9 @@ public class Script {
           }
       }
       throw new UnsupportedOperationException(
-          String.format("Comparison op not supported: %s %s %s", lhs, op.symbol(), rhs));
+          String.format(
+              "Comparison op not supported: %s %s %s",
+              getSimpleTypeName(lhsValue), op.symbol(), getSimpleTypeName(rhsValue)));
     }
 
     private static final Optional<Boolean> isIn(Object lhsValue, Object rhsValue) {
@@ -2950,7 +2955,7 @@ public class Script {
       }
       throw new UnsupportedOperationException(
           String.format(
-              "Binary op not implemented for types `%s %s %s`",
+              "Binary op not supported: %s %s %s",
               getSimpleTypeName(lhsValue), op.symbol(), getSimpleTypeName(rhsValue)));
     }
 

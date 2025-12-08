@@ -183,6 +183,17 @@ sealed interface Instruction {
     }
   }
 
+  record Comparison(Script.Comparison.Op op) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var rhs = context.popData();
+      var lhs = context.popData();
+      context.pushData(Script.Comparison.doOp(context, op, lhs, rhs));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record Star() implements Instruction {
     @Override
     public Context execute(Context context) {

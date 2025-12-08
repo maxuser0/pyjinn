@@ -92,6 +92,10 @@ class Compiler {
       compileExpression(binaryOp.lhs(), instructions);
       compileExpression(binaryOp.rhs(), instructions);
       instructions.add(new Instruction.BinaryOp(binaryOp.op()));
+    } else if (expr instanceof Comparison comparison) {
+      compileExpression(comparison.lhs(), instructions);
+      compileExpression(comparison.rhs(), instructions);
+      instructions.add(new Instruction.Comparison(comparison.op()));
     } else {
       throw new UnsupportedOperationException(
           "Expression type not supported: " + expr.getClass().getName());
