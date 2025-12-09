@@ -3,6 +3,8 @@
 
 package org.pyjinn.interpreter;
 
+import static org.pyjinn.interpreter.Script.convertToBool;
+
 import java.util.ArrayList;
 import java.util.List;
 import org.pyjinn.interpreter.Script.*;
@@ -152,6 +154,12 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public String toString() {
+      return "BindFunction[function=%s, %d instructions]"
+          .formatted(function.identifier().name(), instructions.size());
+    }
   }
 
   record Identifier(String name) implements Instruction {
@@ -214,10 +222,23 @@ sealed interface Instruction {
     }
   }
 
-  record Pass() implements Instruction {
+  record JumpIfFalse(int jumpTarget) implements Instruction {
     @Override
     public Context execute(Context context) {
-      ++context.ip;
+      var condition = context.popData();
+      if (convertToBool(condition)) {
+        ++context.ip;
+      } else {
+        context.ip = jumpTarget;
+      }
+      return context;
+    }
+  }
+
+  record Jump(int jumpTarget) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.ip = jumpTarget;
       return context;
     }
   }

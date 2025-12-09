@@ -22,6 +22,8 @@ class Compiler {
       instructions.add(new Instruction.PopData());
     } else if (statement instanceof Assignment assign) {
       compileAssignment(assign, instructions);
+    } else if (statement instanceof IfBlock ifBlock) {
+      compileIfBlock(ifBlock, instructions);
     } else if (statement instanceof FunctionDef function) {
       compileFunctionDef(function, instructions);
     } else if (statement instanceof ReturnStatement returnStatement) {
@@ -43,6 +45,28 @@ class Compiler {
       */
     } else {
       throw new IllegalArgumentException("Unsupported lhs of assignment: " + lhs.getClass());
+    }
+  }
+
+  private static void compileIfBlock(IfBlock ifBlock, List<Instruction> instructions) {
+    compileExpression(ifBlock.condition(), instructions);
+
+    // Add a placeholder null instruction to be filled in below when the jump target is known.
+    int jumpIfBlockSource = instructions.size();
+    instructions.add(null);
+    compileStatement(ifBlock.thenBody(), instructions);
+
+    if (ifBlock.elseBody().isEmpty()) {
+      int jumpIfBlockTarget = instructions.size();
+      instructions.set(jumpIfBlockSource, new Instruction.JumpIfFalse(jumpIfBlockTarget));
+    } else {
+      int jumpElseBlockSource = instructions.size();
+      instructions.add(null);
+      int jumpIfBlockTarget = instructions.size();
+      compileStatement(ifBlock.elseBody().get(), instructions);
+      int jumpElseBlockTarget = instructions.size();
+      instructions.set(jumpIfBlockSource, new Instruction.JumpIfFalse(jumpIfBlockTarget));
+      instructions.set(jumpElseBlockSource, new Instruction.Jump(jumpElseBlockTarget));
     }
   }
 
