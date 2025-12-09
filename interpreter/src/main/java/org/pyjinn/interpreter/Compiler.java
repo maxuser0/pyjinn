@@ -49,6 +49,30 @@ class Compiler {
   }
 
   private static void compileIfBlock(IfBlock ifBlock, List<Instruction> instructions) {
+    // if CONDITION:
+    //   THEN_BODY
+    //
+    // compiles to instructions:
+    //   [0] eval CONDITION
+    //   [1] JumpIfFalse 3  # jumpIfBlockSource = 1, jumpIfBlockTarget = 3
+    //   [2] execute THEN_BODY
+    //   [3] ...
+    //
+    // if CONDITION:
+    //   THEN_BODY
+    // else:
+    //   ELSE_BODY
+    //
+    // compiles to instructions:
+    //   [0] eval CONDITION
+    //   [1] JumpIfFalse 4  # jumpIfBlockSource = 1, jumpIfBlockTarget = 4
+    //   [2] execute THEN_BODY
+    //   [3] Jump 5  # jumpElseBlockSource = 3, jumpElseBlockTarget = 5
+    //   [4] execute ELSE_BODY
+    //   [5] ...
+    //
+    // Note that each "eval" and "execute" operation may expand to multiple instructions.
+
     compileExpression(ifBlock.condition(), instructions);
 
     // Add a placeholder null instruction to be filled in below when the jump target is known.
@@ -120,6 +144,32 @@ class Compiler {
       compileExpression(comparison.lhs(), instructions);
       compileExpression(comparison.rhs(), instructions);
       instructions.add(new Instruction.Comparison(comparison.op()));
+    } else if (expr instanceof IfExpression ifExpr) {
+      // source: BODY if TEST else OR_ELSE
+      // [0] eval TEST
+      // [1] JumpIfFalse 4  # elseJumpSource = 1, elseJumpTarget = 4
+      // [2] eval BODY
+      // [3] Jump 5  # skipElseJumpSource = 3, skipElseJumpTarget = 5
+      // [4] eval OR_ELSE
+      // [5] ...
+      //
+      // Note that each "eval" operation may expand to multiple instructions.
+      compileExpression(ifExpr.test(), instructions);
+
+      int elseJumpSource = instructions.size();
+      instructions.add(null);
+
+      compileExpression(ifExpr.body(), instructions);
+
+      int skipElseJumpSource = instructions.size();
+      instructions.add(null);
+
+      int atElseJumpTarget = instructions.size();
+      compileExpression(ifExpr.orElse(), instructions);
+      int afterElseJumpTarget = instructions.size();
+
+      instructions.set(elseJumpSource, new Instruction.JumpIfFalse(atElseJumpTarget));
+      instructions.set(skipElseJumpSource, new Instruction.Jump(afterElseJumpTarget));
     } else {
       throw new UnsupportedOperationException(
           "Expression type not supported: " + expr.getClass().getName());
