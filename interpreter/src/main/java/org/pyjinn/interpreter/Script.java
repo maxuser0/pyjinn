@@ -6508,6 +6508,14 @@ public class Script {
       return data == NULL_INSTANCE ? null : data;
     }
 
+    public Object peekData() {
+      var data = dataStack.peek();
+      if (data == null) {
+        throw new IllegalStateException("Context data stack is empty");
+      }
+      return data == NULL_INSTANCE ? null : data;
+    }
+
     // Default constructor is used only for GlobalContext subclass.
     private Context() {
       enclosingContext = null;

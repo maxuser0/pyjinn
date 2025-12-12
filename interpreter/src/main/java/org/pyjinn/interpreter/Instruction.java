@@ -4,8 +4,10 @@
 package org.pyjinn.interpreter;
 
 import static org.pyjinn.interpreter.Script.convertToBool;
+import static org.pyjinn.interpreter.Script.getSimpleTypeName;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import org.pyjinn.interpreter.Script.*;
 
@@ -218,6 +220,46 @@ sealed interface Instruction {
       var value = context.popData();
       context.set(varName, value);
       ++context.ip;
+      return context;
+    }
+  }
+
+  record IterableIterator() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var iter = context.popData();
+      context.pushData(Script.getIterable(iter).iterator());
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record IteratorHasNext() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var iter = context.peekData();
+      if (iter instanceof Iterator<?> iterator) {
+        context.pushData(iterator.hasNext());
+        ++context.ip;
+      } else {
+        throw new IllegalStateException(
+            "Expected iterator on data stack but got: " + getSimpleTypeName(iter));
+      }
+      return context;
+    }
+  }
+
+  record IteratorNext() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var iter = context.peekData();
+      if (iter instanceof Iterator<?> iterator) {
+        context.pushData(iterator.next());
+        ++context.ip;
+      } else {
+        throw new IllegalStateException(
+            "Expected iterator on data stack but got: " + getSimpleTypeName(iter));
+      }
       return context;
     }
   }

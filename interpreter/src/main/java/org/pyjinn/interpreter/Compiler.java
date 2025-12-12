@@ -3,6 +3,8 @@
 
 package org.pyjinn.interpreter;
 
+import static org.pyjinn.interpreter.Script.getSimpleTypeName;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -12,18 +14,37 @@ import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
   public static void compile(Statement statement, List<Instruction> instructions) {
-    var compiler = new Compiler();
+    var compiler = new Compiler(/* withinFunction= */ false);
     compiler.compileStatement(statement, instructions);
   }
 
+  private static void compileFunctionBody(Statement statement, List<Instruction> instructions) {
+    var compiler = new Compiler(/* withinFunction= */ true);
+    compiler.compileStatement(statement, instructions);
+  }
+
+  private enum LoopType {
+    WHILE,
+    FOR
+  }
+
+  private final boolean withinFunction;
+  private final Deque<LoopState> loops = new ArrayDeque<>();
+
+  private Compiler(boolean withinFunction) {
+    this.withinFunction = withinFunction;
+  }
+
   private static class LoopState {
+    public final LoopType type;
     private final List<Instruction> instructions;
     public final int continueTarget;
     private final ArrayList<BreakInstruction> breakInstructions;
 
     private record BreakInstruction(int source, Function<Integer, Instruction> instructor) {}
 
-    public LoopState(List<Instruction> instructions) {
+    public LoopState(LoopType type, List<Instruction> instructions) {
+      this.type = type;
       this.instructions = instructions;
       continueTarget = instructions.size();
       breakInstructions = new ArrayList<>();
@@ -35,14 +56,13 @@ class Compiler {
       breakInstructions.add(new BreakInstruction(breakIp, breakInstruction));
     }
 
-    public void close(int breakTarget) {
+    public void close() {
+      int breakTarget = instructions.size();
       for (var breakInstruction : breakInstructions) {
         instructions.set(breakInstruction.source, breakInstruction.instructor.apply(breakTarget));
       }
     }
   }
-
-  private final Deque<LoopState> loops = new ArrayDeque<>();
 
   private LoopState loop() {
     return loops.peek();
@@ -76,6 +96,8 @@ class Compiler {
       compileIfBlock(ifBlock, instructions);
     } else if (statement instanceof WhileBlock whileBlock) {
       compileWhileBlock(whileBlock, instructions);
+    } else if (statement instanceof ForBlock forBlock) {
+      compileForBlock(forBlock, instructions);
     } else if (statement instanceof FunctionDef function) {
       compileFunctionDef(function, instructions);
     } else if (statement instanceof Continue continueStatement) {
@@ -164,21 +186,60 @@ class Compiler {
     // `continue` in BODY -> Jump 0
     // `break` in BODY -> Jump 4
 
-    loops.push(new LoopState(instructions));
+    loops.push(new LoopState(LoopType.WHILE, instructions));
     compileExpression(whileBlock.condition(), instructions);
-    addBreak(ip -> new Instruction.JumpIfFalse(ip));
+    addBreak(breakPos -> new Instruction.JumpIfFalse(breakPos));
     compileStatement(whileBlock.body(), instructions);
     instructions.add(new Instruction.Jump(continueTarget()));
-    loops.pop().close(instructions.size());
+    loops.pop().close();
+  }
+
+  private void compileForBlock(ForBlock forBlock, List<Instruction> instructions) {
+    var vars = forBlock.vars();
+    if (vars instanceof Identifier id) {
+      // for VAR in ITER:
+      //   BODY
+      //
+      // compiles to instructions:
+      //   [0] eval ITER (Iterable<?>)
+      //   [1] eval ITER.iterator() (leave on data stack: $iterator)
+      //   [2] eval $iterator.hasNext()
+      //   [3] JumpIfFalse 7
+      //   [4] eval $iterator.next()
+      //   [5] assign VAR (rhs = $iterator.next())
+      //   [6] execute BODY
+      //   [7] Jump 1
+      //   [8] pop $iterator
+      //
+      // `continue` in BODY -> Jump 1
+      // `break` in BODY -> Jump 7
+
+      compileExpression(forBlock.iter(), instructions); // [0]
+      instructions.add(new Instruction.IterableIterator()); // [1]
+      loops.push(new LoopState(LoopType.FOR, instructions));
+      instructions.add(new Instruction.IteratorHasNext()); // [2]
+      addBreak(breakPos -> new Instruction.JumpIfFalse(breakPos)); // [3]
+      instructions.add(new Instruction.IteratorNext()); // [4]
+      instructions.add(new Instruction.AssignVariable(id.name())); // [5]
+      compileStatement(forBlock.body(), instructions); // [6]
+      instructions.add(new Instruction.Jump(continueTarget())); // [7]
+      loops.pop().close();
+      instructions.add(new Instruction.PopData()); // [8]
+    } else if (vars instanceof TupleLiteral tuple) {
+      // TODO(maxuser)! implement
+      throw new UnsupportedOperationException("TODO: implement tuple assignment in 'for' loop");
+    } else {
+      throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
+    }
   }
 
   private void compileFunctionDef(FunctionDef function, List<Instruction> instructions) {
     var functionInstructions = new ArrayList<Instruction>();
-    compile(function.body(), functionInstructions);
+    compileFunctionBody(function.body(), functionInstructions);
 
     // Add trailing null return in case there are no earlier returns or earlier returns don't cover
     // all code paths.
-    instructions.add(new Instruction.PushData(null));
+    functionInstructions.add(new Instruction.PushData(null));
     functionInstructions.add(new Instruction.FunctionReturn());
 
     instructions.add(new Instruction.BindFunction(function, functionInstructions));
@@ -190,11 +251,21 @@ class Compiler {
   }
 
   private void compileBreakStatement(Break breakStatement, List<Instruction> instructions) {
-    addBreak(ip -> new Instruction.Jump(ip));
+    addBreak(breakPos -> new Instruction.Jump(breakPos));
   }
 
   private void compileReturnStatement(
       ReturnStatement returnStatement, List<Instruction> instructions) {
+    if (!withinFunction) {
+      throw new IllegalStateException("'return' outside function");
+    }
+
+    // Pop iterator from data stack for each enclosing `for` loop. But don't pop or close the loops
+    // because there can be instructions following this return statement along other branches.
+    loops.stream()
+        .filter(loop -> loop.type == LoopType.FOR)
+        .forEach(loop -> instructions.add(new Instruction.PopData()));
+
     compileExpression(returnStatement.returnValue(), instructions);
     instructions.add(new Instruction.FunctionReturn());
   }
@@ -259,7 +330,7 @@ class Compiler {
       instructions.set(skipElseJumpSource, new Instruction.Jump(afterElseJumpTarget));
     } else {
       throw new UnsupportedOperationException(
-          "Expression type not supported: " + expr.getClass().getName());
+          "Expression type not supported: " + getSimpleTypeName(expr));
     }
   }
 }
