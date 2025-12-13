@@ -8,7 +8,9 @@ import static org.pyjinn.interpreter.Script.getSimpleTypeName;
 
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import org.pyjinn.interpreter.Script.*;
 
 sealed interface Instruction {
@@ -292,5 +294,54 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+  }
+
+  record LoadTuple(int numElements) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var list = loadSequence(context, numElements);
+      context.pushData(new PyjTuple(list.toArray()));
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record LoadList(int numElements) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var list = loadSequence(context, numElements);
+      context.pushData(new PyjList(list));
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record LoadSet(int numElements) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var list = loadSequence(context, numElements);
+      context.pushData(new PyjSet(Set.copyOf(list)));
+      ++context.ip;
+      return context;
+    }
+  }
+
+  // Note that numElements does not reflect the number of elements of starred expressions, so
+  // (a, *b, c) counts as 3 elements.
+  private static List<Object> loadSequence(Context context, int numElements) {
+    var list = new LinkedList<Object>();
+    for (int i = 0; i < numElements; ++i) {
+      var element = context.popData();
+      if (element instanceof StarredValue starred) {
+        var values = new ArrayList<Object>();
+        Script.getIterable(starred.value()).forEach(values::add);
+        for (var value : values.reversed()) {
+          list.addFirst(value);
+        }
+      } else {
+        list.addFirst(element);
+      }
+    }
+    return list;
   }
 }

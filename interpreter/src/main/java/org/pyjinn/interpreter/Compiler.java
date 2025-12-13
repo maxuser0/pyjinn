@@ -13,9 +13,16 @@ import java.util.function.Function;
 import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
+  private static boolean debug = false;
+
   public static void compile(Statement statement, List<Instruction> instructions) {
     var compiler = new Compiler(/* withinFunction= */ false);
     compiler.compileStatement(statement, instructions);
+    if (debug) {
+      for (int i = 0; i < instructions.size(); ++i) {
+        System.out.printf("[%d] %s\n", i, instructions.get(i));
+      }
+    }
   }
 
   private static void compileFunctionBody(Statement statement, List<Instruction> instructions) {
@@ -287,6 +294,12 @@ class Compiler {
   private void compileExpression(Expression expr, List<Instruction> instructions) {
     if (expr instanceof Identifier identifier) {
       instructions.add(new Instruction.Identifier(identifier.name()));
+    } else if (expr instanceof TupleLiteral tuple) {
+      compileTupleLiteral(tuple, instructions);
+    } else if (expr instanceof ListLiteral list) {
+      compileListLiteral(list, instructions);
+    } else if (expr instanceof SetLiteral set) {
+      compileSetLiteral(set, instructions);
     } else if (expr instanceof FunctionCall call) {
       compileFunctionCall(call, instructions);
     } else if (expr instanceof StarredExpression starred) {
@@ -332,5 +345,29 @@ class Compiler {
       throw new UnsupportedOperationException(
           "Expression type not supported: " + getSimpleTypeName(expr));
     }
+  }
+
+  private void compileTupleLiteral(TupleLiteral tuple, List<Instruction> instructions) {
+    // Push elements' values onto the stack in head to tail order.
+    for (var element : tuple.elements()) {
+      compileExpression(element, instructions);
+    }
+    instructions.add(new Instruction.LoadTuple(tuple.elements().size()));
+  }
+
+  private void compileListLiteral(ListLiteral list, List<Instruction> instructions) {
+    // Push elements' values onto the stack in head to tail order.
+    for (var element : list.elements()) {
+      compileExpression(element, instructions);
+    }
+    instructions.add(new Instruction.LoadList(list.elements().size()));
+  }
+
+  private void compileSetLiteral(SetLiteral set, List<Instruction> instructions) {
+    // Push elements' values onto the stack in head to tail order.
+    for (var element : set.elements()) {
+      compileExpression(element, instructions);
+    }
+    instructions.add(new Instruction.LoadSet(set.elements().size()));
   }
 }

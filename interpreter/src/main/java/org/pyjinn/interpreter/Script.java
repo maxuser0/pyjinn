@@ -6478,6 +6478,7 @@ public class Script {
 
   static class Context {
     private static final Object NOT_FOUND = new Object();
+    private static boolean debug = false;
 
     private final Context enclosingContext;
     private final ClassMethodName classMethodName;
@@ -6500,12 +6501,15 @@ public class Script {
     private static final Object NULL_INSTANCE = new Object();
 
     public void pushData(Object data) {
+      if (debug) System.out.println("push: " + data);
       dataStack.push(data == null ? NULL_INSTANCE : data);
     }
 
     public Object popData() {
       var data = dataStack.pop();
-      return data == NULL_INSTANCE ? null : data;
+      data = data == NULL_INSTANCE ? null : data;
+      if (debug) System.out.println("pop: " + data);
+      return data;
     }
 
     public Object peekData() {
@@ -6513,7 +6517,9 @@ public class Script {
       if (data == null) {
         throw new IllegalStateException("Context data stack is empty");
       }
-      return data == NULL_INSTANCE ? null : data;
+      data = data == NULL_INSTANCE ? null : data;
+      if (debug) System.out.println("peek: " + data);
+      return data;
     }
 
     // Default constructor is used only for GlobalContext subclass.
