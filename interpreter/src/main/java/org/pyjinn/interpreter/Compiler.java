@@ -307,6 +307,9 @@ class Compiler {
       instructions.add(new Instruction.Star());
     } else if (expr instanceof ConstantExpression constant) {
       instructions.add(new Instruction.Constant(constant.value()));
+    } else if (expr instanceof UnaryOp unaryOp) {
+      compileExpression(unaryOp.operand(), instructions);
+      instructions.add(new Instruction.UnaryOp(unaryOp.op()));
     } else if (expr instanceof BinaryOp binaryOp) {
       compileExpression(binaryOp.lhs(), instructions);
       compileExpression(binaryOp.rhs(), instructions);

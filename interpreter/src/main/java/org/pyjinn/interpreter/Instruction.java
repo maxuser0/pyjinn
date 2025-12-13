@@ -184,6 +184,16 @@ sealed interface Instruction {
     }
   }
 
+  record UnaryOp(Script.UnaryOp.Op op) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var operand = context.popData();
+      context.pushData(Script.UnaryOp.doOp(context, op, operand));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record BinaryOp(Script.BinaryOp.Op op) implements Instruction {
     @Override
     public Context execute(Context context) {

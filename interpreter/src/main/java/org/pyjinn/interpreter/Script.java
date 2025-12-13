@@ -2748,19 +2748,23 @@ public class Script {
     @Override
     public Object eval(Context context) {
       var value = operand.eval(context);
+      return doOp(context, op, value);
+    }
+
+    static Object doOp(Context context, Op op, Object operand) {
       switch (op) {
         case SUB:
-          if (value instanceof Number number) {
+          if (operand instanceof Number number) {
             return Numbers.negate(number);
           }
           break;
         case NOT:
-          return !convertToBool(value);
+          return !convertToBool(operand);
       }
       throw new IllegalArgumentException(
           String.format(
               "bad operand type for unary %s: '%s' (%s)",
-              op.symbol(), value.getClass().getName(), operand));
+              op.symbol(), getSimpleTypeName(operand), operand));
     }
 
     @Override
