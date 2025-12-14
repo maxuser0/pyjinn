@@ -2114,6 +2114,11 @@ public class Script {
 
     public static void assignTuple(Context context, TupleLiteral lhsTuple, Object rhsValue) {
       List<Identifier> lhsVars = lhsTuple.elements().stream().map(Identifier.class::cast).toList();
+      assignIdentifierTuple(context, lhsVars, rhsValue);
+    }
+
+    public static void assignIdentifierTuple(
+        Context context, List<Identifier> lhsVars, Object rhsValue) {
       rhsValue = promoteArrayToTuple(rhsValue);
       if (rhsValue instanceof ItemGetter getter && rhsValue instanceof Lengthable lengthable) {
         int lengthToUnpack = lengthable.__len__();

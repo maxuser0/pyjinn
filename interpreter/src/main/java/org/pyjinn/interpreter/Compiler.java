@@ -203,41 +203,45 @@ class Compiler {
 
   private void compileForBlock(ForBlock forBlock, List<Instruction> instructions) {
     var vars = forBlock.vars();
+    final Instruction iterVarAssignment;
     if (vars instanceof Identifier id) {
-      // for VAR in ITER:
-      //   BODY
-      //
-      // compiles to instructions:
-      //   [0] eval ITER (Iterable<?>)
-      //   [1] eval ITER.iterator() (leave on data stack: $iterator)
-      //   [2] eval $iterator.hasNext()
-      //   [3] JumpIfFalse 7
-      //   [4] eval $iterator.next()
-      //   [5] assign VAR (rhs = $iterator.next())
-      //   [6] execute BODY
-      //   [7] Jump 1
-      //   [8] pop $iterator
-      //
-      // `continue` in BODY -> Jump 1
-      // `break` in BODY -> Jump 7
-
-      compileExpression(forBlock.iter(), instructions); // [0]
-      instructions.add(new Instruction.IterableIterator()); // [1]
-      loops.push(new LoopState(LoopType.FOR, instructions));
-      instructions.add(new Instruction.IteratorHasNext()); // [2]
-      addBreak(breakPos -> new Instruction.JumpIfFalse(breakPos)); // [3]
-      instructions.add(new Instruction.IteratorNext()); // [4]
-      instructions.add(new Instruction.AssignVariable(id.name())); // [5]
-      compileStatement(forBlock.body(), instructions); // [6]
-      instructions.add(new Instruction.Jump(continueTarget())); // [7]
-      loops.pop().close();
-      instructions.add(new Instruction.PopData()); // [8]
-    } else if (vars instanceof TupleLiteral tuple) {
-      // TODO(maxuser)! implement
-      throw new UnsupportedOperationException("TODO: implement tuple assignment in 'for' loop");
+      iterVarAssignment = new Instruction.AssignVariable(id.name());
+    } else if (vars instanceof TupleLiteral lhsTuple) {
+      iterVarAssignment =
+          new Instruction.AssignTuple(
+              lhsTuple.elements().stream().map(Identifier.class::cast).toList());
     } else {
       throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
     }
+
+    // for VAR, ... in ITER:
+    //   BODY
+    //
+    // compiles to instructions:
+    //   [0] eval ITER (Iterable<?>)
+    //   [1] eval ITER.iterator() (leave on data stack: $iterator)
+    //   [2] eval $iterator.hasNext()
+    //   [3] JumpIfFalse 7
+    //   [4] eval $iterator.next()
+    //   [5] assign VAR, ... (rhs = $iterator.next())
+    //   [6] execute BODY
+    //   [7] Jump 1
+    //   [8] pop $iterator
+    //
+    // `continue` in BODY -> Jump 1
+    // `break` in BODY -> Jump 7
+
+    compileExpression(forBlock.iter(), instructions); // [0]
+    instructions.add(new Instruction.IterableIterator()); // [1]
+    loops.push(new LoopState(LoopType.FOR, instructions));
+    instructions.add(new Instruction.IteratorHasNext()); // [2]
+    addBreak(breakPos -> new Instruction.JumpIfFalse(breakPos)); // [3]
+    instructions.add(new Instruction.IteratorNext()); // [4]
+    instructions.add(iterVarAssignment); // [5]
+    compileStatement(forBlock.body(), instructions); // [6]
+    instructions.add(new Instruction.Jump(continueTarget())); // [7]
+    loops.pop().close();
+    instructions.add(new Instruction.PopData()); // [8]
   }
 
   private void compileFunctionDef(FunctionDef function, List<Instruction> instructions) {

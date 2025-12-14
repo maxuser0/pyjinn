@@ -236,6 +236,16 @@ sealed interface Instruction {
     }
   }
 
+  record AssignTuple(List<Script.Identifier> varNames) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var value = context.popData();
+      Assignment.assignIdentifierTuple(context, varNames, value);
+      ++context.ip;
+      return context;
+    }
+  }
+
   record IterableIterator() implements Instruction {
     @Override
     public Context execute(Context context) {
