@@ -139,7 +139,7 @@ class Compiler {
     //
     // compiles to instructions:
     //   [0] eval CONDITION
-    //   [1] JumpIfFalse 3  # jumpIfBlockSource = 1, jumpIfBlockTarget = 3
+    //   [1] PopJumpIfFalse 3  # jumpIfBlockSource = 1, jumpIfBlockTarget = 3
     //   [2] execute THEN_BODY
     //   [3] ...
     //
@@ -150,7 +150,7 @@ class Compiler {
     //
     // compiles to instructions:
     //   [0] eval CONDITION
-    //   [1] JumpIfFalse 4  # jumpIfBlockSource = 1, jumpIfBlockTarget = 4
+    //   [1] PopJumpIfFalse 4  # jumpIfBlockSource = 1, jumpIfBlockTarget = 4
     //   [2] execute THEN_BODY
     //   [3] Jump 5  # jumpElseBlockSource = 3, jumpElseBlockTarget = 5
     //   [4] execute ELSE_BODY
@@ -167,14 +167,14 @@ class Compiler {
 
     if (ifBlock.elseBody().isEmpty()) {
       int jumpIfBlockTarget = instructions.size();
-      instructions.set(jumpIfBlockSource, new Instruction.JumpIfFalse(jumpIfBlockTarget));
+      instructions.set(jumpIfBlockSource, new Instruction.PopJumpIfFalse(jumpIfBlockTarget));
     } else {
       int jumpElseBlockSource = instructions.size();
       instructions.add(null);
       int jumpIfBlockTarget = instructions.size();
       compileStatement(ifBlock.elseBody().get(), instructions);
       int jumpElseBlockTarget = instructions.size();
-      instructions.set(jumpIfBlockSource, new Instruction.JumpIfFalse(jumpIfBlockTarget));
+      instructions.set(jumpIfBlockSource, new Instruction.PopJumpIfFalse(jumpIfBlockTarget));
       instructions.set(jumpElseBlockSource, new Instruction.Jump(jumpElseBlockTarget));
     }
   }
@@ -185,7 +185,7 @@ class Compiler {
     //
     // compiles to instructions:
     //   [0] eval CONDITION
-    //   [1] JumpIfFalse 4  # breakLoopSource = 1, breakLoopTarget = 4
+    //   [1] PopJumpIfFalse 4  # breakLoopSource = 1, breakLoopTarget = 4
     //   [2] execute BODY
     //   [3] Jump 0  # continueLoopSource = 3, continueLoopTarget = 0
     //   [4] ...
@@ -195,7 +195,7 @@ class Compiler {
 
     loops.push(new LoopState(LoopType.WHILE, instructions));
     compileExpression(whileBlock.condition(), instructions);
-    addBreak(breakPos -> new Instruction.JumpIfFalse(breakPos));
+    addBreak(breakPos -> new Instruction.PopJumpIfFalse(breakPos));
     compileStatement(whileBlock.body(), instructions);
     instructions.add(new Instruction.Jump(continueTarget()));
     loops.pop().close();
@@ -221,7 +221,7 @@ class Compiler {
     //   [0] eval ITER (Iterable<?>)
     //   [1] eval ITER.iterator() (leave on data stack: $iterator)
     //   [2] eval $iterator.hasNext()
-    //   [3] JumpIfFalse 7
+    //   [3] PopJumpIfFalse 7
     //   [4] eval $iterator.next()
     //   [5] assign VAR, ... (rhs = $iterator.next())
     //   [6] execute BODY
@@ -235,7 +235,7 @@ class Compiler {
     instructions.add(new Instruction.IterableIterator()); // [1]
     loops.push(new LoopState(LoopType.FOR, instructions));
     instructions.add(new Instruction.IteratorHasNext()); // [2]
-    addBreak(breakPos -> new Instruction.JumpIfFalse(breakPos)); // [3]
+    addBreak(breakPos -> new Instruction.PopJumpIfFalse(breakPos)); // [3]
     instructions.add(new Instruction.IteratorNext()); // [4]
     instructions.add(iterVarAssignment); // [5]
     compileStatement(forBlock.body(), instructions); // [6]
@@ -322,10 +322,45 @@ class Compiler {
       compileExpression(comparison.lhs(), instructions);
       compileExpression(comparison.rhs(), instructions);
       instructions.add(new Instruction.Comparison(comparison.op()));
+    } else if (expr instanceof BoolOp boolOp) {
+      // source: VALUE1 and VALUE2 and VALUE3...
+      // [0] eval VALUE1
+      // [1] JumpIfFalseOrPop 5
+      // [2] eval VALUE2
+      // [3] JumpIfFalseOrPop 5
+      // [4] eval VALUE3
+      // [5] ...
+
+      // source: VALUE1 or VALUE2 or VALUE3...
+      // [0] eval VALUE1
+      // [1] JumpIfTrueOrPop 5
+      // [2] eval VALUE2
+      // [3] JumpIfTrueOrPop 5
+      // [4] eval VALUE3
+      // [5] ...
+
+      var values = boolOp.values();
+      var placeholderJumps = new ArrayList<Integer>();
+
+      compileExpression(values.get(0), instructions);
+      for (int i = 1; i < values.size(); ++i) {
+        placeholderJumps.add(instructions.size());
+        instructions.add(null);
+        compileExpression(boolOp.values().get(i), instructions);
+      }
+
+      int jumpTarget = instructions.size();
+      var jumpInstruction =
+          boolOp.op() == BoolOp.Op.AND
+              ? new Instruction.JumpIfFalseOrPop(jumpTarget)
+              : new Instruction.JumpIfTrueOrPop(jumpTarget);
+      for (int jumpSource : placeholderJumps) {
+        instructions.set(jumpSource, jumpInstruction);
+      }
     } else if (expr instanceof IfExpression ifExpr) {
       // source: BODY if TEST else OR_ELSE
       // [0] eval TEST
-      // [1] JumpIfFalse 4  # elseJumpSource = 1, elseJumpTarget = 4
+      // [1] PopJumpIfFalse 4  # elseJumpSource = 1, elseJumpTarget = 4
       // [2] eval BODY
       // [3] Jump 5  # skipElseJumpSource = 3, skipElseJumpTarget = 5
       // [4] eval OR_ELSE
@@ -346,7 +381,7 @@ class Compiler {
       compileExpression(ifExpr.orElse(), instructions);
       int afterElseJumpTarget = instructions.size();
 
-      instructions.set(elseJumpSource, new Instruction.JumpIfFalse(atElseJumpTarget));
+      instructions.set(elseJumpSource, new Instruction.PopJumpIfFalse(atElseJumpTarget));
       instructions.set(skipElseJumpSource, new Instruction.Jump(afterElseJumpTarget));
     } else {
       throw new UnsupportedOperationException(

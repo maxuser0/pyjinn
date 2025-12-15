@@ -286,11 +286,39 @@ sealed interface Instruction {
     }
   }
 
-  record JumpIfFalse(int jumpTarget) implements Instruction {
+  record PopJumpIfFalse(int jumpTarget) implements Instruction {
     @Override
     public Context execute(Context context) {
       var condition = context.popData();
       if (convertToBool(condition)) {
+        ++context.ip;
+      } else {
+        context.ip = jumpTarget;
+      }
+      return context;
+    }
+  }
+
+  record JumpIfTrueOrPop(int jumpTarget) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var value = context.peekData();
+      if (convertToBool(value)) {
+        context.ip = jumpTarget;
+      } else {
+        context.popData();
+        ++context.ip;
+      }
+      return context;
+    }
+  }
+
+  record JumpIfFalseOrPop(int jumpTarget) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var value = context.peekData();
+      if (convertToBool(value)) {
+        context.popData();
         ++context.ip;
       } else {
         context.ip = jumpTarget;
