@@ -25,6 +25,17 @@ sealed interface Instruction {
     }
   }
 
+  record BoundMethod(String methodName, SymbolCache symbolCache, Expression objectExpression)
+      implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var object = context.popData();
+      context.pushData(new Script.BoundMethod(object, methodName, symbolCache, objectExpression));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record StarredValue(Object value) {}
 
   record KeywordArg(String name, Object value) {}

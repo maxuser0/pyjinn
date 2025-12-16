@@ -295,6 +295,14 @@ class Compiler {
     instructions.add(new Instruction.FunctionCall(call.filename(), call.lineno(), numArgs));
   }
 
+  private void compileBoundMethod(
+      BoundMethodExpression boundMethod, List<Instruction> instructions) {
+    compileExpression(boundMethod.object(), instructions);
+    instructions.add(
+        new Instruction.BoundMethod(
+            boundMethod.methodId().name(), boundMethod.symbolCache(), boundMethod.object()));
+  }
+
   private void compileExpression(Expression expr, List<Instruction> instructions) {
     if (expr instanceof Identifier identifier) {
       instructions.add(new Instruction.Identifier(identifier.name()));
@@ -304,8 +312,10 @@ class Compiler {
       compileListLiteral(list, instructions);
     } else if (expr instanceof SetLiteral set) {
       compileSetLiteral(set, instructions);
-    } else if (expr instanceof FunctionCall call) {
-      compileFunctionCall(call, instructions);
+    } else if (expr instanceof FunctionCall functionCall) {
+      compileFunctionCall(functionCall, instructions);
+    } else if (expr instanceof BoundMethodExpression boundMethod) {
+      compileBoundMethod(boundMethod, instructions);
     } else if (expr instanceof StarredExpression starred) {
       compileExpression(starred.value(), instructions);
       instructions.add(new Instruction.Star());
