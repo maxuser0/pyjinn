@@ -126,8 +126,8 @@ sealed interface Instruction {
           return context;
         } else {
           context.enterFunction(filename, lineno);
-          var localContext = binding.initLocalContext(context.env(), paramValues.toArray());
-          localContext.pushData(context);
+          var localContext =
+              binding.initLocalContext(/* callingContext= */ context, paramValues.toArray());
           localContext.instructions = binding.instructions();
           return localContext;
         }
@@ -155,7 +155,7 @@ sealed interface Instruction {
     public Context execute(Context context) {
       context.leaveFunction();
       var returnValue = context.popData();
-      var callingContext = (Context) context.popData();
+      var callingContext = context.callingContext();
       callingContext.pushData(returnValue);
       ++callingContext.ip;
       return callingContext;

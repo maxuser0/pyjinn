@@ -1075,7 +1075,10 @@ public class Script {
       if (isHalted()) {
         return null;
       }
-      var localContext = initLocalContext(env, params);
+      // TODO(maxuser): Either change the in-script call to this call() method to somehow pass the
+      // callingContext or eliminate this tree-walk implementation in favor of the compiled form in
+      // Instruction.java.
+      var localContext = initLocalContext(/* callingContext= */ null, params);
       localContext.exec(function.body);
       return localContext.returnValue();
     }
@@ -1094,10 +1097,10 @@ public class Script {
       }
     }
 
-    Context initLocalContext(Environment env, Object... params) {
+    Context initLocalContext(Context callingContext, Object[] params) {
       var localContext =
           enclosingContext.createLocalContext(
-              function.enclosingClassName, function.identifier.name());
+              callingContext, function.enclosingClassName, function.identifier.name());
 
       final List<FunctionArg> args = function.args;
       int numParams = params.length;
@@ -3692,7 +3695,10 @@ public class Script {
       implements Expression {
     @Override
     public Object eval(Context context) {
-      var localContext = context.createLocalContext();
+      // TODO(maxuser): Either change the in-script call to this eval() method to somehow pass the
+      // callingContext or eliminate this tree-walk implementation in favor of the compiled form in
+      // Instruction.java.
+      var localContext = context.createLocalContext(/* callingContext= */ null);
       var list = new PyjList();
       // TODO(maxuser): Share portions of impl with ForBlock::exec.
       final Identifier loopVar;
@@ -4506,7 +4512,10 @@ public class Script {
                   "Invoking lambda with %d args but %d required", params.length, args.size()));
         }
 
-        var localContext = enclosingContext.createLocalContext();
+        // TODO(maxuser): Either change the in-script call to this call() method to somehow pass the
+        // callingContext or eliminate this tree-walk implementation in favor of the compiled form
+        // in Instruction.java.
+        var localContext = enclosingContext.createLocalContext(/* callingContext= */ null);
         for (int i = 0; i < args.size(); ++i) {
           var arg = args.get(i);
           var argValue = params[i];
@@ -6489,7 +6498,8 @@ public class Script {
     private static final Object NOT_FOUND = new Object();
     private static boolean debug = false;
 
-    private final Context enclosingContext;
+    private final Context callingContext; // for returning to caller in compiled mode
+    private final Context enclosingContext; // for resolving variables
     private final ClassMethodName classMethodName;
     private Set<String> globalVarNames = null;
     private Set<String> nonlocalVarNames = null;
@@ -6508,6 +6518,10 @@ public class Script {
 
     // NULL_INSTANCE stands in for null in dataStack since Deque cannot store nulls directly.
     private static final Object NULL_INSTANCE = new Object();
+
+    public Context callingContext() {
+      return callingContext;
+    }
 
     public void pushData(Object data) {
       if (debug) System.out.println("push: " + data);
@@ -6533,17 +6547,22 @@ public class Script {
 
     // Default constructor is used only for GlobalContext subclass.
     private Context() {
+      callingContext = null;
       enclosingContext = null;
       classMethodName = new ClassMethodName("<>", "<>");
     }
 
-    private Context(GlobalContext globals, Context enclosingContext) {
-      this(globals, enclosingContext, enclosingContext.classMethodName);
+    private Context(GlobalContext globals, Context callingContext, Context enclosingContext) {
+      this(globals, callingContext, enclosingContext, enclosingContext.classMethodName);
     }
 
     private Context(
-        GlobalContext globals, Context enclosingContext, ClassMethodName classMethodName) {
+        GlobalContext globals,
+        Context callingContext,
+        Context enclosingContext,
+        ClassMethodName classMethodName) {
       this.globals = globals;
+      this.callingContext = callingContext;
       this.enclosingContext = enclosingContext == globals ? null : enclosingContext;
       this.classMethodName = classMethodName;
     }
@@ -6560,13 +6579,17 @@ public class Script {
       globals.getCallStack().pop();
     }
 
-    public Context createLocalContext(String enclosingClassName, String enclosingMethodName) {
+    public Context createLocalContext(
+        Context callingContext, String enclosingClassName, String enclosingMethodName) {
       return new Context(
-          globals, this, new ClassMethodName(enclosingClassName, enclosingMethodName));
+          globals,
+          callingContext,
+          /* enclosingContext= */ this,
+          new ClassMethodName(enclosingClassName, enclosingMethodName));
     }
 
-    public Context createLocalContext() {
-      return new Context(globals, this);
+    public Context createLocalContext(Context callingContext) {
+      return new Context(globals, callingContext, /* enclosingContext= */ this);
     }
 
     public void declareGlobalVar(String name) {

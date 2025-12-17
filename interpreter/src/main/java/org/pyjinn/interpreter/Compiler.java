@@ -123,7 +123,7 @@ class Compiler {
     if (lhs instanceof Identifier identifier) {
       compileExpression(assign.rhs(), instructions);
       instructions.add(new Instruction.AssignVariable(identifier.name()));
-      /* TODO(maxuser)!
+      /* TODO(maxuser)! support all forms of assignment
       } else if (lhs instanceof FieldAccess fieldAccess) {
       } else if (lhs instanceof ArrayIndex arrayIndex) {
       } else if (lhs instanceof TupleLiteral tuple) {
