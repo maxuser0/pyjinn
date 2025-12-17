@@ -128,7 +128,7 @@ sealed interface Instruction {
           context.enterFunction(filename, lineno);
           var localContext =
               binding.initLocalContext(/* callingContext= */ context, paramValues.toArray());
-          localContext.instructions = binding.instructions();
+          localContext.code = binding.code();
           return localContext;
         }
       }
@@ -162,10 +162,10 @@ sealed interface Instruction {
     }
   }
 
-  record BindFunction(FunctionDef function, List<Instruction> instructions) implements Instruction {
+  record BindFunction(FunctionDef function, Code code) implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.setBoundFunction(new BoundFunction(function, context, instructions));
+      context.setBoundFunction(new BoundFunction(function, context, code));
       ++context.ip;
       return context;
     }
@@ -173,7 +173,7 @@ sealed interface Instruction {
     @Override
     public String toString() {
       return "BindFunction[function=%s, %d instructions]"
-          .formatted(function.identifier().name(), instructions.size());
+          .formatted(function.identifier().name(), code.instructions().size());
     }
   }
 

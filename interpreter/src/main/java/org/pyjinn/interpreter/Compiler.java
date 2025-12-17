@@ -13,21 +13,14 @@ import java.util.function.Function;
 import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
-  private static boolean debug = false;
-
-  public static void compile(Statement statement, List<Instruction> instructions) {
+  public static void compile(Statement statement, Code code) {
     var compiler = new Compiler(/* withinFunction= */ false);
-    compiler.compileStatement(statement, instructions);
-    if (debug) {
-      for (int i = 0; i < instructions.size(); ++i) {
-        System.out.printf("[%d] %s\n", i, instructions.get(i));
-      }
-    }
+    compiler.compileStatement(statement, code);
   }
 
-  private static void compileFunctionBody(Statement statement, List<Instruction> instructions) {
+  private static void compileFunctionBody(Statement statement, Code code) {
     var compiler = new Compiler(/* withinFunction= */ true);
-    compiler.compileStatement(statement, instructions);
+    compiler.compileStatement(statement, code);
   }
 
   private enum LoopType {
@@ -89,40 +82,40 @@ class Compiler {
     return loop().continueTarget;
   }
 
-  private void compileStatement(Statement statement, List<Instruction> instructions) {
+  private void compileStatement(Statement statement, Code code) {
     if (statement instanceof StatementBlock block) {
       for (var s : block.statements()) {
-        compileStatement(s, instructions);
+        compileStatement(s, code);
       }
     } else if (statement instanceof Expression expr) {
-      compileExpression(expr, instructions);
-      instructions.add(new Instruction.PopData());
+      compileExpression(expr, code.instructions());
+      code.instructions().add(new Instruction.PopData());
     } else if (statement instanceof Assignment assign) {
-      compileAssignment(assign, instructions);
+      compileAssignment(assign, code);
     } else if (statement instanceof IfBlock ifBlock) {
-      compileIfBlock(ifBlock, instructions);
+      compileIfBlock(ifBlock, code);
     } else if (statement instanceof WhileBlock whileBlock) {
-      compileWhileBlock(whileBlock, instructions);
+      compileWhileBlock(whileBlock, code);
     } else if (statement instanceof ForBlock forBlock) {
-      compileForBlock(forBlock, instructions);
+      compileForBlock(forBlock, code);
     } else if (statement instanceof FunctionDef function) {
-      compileFunctionDef(function, instructions);
+      compileFunctionDef(function, code);
     } else if (statement instanceof Continue continueStatement) {
-      compileContinueStatement(continueStatement, instructions);
+      compileContinueStatement(continueStatement, code);
     } else if (statement instanceof Break breakStatement) {
-      compileBreakStatement(breakStatement, instructions);
+      compileBreakStatement(breakStatement);
     } else if (statement instanceof ReturnStatement returnStatement) {
-      compileReturnStatement(returnStatement, instructions);
+      compileReturnStatement(returnStatement, code);
     } else {
       throw new IllegalArgumentException("Unsupported statement type: " + statement.getClass());
     }
   }
 
-  private void compileAssignment(Assignment assign, List<Instruction> instructions) {
+  private void compileAssignment(Assignment assign, Code code) {
     Expression lhs = assign.lhs();
     if (lhs instanceof Identifier identifier) {
-      compileExpression(assign.rhs(), instructions);
-      instructions.add(new Instruction.AssignVariable(identifier.name()));
+      compileExpression(assign.rhs(), code.instructions());
+      code.add(new Instruction.AssignVariable(identifier.name()));
       /* TODO(maxuser)! support all forms of assignment
       } else if (lhs instanceof FieldAccess fieldAccess) {
       } else if (lhs instanceof ArrayIndex arrayIndex) {
@@ -133,7 +126,7 @@ class Compiler {
     }
   }
 
-  private void compileIfBlock(IfBlock ifBlock, List<Instruction> instructions) {
+  private void compileIfBlock(IfBlock ifBlock, Code code) {
     // if CONDITION:
     //   THEN_BODY
     //
@@ -158,12 +151,13 @@ class Compiler {
     //
     // Note that each "eval" and "execute" operation may expand to multiple instructions.
 
-    compileExpression(ifBlock.condition(), instructions);
+    var instructions = code.instructions();
+    compileExpression(ifBlock.condition(), code.instructions());
 
     // Add a placeholder null instruction to be filled in below when the jump target is known.
     int jumpIfBlockSource = instructions.size();
     instructions.add(null);
-    compileStatement(ifBlock.thenBody(), instructions);
+    compileStatement(ifBlock.thenBody(), code);
 
     if (ifBlock.elseBody().isEmpty()) {
       int jumpIfBlockTarget = instructions.size();
@@ -172,14 +166,14 @@ class Compiler {
       int jumpElseBlockSource = instructions.size();
       instructions.add(null);
       int jumpIfBlockTarget = instructions.size();
-      compileStatement(ifBlock.elseBody().get(), instructions);
+      compileStatement(ifBlock.elseBody().get(), code);
       int jumpElseBlockTarget = instructions.size();
       instructions.set(jumpIfBlockSource, new Instruction.PopJumpIfFalse(jumpIfBlockTarget));
       instructions.set(jumpElseBlockSource, new Instruction.Jump(jumpElseBlockTarget));
     }
   }
 
-  private void compileWhileBlock(WhileBlock whileBlock, List<Instruction> instructions) {
+  private void compileWhileBlock(WhileBlock whileBlock, Code code) {
     // while CONDITION:
     //   BODY
     //
@@ -193,15 +187,16 @@ class Compiler {
     // `continue` in BODY -> Jump 0
     // `break` in BODY -> Jump 4
 
+    var instructions = code.instructions();
     loops.push(new LoopState(LoopType.WHILE, instructions));
     compileExpression(whileBlock.condition(), instructions);
     addBreak(breakPos -> new Instruction.PopJumpIfFalse(breakPos));
-    compileStatement(whileBlock.body(), instructions);
+    compileStatement(whileBlock.body(), code);
     instructions.add(new Instruction.Jump(continueTarget()));
     loops.pop().close();
   }
 
-  private void compileForBlock(ForBlock forBlock, List<Instruction> instructions) {
+  private void compileForBlock(ForBlock forBlock, Code code) {
     var vars = forBlock.vars();
     final Instruction iterVarAssignment;
     if (vars instanceof Identifier id) {
@@ -231,6 +226,7 @@ class Compiler {
     // `continue` in BODY -> Jump 1
     // `break` in BODY -> Jump 7
 
+    var instructions = code.instructions();
     compileExpression(forBlock.iter(), instructions); // [0]
     instructions.add(new Instruction.IterableIterator()); // [1]
     loops.push(new LoopState(LoopType.FOR, instructions));
@@ -238,35 +234,33 @@ class Compiler {
     addBreak(breakPos -> new Instruction.PopJumpIfFalse(breakPos)); // [3]
     instructions.add(new Instruction.IteratorNext()); // [4]
     instructions.add(iterVarAssignment); // [5]
-    compileStatement(forBlock.body(), instructions); // [6]
+    compileStatement(forBlock.body(), code); // [6]
     instructions.add(new Instruction.Jump(continueTarget())); // [7]
     loops.pop().close();
     instructions.add(new Instruction.PopData()); // [8]
   }
 
-  private void compileFunctionDef(FunctionDef function, List<Instruction> instructions) {
-    var functionInstructions = new ArrayList<Instruction>();
-    compileFunctionBody(function.body(), functionInstructions);
+  private void compileFunctionDef(FunctionDef function, Code code) {
+    var functionCode = new Code();
+    compileFunctionBody(function.body(), functionCode);
 
     // Add trailing null return in case there are no earlier returns or earlier returns don't cover
     // all code paths.
-    functionInstructions.add(new Instruction.PushData(null));
-    functionInstructions.add(new Instruction.FunctionReturn());
+    functionCode.instructions().add(new Instruction.PushData(null));
+    functionCode.instructions().add(new Instruction.FunctionReturn());
 
-    instructions.add(new Instruction.BindFunction(function, functionInstructions));
+    code.instructions().add(new Instruction.BindFunction(function, functionCode));
   }
 
-  private void compileContinueStatement(
-      Continue continueStatement, List<Instruction> instructions) {
-    instructions.add(new Instruction.Jump(continueTarget()));
+  private void compileContinueStatement(Continue continueStatement, Code code) {
+    code.add(new Instruction.Jump(continueTarget()));
   }
 
-  private void compileBreakStatement(Break breakStatement, List<Instruction> instructions) {
+  private void compileBreakStatement(Break breakStatement) {
     addBreak(breakPos -> new Instruction.Jump(breakPos));
   }
 
-  private void compileReturnStatement(
-      ReturnStatement returnStatement, List<Instruction> instructions) {
+  private void compileReturnStatement(ReturnStatement returnStatement, Code code) {
     if (!withinFunction) {
       throw new IllegalStateException("'return' outside function");
     }
@@ -275,10 +269,10 @@ class Compiler {
     // because there can be instructions following this return statement along other branches.
     loops.stream()
         .filter(loop -> loop.type == LoopType.FOR)
-        .forEach(loop -> instructions.add(new Instruction.PopData()));
+        .forEach(loop -> code.add(new Instruction.PopData()));
 
-    compileExpression(returnStatement.returnValue(), instructions);
-    instructions.add(new Instruction.FunctionReturn());
+    compileExpression(returnStatement.returnValue(), code.instructions());
+    code.add(new Instruction.FunctionReturn());
   }
 
   private void compileFunctionCall(FunctionCall call, List<Instruction> instructions) {

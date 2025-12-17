@@ -1048,7 +1048,7 @@ public class Script {
       FunctionDef function,
       Context enclosingContext,
       List<Object> defaults,
-      List<Instruction> instructions,
+      Code code,
       AtomicInteger zombieCounter)
       implements Function {
     public BoundFunction(FunctionDef function, Context enclosingContext) {
@@ -1056,17 +1056,16 @@ public class Script {
           function,
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
-          /* instructions= */ null,
+          /* code= */ null,
           new AtomicInteger());
     }
 
-    public BoundFunction(
-        FunctionDef function, Context enclosingContext, List<Instruction> instructions) {
+    public BoundFunction(FunctionDef function, Context enclosingContext, Code code) {
       this(
           function,
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
-          instructions,
+          code,
           new AtomicInteger());
     }
 
@@ -6431,11 +6430,11 @@ public class Script {
      * compileGlobalStatements}.
      */
     public void compileGlobalStatements() {
-      if (instructions == null) {
-        instructions = new ArrayList<Instruction>();
+      if (code == null) {
+        code = new Code();
       }
       for (var statement : globalStatements) {
-        Compiler.compile(statement, instructions);
+        Compiler.compile(statement, code);
       }
       globalStatements.clear();
     }
@@ -6445,20 +6444,14 @@ public class Script {
      * execGlobalStatements}.
      */
     public void execGlobalStatements() {
-      if (instructions == null) {
+      if (code == null) {
         for (var statement : globalStatements) {
           globals.exec(statement);
         }
       } else {
-        // TODO(maxuser): Refactor instruction execution loop into a VirtualMachine class?
         Context context = this;
-        while (true) {
-          int ip = context.ip;
-          var instructions = context.instructions;
-          if (ip >= instructions.size()) {
-            break;
-          }
-          context = instructions.get(ip).execute(context);
+        while (context.hasMoreInstructions()) {
+          context = context.executeNextInstruction();
         }
       }
       globalStatements.clear();
@@ -6513,7 +6506,7 @@ public class Script {
     protected final PyjDict vars = new PyjDict();
 
     private Deque<Object> dataStack = new ArrayDeque<>();
-    List<Instruction> instructions = null;
+    Code code = null;
     int ip = 0; // instruction pointer
 
     // NULL_INSTANCE stands in for null in dataStack since Deque cannot store nulls directly.
@@ -6521,6 +6514,14 @@ public class Script {
 
     public Context callingContext() {
       return callingContext;
+    }
+
+    public boolean hasMoreInstructions() {
+      return ip < code.instructions().size();
+    }
+
+    public Context executeNextInstruction() {
+      return code.instructions().get(ip).execute(this);
     }
 
     public void pushData(Object data) {
