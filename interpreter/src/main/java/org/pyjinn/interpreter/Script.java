@@ -6451,7 +6451,24 @@ public class Script {
       } else {
         Context context = this;
         while (context.hasMoreInstructions()) {
-          context = context.executeNextInstruction();
+          try {
+            context = context.executeNextInstruction();
+          } catch (RuntimeException e) {
+            context.exception = e;
+            Code.ExceptionalJump jump = null;
+            while ((jump = context.code.getExceptionalJump(context.ip)) == null
+                && context.callingContext() != null) {
+              var caller = context.callingContext();
+              caller.exception = context.exception;
+              context.exception = null;
+              context = context.callingContext();
+            }
+            if (jump == null) {
+              throw e;
+            } else {
+              context.ip = jump.jumpTarget();
+            }
+          }
         }
       }
       globalStatements.clear();
@@ -6511,6 +6528,8 @@ public class Script {
 
     // NULL_INSTANCE stands in for null in dataStack since Deque cannot store nulls directly.
     private static final Object NULL_INSTANCE = new Object();
+
+    public RuntimeException exception; // Set when an exception is active in this context.
 
     public Context callingContext() {
       return callingContext;

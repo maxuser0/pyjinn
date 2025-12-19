@@ -9,7 +9,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.function.Function;
 import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
@@ -35,32 +34,49 @@ class Compiler {
     this.withinFunction = withinFunction;
   }
 
+  // Interface for deferring creation of a jump instruction.
+  interface Instructor {
+    Instruction createInstruction(int jumpTarget);
+  }
+
+  private record DeferredJump(int source, Instructor instructor) {}
+
+  private record DeferredJumpList(List<DeferredJump> jumps, List<Instruction> instructions) {
+    DeferredJumpList(List<Instruction> instructions) {
+      this(new ArrayList<>(), instructions);
+    }
+
+    void createDeferredJump(Instructor instructor) {
+      int jumpSource = instructions.size();
+      instructions.add(null);
+      jumps.add(new DeferredJump(jumpSource, instructor));
+    }
+
+    void finalizeJumps() {
+      int jumpTarget = instructions.size();
+      for (var jump : jumps) {
+        instructions.set(jump.source, jump.instructor.createInstruction(jumpTarget));
+      }
+    }
+  }
+
   private static class LoopState {
     public final LoopType type;
-    private final List<Instruction> instructions;
     public final int continueTarget;
-    private final ArrayList<BreakInstruction> breakInstructions;
-
-    private record BreakInstruction(int source, Function<Integer, Instruction> instructor) {}
+    private final DeferredJumpList deferredBreaks;
 
     public LoopState(LoopType type, List<Instruction> instructions) {
       this.type = type;
-      this.instructions = instructions;
       continueTarget = instructions.size();
-      breakInstructions = new ArrayList<>();
+      deferredBreaks = new DeferredJumpList(instructions);
     }
 
-    public void addBreak(Function<Integer, Instruction> breakInstruction) {
-      int breakIp = instructions.size();
-      instructions.add(null);
-      breakInstructions.add(new BreakInstruction(breakIp, breakInstruction));
+    public void addBreak(Instructor breakInstructor) {
+      deferredBreaks.createDeferredJump(breakInstructor);
     }
 
     public void close() {
-      int breakTarget = instructions.size();
-      for (var breakInstruction : breakInstructions) {
-        instructions.set(breakInstruction.source, breakInstruction.instructor.apply(breakTarget));
-      }
+      deferredBreaks.finalizeJumps();
     }
   }
 
@@ -68,11 +84,11 @@ class Compiler {
     return loops.peek();
   }
 
-  private void addBreak(Function<Integer, Instruction> breakInstruction) {
+  private void addBreak(Instructor breakInstructor) {
     if (loops.isEmpty()) {
       throw new IllegalStateException("break statement outside of loop");
     }
-    loop().addBreak(breakInstruction);
+    loop().addBreak(breakInstructor);
   }
 
   private int continueTarget() {
@@ -98,6 +114,8 @@ class Compiler {
       compileWhileBlock(whileBlock, code);
     } else if (statement instanceof ForBlock forBlock) {
       compileForBlock(forBlock, code);
+    } else if (statement instanceof TryBlock tryBlock) {
+      compileTryBlock(tryBlock, code);
     } else if (statement instanceof FunctionDef function) {
       compileFunctionDef(function, code);
     } else if (statement instanceof Continue continueStatement) {
@@ -115,7 +133,7 @@ class Compiler {
     Expression lhs = assign.lhs();
     if (lhs instanceof Identifier identifier) {
       compileExpression(assign.rhs(), code.instructions());
-      code.add(new Instruction.AssignVariable(identifier.name()));
+      code.addInstruction(new Instruction.AssignVariable(identifier.name()));
       /* TODO(maxuser)! support all forms of assignment
       } else if (lhs instanceof FieldAccess fieldAccess) {
       } else if (lhs instanceof ArrayIndex arrayIndex) {
@@ -190,7 +208,7 @@ class Compiler {
     var instructions = code.instructions();
     loops.push(new LoopState(LoopType.WHILE, instructions));
     compileExpression(whileBlock.condition(), instructions);
-    addBreak(breakPos -> new Instruction.PopJumpIfFalse(breakPos));
+    addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget));
     compileStatement(whileBlock.body(), code);
     instructions.add(new Instruction.Jump(continueTarget()));
     loops.pop().close();
@@ -231,13 +249,75 @@ class Compiler {
     instructions.add(new Instruction.IterableIterator()); // [1]
     loops.push(new LoopState(LoopType.FOR, instructions));
     instructions.add(new Instruction.IteratorHasNext()); // [2]
-    addBreak(breakPos -> new Instruction.PopJumpIfFalse(breakPos)); // [3]
+    addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget)); // [3]
     instructions.add(new Instruction.IteratorNext()); // [4]
     instructions.add(iterVarAssignment); // [5]
     compileStatement(forBlock.body(), code); // [6]
     instructions.add(new Instruction.Jump(continueTarget())); // [7]
     loops.pop().close();
     instructions.add(new Instruction.PopData()); // [8]
+  }
+
+  private void compileTryBlock(TryBlock tryBlock, Code code) {
+    var instructions = code.instructions();
+    boolean hasFinally = tryBlock.finallyBlock().isPresent();
+    var jumpsToFinally = hasFinally ? new DeferredJumpList(instructions) : null;
+    var exceptionHandlers = tryBlock.exceptionHandlers();
+    int numHandlers = exceptionHandlers.size();
+
+    int blockStart = instructions.size();
+    compileStatement(tryBlock.tryBody(), code);
+    int blockEnd = instructions.size();
+
+    // Set to non-negative if there's no finally block and try block needs to jump past the except
+    // blocks.
+    int jumpPastExceptionHandlers = -1;
+
+    // No need to jump to finally unless there are except handlers between try and finally.
+    if (hasFinally) {
+      if (numHandlers == 0) {
+        code.registerExceptionalJump(
+            blockStart, blockEnd, instructions.size(), Code.ExceptionClause.FINALLY);
+      } else {
+        jumpsToFinally.createDeferredJump(Instruction.Jump::new);
+      }
+    } else {
+      jumpPastExceptionHandlers = instructions.size();
+      instructions.add(null);
+    }
+
+    for (int i = 0; i < numHandlers; ++i) {
+      var handler = exceptionHandlers.get(i);
+      boolean isLastHandler = i == numHandlers - 1;
+
+      // For the sequence of blocks 'try', 'except', ..., chain one block's range to jump to the
+      // next block's start. Each 'except' block with a declared exception type gets instructions
+      // inserted at its beginning that checks if the thrown exception matches the declared
+      // exception type.
+      code.registerExceptionalJump(
+          blockStart, blockEnd, instructions.size(), Code.ExceptionClause.EXCEPT);
+
+      // TODO(maxuser)! Insert instructions for matching exception type. If handler.exceptionType()
+      // is present and doesn't matches the active exception, jump to the next 'except/finally'
+      // block.
+
+      blockStart = instructions.size();
+      compileStatement(handler.body(), code);
+      blockEnd = instructions.size();
+
+      instructions.add(new Instruction.SwallowException());
+      if (hasFinally && !isLastHandler) {
+        jumpsToFinally.createDeferredJump(Instruction.Jump::new);
+      }
+    }
+
+    if (hasFinally) {
+      jumpsToFinally.finalizeJumps();
+      compileStatement(tryBlock.finallyBlock().get(), code);
+      instructions.add(new Instruction.RethrowException());
+    } else {
+      instructions.set(jumpPastExceptionHandlers, new Instruction.Jump(instructions.size()));
+    }
   }
 
   private void compileFunctionDef(FunctionDef function, Code code) {
@@ -253,11 +333,11 @@ class Compiler {
   }
 
   private void compileContinueStatement(Continue continueStatement, Code code) {
-    code.add(new Instruction.Jump(continueTarget()));
+    code.addInstruction(new Instruction.Jump(continueTarget()));
   }
 
   private void compileBreakStatement(Break breakStatement) {
-    addBreak(breakPos -> new Instruction.Jump(breakPos));
+    addBreak(breakTarget -> new Instruction.Jump(breakTarget));
   }
 
   private void compileReturnStatement(ReturnStatement returnStatement, Code code) {
@@ -269,10 +349,10 @@ class Compiler {
     // because there can be instructions following this return statement along other branches.
     loops.stream()
         .filter(loop -> loop.type == LoopType.FOR)
-        .forEach(loop -> code.add(new Instruction.PopData()));
+        .forEach(loop -> code.addInstruction(new Instruction.PopData()));
 
     compileExpression(returnStatement.returnValue(), code.instructions());
-    code.add(new Instruction.FunctionReturn());
+    code.addInstruction(new Instruction.FunctionReturn());
   }
 
   private void compileFunctionCall(FunctionCall call, List<Instruction> instructions) {

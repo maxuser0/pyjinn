@@ -14,7 +14,7 @@ import java.util.Set;
 import org.pyjinn.interpreter.Script.*;
 
 sealed interface Instruction {
-  Context execute(Context context);
+  Context execute(Context context) throws RuntimeException;
 
   record PushData(Object value) implements Instruction {
     @Override
@@ -342,6 +342,30 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       context.ip = jumpTarget;
+      return context;
+    }
+  }
+
+  /** Swallows the active exception if there is one. */
+  record SwallowException() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      if (context.exception != null) {
+        context.exception = null;
+      }
+      ++context.ip;
+      return context;
+    }
+  }
+
+  /** Rethrows the active exception if there is one. */
+  record RethrowException() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      if (context.exception != null) {
+        throw context.exception;
+      }
+      ++context.ip;
       return context;
     }
   }
