@@ -275,10 +275,7 @@ class Compiler {
 
     // No need to jump to finally unless there are except handlers between try and finally.
     if (hasFinally) {
-      if (numHandlers == 0) {
-        code.registerExceptionalJump(
-            blockStart, blockEnd, instructions.size(), Code.ExceptionClause.FINALLY);
-      } else {
+      if (numHandlers > 0) {
         jumpsToFinally.createDeferredJump(Instruction.Jump::new);
       }
     } else {
@@ -297,10 +294,16 @@ class Compiler {
       code.registerExceptionalJump(
           blockStart, blockEnd, instructions.size(), Code.ExceptionClause.EXCEPT);
 
-      // TODO(maxuser)! Insert instructions for matching exception type. If handler.exceptionType()
-      // is present and doesn't match the active exception, jump to the next 'except/finally' block.
-
       blockStart = instructions.size();
+      // CatchExceptionType instruction must be inside the [blockStart, blockEnd) range because that
+      // instruction rethrows the exception if it doesn't match the formal exception type of the
+      // 'except' clause.
+      if (handler.exceptionType().isPresent()) {
+        instructions.add(
+            new Instruction.CatchExceptionType(
+                handler.exceptionType().get().name(),
+                handler.exceptionVariable().map(Identifier::name)));
+      }
       compileStatement(handler.body(), code);
       blockEnd = instructions.size();
 
@@ -311,6 +314,8 @@ class Compiler {
     }
 
     if (hasFinally) {
+      code.registerExceptionalJump(
+          blockStart, blockEnd, instructions.size(), Code.ExceptionClause.FINALLY);
       jumpsToFinally.finalizeJumps();
       compileStatement(tryBlock.finallyBlock().get(), code);
       instructions.add(new Instruction.RethrowException());

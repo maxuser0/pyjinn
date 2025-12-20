@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.pyjinn.interpreter.Script.*;
 
@@ -351,6 +352,29 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       context.ip = jumpTarget;
+      return context;
+    }
+  }
+
+  record CatchExceptionType(String exceptionType, Optional<String> variableName)
+      implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      if (context.exception == null) {
+        throw new IllegalStateException(
+            "Trying to execute 'except' clause with no active exception in this calling context");
+      }
+      var formalExceptionType = context.get(exceptionType);
+      if (formalExceptionType instanceof JavaClass jclass) {
+        formalExceptionType = jclass.type();
+      }
+      if (context.exception.getClass() == formalExceptionType) {
+        variableName.ifPresent(e -> context.set(e, context.exception));
+        context.exception = null;
+      } else {
+        throw context.exception;
+      }
+      ++context.ip;
       return context;
     }
   }
