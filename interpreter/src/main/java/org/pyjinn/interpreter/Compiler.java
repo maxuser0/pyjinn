@@ -298,8 +298,7 @@ class Compiler {
           blockStart, blockEnd, instructions.size(), Code.ExceptionClause.EXCEPT);
 
       // TODO(maxuser)! Insert instructions for matching exception type. If handler.exceptionType()
-      // is present and doesn't matches the active exception, jump to the next 'except/finally'
-      // block.
+      // is present and doesn't match the active exception, jump to the next 'except/finally' block.
 
       blockStart = instructions.size();
       compileStatement(handler.body(), code);
@@ -395,6 +394,8 @@ class Compiler {
       instructions.add(new Instruction.Star());
     } else if (expr instanceof ConstantExpression constant) {
       instructions.add(new Instruction.Constant(constant.value()));
+    } else if (expr instanceof JavaClassCall javaClassCall) {
+      instructions.add(new Instruction.LoadJavaClass(javaClassCall));
     } else if (expr instanceof UnaryOp unaryOp) {
       compileExpression(unaryOp.operand(), instructions);
       instructions.add(new Instruction.UnaryOp(unaryOp.op()));

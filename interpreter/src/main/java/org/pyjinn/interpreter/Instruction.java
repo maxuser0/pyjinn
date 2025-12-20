@@ -195,6 +195,15 @@ sealed interface Instruction {
     }
   }
 
+  record LoadJavaClass(JavaClassCall javaClassCall) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.pushData(javaClassCall.eval(context));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record UnaryOp(Script.UnaryOp.Op op) implements Instruction {
     @Override
     public Context execute(Context context) {
