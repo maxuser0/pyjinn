@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.pyjinn.parser.PyjinnParser;
 
 public class ScriptTest {
@@ -1006,6 +1008,30 @@ public class ScriptTest {
     assertEquals(getVariable("call"), "x(y, z, 1, 2, 3)");
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void exceptions(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        NPE = JavaClass("java.lang.NullPointerException")
+        ISE = JavaClass("java.lang.IllegalArgumentException")
+        output = None
+        done = False
+        try:
+          None.foo()  # NPE!
+        except (NPE, ISE) as e:
+          output = type(type(e))
+        except:
+          output = "unknown exception"
+        finally:
+          done = True
+        """);
+
+    assertEquals(getVariable("output"), NullPointerException.class);
+    assertEquals(getVariable("done"), true);
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
@@ -1024,9 +1050,17 @@ public class ScriptTest {
   }
 
   private Script.Environment execute(String source) throws Exception {
+    return execute(/* compile= */ false, source);
+  }
+
+  private Script.Environment execute(boolean compile, String source) throws Exception {
     var jsonAst = PyjinnParser.parse("script_test.pyj", source);
     script = new Script();
-    script.parse(jsonAst).exec();
+    script.parse(jsonAst);
+    if (compile) {
+      script.compile();
+    }
+    script.exec();
     env = script.mainModule().globals();
     return env;
   }

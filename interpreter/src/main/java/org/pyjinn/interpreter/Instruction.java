@@ -356,19 +356,16 @@ sealed interface Instruction {
     }
   }
 
-  record CatchExceptionType(String exceptionType, Optional<String> variableName)
-      implements Instruction {
+  record CatchExceptionType(Optional<String> variableName) implements Instruction {
     @Override
     public Context execute(Context context) {
       if (context.exception == null) {
         throw new IllegalStateException(
             "Trying to execute 'except' clause with no active exception in this calling context");
       }
-      var formalExceptionType = context.get(exceptionType);
-      if (formalExceptionType instanceof JavaClass jclass) {
-        formalExceptionType = jclass.type();
-      }
-      if (context.exception.getClass() == formalExceptionType) {
+      var exceptionTypeSpec = context.popData();
+      if (TryBlock.matchesExceptionSpec(
+          exceptionTypeSpec, context.exception, /* allowTuple= */ true)) {
         variableName.ifPresent(e -> context.set(e, context.exception));
         context.exception = null;
       } else {

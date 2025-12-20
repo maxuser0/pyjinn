@@ -262,6 +262,7 @@ class Compiler {
     var instructions = code.instructions();
     boolean hasFinally = tryBlock.finallyBlock().isPresent();
     var jumpsToFinally = hasFinally ? new DeferredJumpList(instructions) : null;
+    var jumpsPastExceptionHandlers = hasFinally ? null : new DeferredJumpList(instructions);
     var exceptionHandlers = tryBlock.exceptionHandlers();
     int numHandlers = exceptionHandlers.size();
 
@@ -269,18 +270,13 @@ class Compiler {
     compileStatement(tryBlock.tryBody(), code);
     int blockEnd = instructions.size();
 
-    // Set to non-negative if there's no finally block and try block needs to jump past the except
-    // blocks.
-    int jumpPastExceptionHandlers = -1;
-
     // No need to jump to finally unless there are except handlers between try and finally.
     if (hasFinally) {
       if (numHandlers > 0) {
         jumpsToFinally.createDeferredJump(Instruction.Jump::new);
       }
     } else {
-      jumpPastExceptionHandlers = instructions.size();
-      instructions.add(null);
+      jumpsPastExceptionHandlers.createDeferredJump(Instruction.Jump::new);
     }
 
     for (int i = 0; i < numHandlers; ++i) {
@@ -298,18 +294,21 @@ class Compiler {
       // CatchExceptionType instruction must be inside the [blockStart, blockEnd) range because that
       // instruction rethrows the exception if it doesn't match the formal exception type of the
       // 'except' clause.
-      if (handler.exceptionType().isPresent()) {
+      if (handler.exceptionTypeSpec().isPresent()) {
+        compileExpression(handler.exceptionTypeSpec().get(), instructions);
         instructions.add(
-            new Instruction.CatchExceptionType(
-                handler.exceptionType().get().name(),
-                handler.exceptionVariable().map(Identifier::name)));
+            new Instruction.CatchExceptionType(handler.exceptionVariable().map(Identifier::name)));
       }
       compileStatement(handler.body(), code);
       blockEnd = instructions.size();
 
       instructions.add(new Instruction.SwallowException());
-      if (hasFinally && !isLastHandler) {
-        jumpsToFinally.createDeferredJump(Instruction.Jump::new);
+      if (!isLastHandler) {
+        if (hasFinally) {
+          jumpsToFinally.createDeferredJump(Instruction.Jump::new);
+        } else {
+          jumpsPastExceptionHandlers.createDeferredJump(Instruction.Jump::new);
+        }
       }
     }
 
@@ -320,7 +319,7 @@ class Compiler {
       compileStatement(tryBlock.finallyBlock().get(), code);
       instructions.add(new Instruction.RethrowException());
     } else {
-      instructions.set(jumpPastExceptionHandlers, new Instruction.Jump(instructions.size()));
+      jumpsPastExceptionHandlers.finalizeJumps();
     }
   }
 

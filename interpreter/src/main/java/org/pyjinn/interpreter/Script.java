@@ -748,7 +748,7 @@ public class Script {
       return new ExceptionHandler(
           type.isJsonNull()
               ? Optional.empty()
-              : Optional.of(new Identifier(getAttr(getAttr(element, "type"), "id").getAsString())),
+              : Optional.of(parseExpression(getAttr(element, "type"))),
           name.isJsonNull()
               ? Optional.empty()
               : Optional.of(new Identifier(getAttr(element, "name").getAsString())),
@@ -1916,7 +1916,9 @@ public class Script {
   }
 
   public record ExceptionHandler(
-      Optional<Identifier> exceptionType, Optional<Identifier> exceptionVariable, Statement body) {}
+      Optional<Expression> exceptionTypeSpec, // Evaluates to a type or tuple of types.
+      Optional<Identifier> exceptionVariable,
+      Statement body) {}
 
   public record TryBlock(
       int lineno,
@@ -1943,13 +1945,9 @@ public class Script {
         }
         boolean handled = false;
         for (var handler : exceptionHandlers) {
-          var exceptionType = handler.exceptionType().map(t -> context.get(t.name()));
+          var exceptionType = handler.exceptionTypeSpec().map(t -> t.eval(context));
           if (exceptionType.isEmpty()
-              || (exceptionType.get() instanceof PyjClass declaredType
-                  && exception instanceof PyjObject thrownObject
-                  && thrownObject.__class__ == declaredType)
-              || (exceptionType.get() instanceof JavaClass javaClassId
-                  && javaClassId.type().isAssignableFrom(exception.getClass()))) {
+              || matchesExceptionSpec(exceptionType.get(), exception, /* allowTuple= */ true)) {
             handler
                 .exceptionVariable()
                 .ifPresent(
@@ -1979,21 +1977,44 @@ public class Script {
       }
     }
 
+    public static boolean matchesExceptionSpec(
+        Object exceptionSpec, Object exception, boolean allowTuple) {
+      if (exceptionSpec instanceof PyjClass declaredType
+          && exception instanceof PyjObject thrownObject
+          && thrownObject.__class__ == declaredType) {
+        return true;
+      }
+      if (exceptionSpec instanceof JavaClass javaClassId
+          && javaClassId.type().isAssignableFrom(exception.getClass())) {
+        return true;
+      }
+      if (allowTuple && exceptionSpec instanceof PyjTuple tuple) {
+        for (var type : tuple) {
+          // Allow tuple only at the top-level of the exception type(s), not recursively.
+          if (matchesExceptionSpec(type, exception, /* allowTuple= */ false)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
     @Override
     public String toString() {
       var out = new StringBuilder("try:\n");
       out.append("  " + tryBody.toString().replaceAll("\n", "\n  ") + "\n");
       for (var handler : exceptionHandlers) {
         out.append("except");
-        boolean hasExceptionType = handler.exceptionType().isPresent();
+        boolean hasExceptionType = handler.exceptionTypeSpec().isPresent();
         boolean hasExceptionVariable = handler.exceptionVariable().isPresent();
         if (hasExceptionType && hasExceptionVariable) {
           out.append(
-              " %s as %s".formatted(handler.exceptionType.get(), handler.exceptionVariable.get()));
+              " %s as %s"
+                  .formatted(handler.exceptionTypeSpec.get(), handler.exceptionVariable.get()));
         } else if (!hasExceptionType && hasExceptionVariable) {
           out.append(" " + handler.exceptionVariable.get());
         } else if (hasExceptionType && !hasExceptionVariable) {
-          out.append(" " + handler.exceptionType.get());
+          out.append(" " + handler.exceptionTypeSpec.get());
         }
         out.append(":\n");
         out.append("  " + handler.body().toString().replaceAll("\n", "\n  ") + "\n");
