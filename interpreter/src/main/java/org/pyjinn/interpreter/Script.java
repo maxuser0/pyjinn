@@ -1343,57 +1343,12 @@ public class Script {
     /** Adds this class definition to the specified {@code context}. */
     @Override
     public void exec(Context context) {
-      var type = new PyjClass[1]; // Using array to circumvent immutability constraint for record.
-      Function ctor;
+      var type = new PyjClass[1]; // Using array to pass to lambda for deferred type creation.
+      Function ctor = null;
       Optional<Decorator> dataclass =
           decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
       if (dataclass.isPresent()) {
-        // Validate that all fields with default values appear after all fields without defaults.
-        List<Expression> defaults = new ArrayList<>();
-        for (var field : fields) {
-          if (field.defaultValue().isPresent()) {
-            defaults.add(field.defaultValue().get());
-          } else if (!defaults.isEmpty()) {
-            throw new IllegalArgumentException(
-                "non-default argument '%s' follows default argument"
-                    .formatted(field.identifier().name()));
-          }
-        }
-
-        ctor =
-            new BoundFunction(
-                new FunctionDef(
-                    lineno,
-                    identifier.name(),
-                    new Identifier("__init__"),
-                    /* decorators= */ List.of(),
-                    /* args= */ fields.stream().map(f -> new FunctionArg(f.identifier)).toList(),
-                    /* vararg= */ Optional.empty(),
-                    /* kwarg= */ Optional.empty(),
-                    defaults,
-                    new Statement() {
-                      @Override
-                      public void exec(Context context) {
-                        var object = new PyjObject(type[0]);
-                        for (var field : fields) {
-                          String name = field.identifier().name();
-                          object.__dict__.__setitem__(name, context.get(name));
-                        }
-                        context.returnWithValue(object);
-                      }
-
-                      @Override
-                      public int lineno() {
-                        return lineno;
-                      }
-                    }),
-                context);
-      } else {
-        ctor =
-            (env, params) -> {
-              Function.expectNumParams(params, 0, identifier.name() + ".__init__");
-              return new PyjObject(type[0]);
-            };
+        ctor = getDataclassDefaultCtor(context, type);
       }
 
       var instanceMethods = new HashMap<String, Function>();
@@ -1414,28 +1369,21 @@ public class Script {
           instanceMethods.put(methodName, new BoundFunction(methodDef, context));
         }
       }
-      // Example of "@dataclass(frozen=True)":
-      // [{"type":"keyword","arg":"frozen","value":{"value":true}}]
-      boolean isFrozen =
-          dataclass
-              .map(
-                  d ->
-                      d.keywords().stream()
-                          .anyMatch(
-                              k ->
-                                  JsonAstParser.getType(k).equals("keyword")
-                                      && JsonAstParser.getAttr(k, "arg")
-                                          .getAsString()
-                                          .equals("frozen")
-                                      && JsonAstParser.getAttr(
-                                              JsonAstParser.getAttr(k, "value"), "value")
-                                          .getAsBoolean()))
-              .orElse(false);
+
+      // Create default ctor if one hasn't been defined above.
+      if (ctor == null) {
+        ctor =
+            (env, params) -> {
+              Function.expectNumParams(params, 0, identifier.name() + ".__init__");
+              return new PyjObject(type[0]);
+            };
+      }
+
       type[0] =
           new PyjClass(
               identifier.name(),
               ctor,
-              isFrozen,
+              isFrozenDataclass(dataclass),
               instanceMethods,
               classLevelMethods,
               dataclass.map(d -> dataclassHashCode(fields)),
@@ -1449,6 +1397,66 @@ public class Script {
                   v -> type[0].__dict__.__setitem__(field.identifier().name(), v.eval(context)));
         }
       }
+    }
+
+    // Type passed as an array of one element to defer creation of the type.
+    private Function getDataclassDefaultCtor(Context context, PyjClass[] type) {
+      // Validate that all fields with default values appear after all fields without defaults.
+      List<Expression> defaults = new ArrayList<>();
+      for (var field : fields) {
+        if (field.defaultValue().isPresent()) {
+          defaults.add(field.defaultValue().get());
+        } else if (!defaults.isEmpty()) {
+          throw new IllegalArgumentException(
+              "non-default argument '%s' follows default argument"
+                  .formatted(field.identifier().name()));
+        }
+      }
+
+      return new BoundFunction(
+          new FunctionDef(
+              lineno,
+              identifier.name(),
+              new Identifier("__init__"),
+              /* decorators= */ List.of(),
+              /* args= */ fields.stream().map(f -> new FunctionArg(f.identifier)).toList(),
+              /* vararg= */ Optional.empty(),
+              /* kwarg= */ Optional.empty(),
+              defaults,
+              new Statement() {
+                @Override
+                public void exec(Context context) {
+                  var object = new PyjObject(type[0]);
+                  for (var field : fields) {
+                    String name = field.identifier().name();
+                    object.__dict__.__setitem__(name, context.get(name));
+                  }
+                  context.returnWithValue(object);
+                }
+
+                @Override
+                public int lineno() {
+                  return lineno;
+                }
+              }),
+          context);
+    }
+
+    // Example of "@dataclass(frozen=True)":
+    // [{"type":"keyword","arg":"frozen","value":{"value":true}}]
+    private static boolean isFrozenDataclass(Optional<Decorator> dataclass) {
+      return dataclass
+          .map(
+              d ->
+                  d.keywords().stream()
+                      .anyMatch(
+                          k ->
+                              JsonAstParser.getType(k).equals("keyword")
+                                  && JsonAstParser.getAttr(k, "arg").getAsString().equals("frozen")
+                                  && JsonAstParser.getAttr(
+                                          JsonAstParser.getAttr(k, "value"), "value")
+                                      .getAsBoolean()))
+          .orElse(false);
     }
 
     private static java.util.function.Function<PyjObject, Integer> dataclassHashCode(
