@@ -120,21 +120,33 @@ sealed interface Instruction {
         }
       }
 
-      // Specialize handling of BoundFunction so instructions can be interrupted.
-      if (caller instanceof BoundFunction binding) {
-        if (binding.isHalted()) {
-          ++context.ip;
-          return context;
-        } else {
-          context.enterFunction(filename, lineno);
-          var localContext =
-              binding.initLocalContext(/* callingContext= */ context, paramValues.toArray());
-          localContext.code = binding.code();
-          return localContext;
+      // Effective caller may be a function that's being delegated to.
+      var effectiveCaller = caller;
+
+      // Specialize handling of BoundMethod so instructions can be interrupted.
+      if (caller instanceof Script.BoundMethod binding
+          && binding.object() instanceof PyjObject pyjObject) {
+        var method = pyjObject.__class__.instanceMethods.get(binding.methodName());
+        if (method != null && method instanceof BoundFunction function) {
+          var methodParams = new ArrayList<Object>(paramValues.size() + 1);
+          methodParams.add(pyjObject);
+          methodParams.addAll(paramValues);
+          return executeCompiledFunction(context, function, methodParams.toArray());
+        }
+
+        // If PyjObject's field is assigned to a function, make that function the effective caller.
+        var field = pyjObject.__dict__.get(binding.methodName());
+        if (field != null && field instanceof Function function) {
+          effectiveCaller = function;
         }
       }
 
-      if (caller instanceof Function function) {
+      // Specialize handling of BoundFunction so instructions can be interrupted.
+      if (effectiveCaller instanceof BoundFunction function) {
+        return executeCompiledFunction(context, function, paramValues.toArray());
+      }
+
+      if (effectiveCaller instanceof Function function) {
         try {
           context.enterFunction(filename, lineno);
           context.pushData(function.call(context.env(), paramValues.toArray()));
@@ -148,6 +160,19 @@ sealed interface Instruction {
       throw new IllegalArgumentException(
           String.format(
               "'%s' is not callable", caller == null ? "NoneType" : caller.getClass().getName()));
+    }
+
+    private Context executeCompiledFunction(
+        Context context, BoundFunction function, Object[] params) {
+      if (function.isHalted()) {
+        ++context.ip;
+        return context;
+      } else {
+        context.enterFunction(filename, lineno);
+        var localContext = function.initLocalContext(/* callingContext= */ context, params);
+        localContext.code = function.code();
+        return localContext;
+      }
     }
   }
 
@@ -175,6 +200,15 @@ sealed interface Instruction {
     public String toString() {
       return "BindFunction[function=%s, %d instructions]"
           .formatted(function.identifier().name(), code.instructions().size());
+    }
+  }
+
+  record DefineClass(ClassDef classDef, FunctionCompiler compiler) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.set(classDef.identifier().name(), classDef.compile(context, compiler));
+      ++context.ip;
+      return context;
     }
   }
 

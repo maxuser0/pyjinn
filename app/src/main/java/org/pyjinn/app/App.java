@@ -24,6 +24,7 @@ public class App {
   public static void main(String[] args) throws Exception {
     List<String> argsList = new ArrayList<>(Arrays.asList(args));
     Set<String> argsSet = new HashSet<>(argsList);
+
     boolean compile = argsSet.contains("-c");
     if (compile) {
       argsSet.remove("-c");
@@ -40,8 +41,10 @@ public class App {
             .lines()
             .collect(Collectors.joining("\n"));
 
-    if (System.getenv("PYJINN_DEBUG") != null) {
+    String debug = System.getenv("PYJINN_DEBUG");
+    if (debug != null && !debug.equals("") && !debug.equals("0")) {
       Script.setDebugLogger((message, params) -> System.out.printf(message + "\n", params));
+      Script.setVerboseDebugging(true);
     }
 
     JsonElement jsonAst = null;

@@ -118,6 +118,8 @@ class Compiler {
       compileTryBlock(tryBlock, code);
     } else if (statement instanceof FunctionDef function) {
       compileFunctionDef(function, code);
+    } else if (statement instanceof ClassDef classDef) {
+      compileClassDef(classDef, code);
     } else if (statement instanceof Continue continueStatement) {
       compileContinueStatement(continueStatement, code);
     } else if (statement instanceof Break breakStatement) {
@@ -332,7 +334,22 @@ class Compiler {
     functionCode.instructions().add(new Instruction.PushData(null));
     functionCode.instructions().add(new Instruction.FunctionReturn());
 
-    code.instructions().add(new Instruction.BindFunction(function, functionCode));
+    code.instructions().add(new Instruction.BindFunction(function, compileFunction(function)));
+  }
+
+  private void compileClassDef(ClassDef classDef, Code code) {
+    code.instructions().add(new Instruction.DefineClass(classDef, Compiler::compileFunction));
+  }
+
+  private static Code compileFunction(FunctionDef function) {
+    var code = new Code();
+    compileFunctionBody(function.body(), code);
+
+    // Add trailing null return in case there are no earlier returns or earlier returns don't cover
+    // all code paths.
+    code.instructions().add(new Instruction.PushData(null));
+    code.instructions().add(new Instruction.FunctionReturn());
+    return code;
   }
 
   private void compileContinueStatement(Continue continueStatement, Code code) {

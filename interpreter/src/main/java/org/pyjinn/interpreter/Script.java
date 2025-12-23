@@ -164,6 +164,12 @@ public class Script {
 
   private static DebugLogger logger = (message, args) -> {};
 
+  private static boolean debug = false;
+
+  public static void setVerboseDebugging(boolean enable) {
+    debug = enable;
+  }
+
   // To enable debug logging to stderr:
   // Script.setDebugLogger((str, args) -> System.err.printf(str + "%n", args));
   public static void setDebugLogger(DebugLogger newLogger) {
@@ -1331,7 +1337,32 @@ public class Script {
     }
   }
 
+  interface FunctionCompiler {
+    Code compile(FunctionDef functionDef);
+
+    static FunctionCompiler NULL_CODE_GENERATOR = f -> null;
+  }
+
   public record ClassFieldDef(Identifier identifier, Optional<Expression> defaultValue) {}
+
+  // Type passed as an array of one element to defer creation of the type.
+  public record DataclassCtor(PyjClass[] type, List<ClassFieldDef> fields, int lineno)
+      implements Statement {
+    @Override
+    public void exec(Context context) {
+      var object = new PyjObject(type[0]);
+      for (var field : fields) {
+        String name = field.identifier().name();
+        object.__dict__.__setitem__(name, context.get(name));
+      }
+      context.returnWithValue(object);
+    }
+
+    @Override
+    public int lineno() {
+      return lineno;
+    }
+  }
 
   public record ClassDef(
       int lineno,
@@ -1343,12 +1374,18 @@ public class Script {
     /** Adds this class definition to the specified {@code context}. */
     @Override
     public void exec(Context context) {
+      context.set(
+          identifier.name(),
+          compile(context, /* compiler= */ FunctionCompiler.NULL_CODE_GENERATOR));
+    }
+
+    PyjClass compile(Context context, FunctionCompiler compiler) {
       var type = new PyjClass[1]; // Using array to pass to lambda for deferred type creation.
       Function ctor = null;
       Optional<Decorator> dataclass =
           decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
       if (dataclass.isPresent()) {
-        ctor = getDataclassDefaultCtor(context, type);
+        ctor = getDataclassDefaultCtor(context, compiler, type);
       }
 
       var instanceMethods = new HashMap<String, Function>();
@@ -1357,16 +1394,23 @@ public class Script {
         String methodName = methodDef.identifier().name();
         // TODO(maxuser): Support __str__/__rep__ methods for custom string output.
         if ("__init__".equals(methodName)) {
-          ctor = new CtorFunction(type, new BoundFunction(methodDef, context));
+          ctor =
+              new CtorFunction(
+                  type, new BoundFunction(methodDef, context, compiler.compile(methodDef)));
           instanceMethods.put(methodName, ctor);
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("classmethod"))) {
           classLevelMethods.put(
-              methodName, new ClassLevelMethod(true, new BoundFunction(methodDef, context)));
+              methodName,
+              new ClassLevelMethod(
+                  true, new BoundFunction(methodDef, context, compiler.compile(methodDef))));
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("staticmethod"))) {
           classLevelMethods.put(
-              methodName, new ClassLevelMethod(false, new BoundFunction(methodDef, context)));
+              methodName,
+              new ClassLevelMethod(
+                  false, new BoundFunction(methodDef, context, compiler.compile(methodDef))));
         } else {
-          instanceMethods.put(methodName, new BoundFunction(methodDef, context));
+          instanceMethods.put(
+              methodName, new BoundFunction(methodDef, context, compiler.compile(methodDef)));
         }
       }
 
@@ -1388,7 +1432,6 @@ public class Script {
               classLevelMethods,
               dataclass.map(d -> dataclassHashCode(fields)),
               dataclass.map(d -> dataclassToString(fields)));
-      context.set(identifier.name(), type[0]);
       if (!dataclass.isPresent()) {
         for (var field : fields) {
           field
@@ -1397,10 +1440,12 @@ public class Script {
                   v -> type[0].__dict__.__setitem__(field.identifier().name(), v.eval(context)));
         }
       }
+      return type[0];
     }
 
     // Type passed as an array of one element to defer creation of the type.
-    private Function getDataclassDefaultCtor(Context context, PyjClass[] type) {
+    private Function getDataclassDefaultCtor(
+        Context context, FunctionCompiler compiler, PyjClass[] type) {
       // Validate that all fields with default values appear after all fields without defaults.
       List<Expression> defaults = new ArrayList<>();
       for (var field : fields) {
@@ -1413,7 +1458,7 @@ public class Script {
         }
       }
 
-      return new BoundFunction(
+      var functionDef =
           new FunctionDef(
               lineno,
               identifier.name(),
@@ -1423,23 +1468,8 @@ public class Script {
               /* vararg= */ Optional.empty(),
               /* kwarg= */ Optional.empty(),
               defaults,
-              new Statement() {
-                @Override
-                public void exec(Context context) {
-                  var object = new PyjObject(type[0]);
-                  for (var field : fields) {
-                    String name = field.identifier().name();
-                    object.__dict__.__setitem__(name, context.get(name));
-                  }
-                  context.returnWithValue(object);
-                }
-
-                @Override
-                public int lineno() {
-                  return lineno;
-                }
-              }),
-          context);
+              new DataclassCtor(type, fields, lineno));
+      return new BoundFunction(functionDef, context, compiler.compile(functionDef));
     }
 
     // Example of "@dataclass(frozen=True)":
@@ -6493,6 +6523,7 @@ public class Script {
               context = context.callingContext();
             }
             if (jump == null) {
+              context.debugLogInstructions();
               throw e;
             } else {
               context.ip = jump.jumpTarget();
@@ -6535,8 +6566,6 @@ public class Script {
 
   static class Context {
     private static final Object NOT_FOUND = new Object();
-    private static boolean debug = false;
-
     private final Context callingContext; // for returning to caller in compiled mode
     private final Context enclosingContext; // for resolving variables
     private final ClassMethodName classMethodName;
@@ -6569,18 +6598,22 @@ public class Script {
     }
 
     public Context executeNextInstruction() {
-      return code.instructions().get(ip).execute(this);
+      var instruction = code.instructions().get(ip);
+      if (debug) {
+        logger.log("Executing instruction: [%d] %s", ip, instruction);
+      }
+      return instruction.execute(this);
     }
 
     public void pushData(Object data) {
-      if (debug) System.out.println("push: " + data);
+      if (debug) logger.log("push: " + data);
       dataStack.push(data == null ? NULL_INSTANCE : data);
     }
 
     public Object popData() {
       var data = dataStack.pop();
       data = data == NULL_INSTANCE ? null : data;
-      if (debug) System.out.println("pop: " + data);
+      if (debug) logger.log("pop: " + data);
       return data;
     }
 
@@ -6590,8 +6623,18 @@ public class Script {
         throw new IllegalStateException("Context data stack is empty");
       }
       data = data == NULL_INSTANCE ? null : data;
-      if (debug) System.out.println("peek: " + data);
+      if (debug) logger.log("peek: " + data);
       return data;
+    }
+
+    public void debugLogInstructions() {
+      if (debug && code != null) {
+        for (int i = 0; i < code.instructions().size(); ++i) {
+          var instruction = code.instructions().get(i);
+          String prefix = i == ip ? "> " : "  ";
+          logger.log("%s[%d] %s", prefix, i, instruction);
+        }
+      }
     }
 
     // Default constructor is used only for GlobalContext subclass.
