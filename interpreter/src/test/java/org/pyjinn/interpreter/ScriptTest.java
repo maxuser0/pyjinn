@@ -1052,6 +1052,29 @@ public class ScriptTest {
     assertEquals(getVariable("output"), "barbaz");
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void dataclass(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        @dataclass
+        class Foo:
+          x: str
+
+          def bar(self):
+            return self.baz("bar")
+
+          def baz(self, x):
+            return self.x + x + "baz"
+
+        foo = Foo("foo")
+        output = foo.bar()
+        """);
+
+    assertEquals(getVariable("output"), "foobarbaz");
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

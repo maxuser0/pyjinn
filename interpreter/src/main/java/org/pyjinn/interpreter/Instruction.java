@@ -212,6 +212,15 @@ sealed interface Instruction {
     }
   }
 
+  record DataclassDefaultInit(Script.DataclassDefaultInit dataclassInit) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.pushData(dataclassInit.create(context));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record Identifier(String name) implements Instruction {
     @Override
     public Context execute(Context context) {
@@ -271,6 +280,16 @@ sealed interface Instruction {
     }
   }
 
+  record FieldAccess(Script.FieldAccess expression) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var object = context.popData();
+      context.pushData(expression.getField(object));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record Star() implements Instruction {
     @Override
     public Context execute(Context context) {
@@ -284,8 +303,23 @@ sealed interface Instruction {
   record AssignVariable(String varName) implements Instruction {
     @Override
     public Context execute(Context context) {
-      var value = context.popData();
-      context.set(varName, value);
+      var rhs = context.popData();
+      context.set(varName, rhs);
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record AssignField(String fieldName) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var object = context.popData();
+      var rhs = context.popData();
+      if (!Assignment.assignField(object, fieldName, rhs)) {
+        throw new IllegalArgumentException(
+            "Unsupported expression type for lhs of assignment: %s"
+                .formatted(getSimpleTypeName(object)));
+      }
       ++context.ip;
       return context;
     }

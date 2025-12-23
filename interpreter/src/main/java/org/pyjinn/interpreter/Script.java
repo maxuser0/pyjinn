@@ -1346,16 +1346,20 @@ public class Script {
   public record ClassFieldDef(Identifier identifier, Optional<Expression> defaultValue) {}
 
   // Type passed as an array of one element to defer creation of the type.
-  public record DataclassCtor(PyjClass[] type, List<ClassFieldDef> fields, int lineno)
+  public record DataclassDefaultInit(PyjClass[] type, List<ClassFieldDef> fields, int lineno)
       implements Statement {
     @Override
     public void exec(Context context) {
+      context.returnWithValue(create(context));
+    }
+
+    public PyjObject create(Context context) {
       var object = new PyjObject(type[0]);
       for (var field : fields) {
         String name = field.identifier().name();
         object.__dict__.__setitem__(name, context.get(name));
       }
-      context.returnWithValue(object);
+      return object;
     }
 
     @Override
@@ -1384,10 +1388,6 @@ public class Script {
       Function ctor = null;
       Optional<Decorator> dataclass =
           decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
-      if (dataclass.isPresent()) {
-        ctor = getDataclassDefaultCtor(context, compiler, type);
-      }
-
       var instanceMethods = new HashMap<String, Function>();
       var classLevelMethods = new HashMap<String, ClassLevelMethod>();
       for (var methodDef : methodDefs) {
@@ -1416,11 +1416,15 @@ public class Script {
 
       // Create default ctor if one hasn't been defined above.
       if (ctor == null) {
-        ctor =
-            (env, params) -> {
-              Function.expectNumParams(params, 0, identifier.name() + ".__init__");
-              return new PyjObject(type[0]);
-            };
+        if (dataclass.isPresent()) {
+          ctor = getDataclassDefaultCtor(context, compiler, type);
+        } else {
+          ctor =
+              (env, params) -> {
+                Function.expectNumParams(params, 0, identifier.name() + ".__init__");
+                return new PyjObject(type[0]);
+              };
+        }
       }
 
       type[0] =
@@ -1468,7 +1472,7 @@ public class Script {
               /* vararg= */ Optional.empty(),
               /* kwarg= */ Optional.empty(),
               defaults,
-              new DataclassCtor(type, fields, lineno));
+              new DataclassDefaultInit(type, fields, lineno));
       return new BoundFunction(functionDef, context, compiler.compile(functionDef));
     }
 
@@ -2210,14 +2214,8 @@ public class Script {
         return;
       } else if (lhs instanceof FieldAccess lhsFieldAccess) {
         var lhsObject = lhsFieldAccess.object().eval(context);
-        if (lhsObject instanceof PyjObject pyObject) {
-          String fieldName = lhsFieldAccess.field().name();
-          if (pyObject.__class__.isFrozen) {
-            throw new FrozenInstanceError(
-                "cannot assign to field '%s' of type '%s'"
-                    .formatted(fieldName, pyObject.__class__.name));
-          }
-          pyObject.__dict__.__setitem__(fieldName, rhsValue);
+        String fieldName = lhsFieldAccess.field().name();
+        if (assignField(lhsObject, fieldName, rhsValue)) {
           return;
         }
       } else if (lhs instanceof TupleLiteral lhsTuple) {
@@ -2252,6 +2250,19 @@ public class Script {
       throw new IllegalArgumentException(
           "Unsupported expression type for lhs of assignment: '%s' (%s)"
               .formatted(lhs, lhs.getClass().getSimpleName()));
+    }
+
+    public static boolean assignField(Object lhsObject, String fieldName, Object rhsValue) {
+      if (lhsObject instanceof PyjObject pyObject) {
+        if (pyObject.__class__.isFrozen) {
+          throw new FrozenInstanceError(
+              "cannot assign to field '%s' of type '%s'"
+                  .formatted(fieldName, pyObject.__class__.name));
+        }
+        pyObject.__dict__.__setitem__(fieldName, rhsValue);
+        return true;
+      }
+      return false;
     }
 
     @Override
@@ -6250,6 +6261,10 @@ public class Script {
     @Override
     public Object eval(Context context) {
       var objectValue = object.eval(context);
+      return getField(objectValue);
+    }
+
+    public Object getField(Object objectValue) {
       if (objectValue instanceof PyjObject pyObject) {
         if (field.name().equals("__class__")) {
           return pyObject.__class__;

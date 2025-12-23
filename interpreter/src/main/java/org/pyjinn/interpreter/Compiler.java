@@ -120,6 +120,8 @@ class Compiler {
       compileFunctionDef(function, code);
     } else if (statement instanceof ClassDef classDef) {
       compileClassDef(classDef, code);
+    } else if (statement instanceof DataclassDefaultInit dataclassInit) {
+      compileDataclassDefaultInit(dataclassInit, code);
     } else if (statement instanceof Continue continueStatement) {
       compileContinueStatement(continueStatement, code);
     } else if (statement instanceof Break breakStatement) {
@@ -136,6 +138,11 @@ class Compiler {
     if (lhs instanceof Identifier identifier) {
       compileExpression(assign.rhs(), code.instructions());
       code.addInstruction(new Instruction.AssignVariable(identifier.name()));
+    } else if (lhs instanceof FieldAccess fieldAccess) {
+      compileExpression(assign.rhs(), code.instructions());
+      compileExpression(fieldAccess.object(), code.instructions());
+      code.addInstruction(new Instruction.AssignField(fieldAccess.field().name()));
+
       /* TODO(maxuser)! support all forms of assignment
       } else if (lhs instanceof FieldAccess fieldAccess) {
       } else if (lhs instanceof ArrayIndex arrayIndex) {
@@ -341,6 +348,10 @@ class Compiler {
     code.instructions().add(new Instruction.DefineClass(classDef, Compiler::compileFunction));
   }
 
+  private void compileDataclassDefaultInit(DataclassDefaultInit dataclassInit, Code code) {
+    code.instructions().add(new Instruction.DataclassDefaultInit(dataclassInit));
+  }
+
   private static Code compileFunction(FunctionDef function) {
     var code = new Code();
     compileFunctionBody(function.body(), code);
@@ -428,6 +439,9 @@ class Compiler {
       compileExpression(comparison.lhs(), instructions);
       compileExpression(comparison.rhs(), instructions);
       instructions.add(new Instruction.Comparison(comparison.op()));
+    } else if (expr instanceof FieldAccess fieldAccess) {
+      compileExpression(fieldAccess.object(), instructions);
+      instructions.add(new Instruction.FieldAccess(fieldAccess));
     } else if (expr instanceof BoolOp boolOp) {
       // source: VALUE1 and VALUE2 and VALUE3...
       // [0] eval VALUE1
