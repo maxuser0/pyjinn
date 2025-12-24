@@ -1597,6 +1597,12 @@ public class Script {
 
       var method = __class__.instanceMethods.get(methodName);
       if (method != null) {
+        if (method instanceof BoundFunction boundFunction && boundFunction.code() != null) {
+          throw new IllegalStateException(
+              "BoundFunction with code executed via recursive tree evaluation but should be"
+                  + " executed via iterative virtual machine: %s.%s(...)"
+                      .formatted(__class__.name, boundFunction.function().identifier().name()));
+        }
         Object[] methodParams = new Object[params.length + 1];
         methodParams[0] = this;
         System.arraycopy(params, 0, methodParams, 1, params.length);

@@ -60,6 +60,79 @@ sealed interface Instruction {
     }
 
     private Context call(Context context, Object caller, Object[] params) {
+      List<Object> paramValues = resolveParams(params);
+      if (caller instanceof Class<?> type) {
+        Function function;
+        if ((function = InterfaceProxy.getFunctionPassedToInterface(type, paramValues.toArray()))
+            != null) {
+          context.pushData(
+              InterfaceProxy.promoteFunctionToJavaInterface(context.env(), type, function));
+          ++context.ip;
+          return context;
+        }
+      }
+
+      // Translate len(x) to x.__len__().
+      if (caller instanceof LenFunction && paramValues.size() == 1) {
+        var function = getMethod(paramValues.get(0), "__len__");
+        if (function != null) {
+          return executeCompiledFunction(context, function, paramValues.toArray());
+        }
+      }
+
+      // Effective caller may be a function that's being delegated to.
+      var effectiveCaller = caller;
+
+      // Specialize handling of BoundMethod so instructions can be interrupted.
+      if (caller instanceof Script.BoundMethod binding
+          && binding.object() instanceof PyjObject pyjObject) {
+        var method = pyjObject.__class__.instanceMethods.get(binding.methodName());
+        if (method != null && method instanceof BoundFunction function) {
+          var methodParams = new ArrayList<Object>(paramValues.size() + 1);
+          methodParams.add(pyjObject);
+          methodParams.addAll(paramValues);
+          return executeCompiledFunction(context, function, methodParams.toArray());
+        }
+
+        // If PyjObject's field is assigned to a function, make that function the effective caller.
+        var field = pyjObject.__dict__.get(binding.methodName());
+        if (field != null && field instanceof Function function) {
+          effectiveCaller = function;
+        }
+      }
+
+      // Specialize handling of BoundFunction so instructions can be interrupted.
+      if (effectiveCaller instanceof BoundFunction function) {
+        return executeCompiledFunction(context, function, paramValues.toArray());
+      }
+
+      if (effectiveCaller instanceof Function function) {
+        try {
+          context.enterFunction(filename, lineno);
+          context.pushData(function.call(context.env(), paramValues.toArray()));
+          ++context.ip;
+          return context;
+        } finally {
+          context.leaveFunction();
+        }
+      }
+
+      throw new IllegalArgumentException(
+          String.format(
+              "'%s' is not callable", caller == null ? "NoneType" : caller.getClass().getName()));
+    }
+
+    static BoundFunction getMethod(Object object, String methodName) {
+      if (object instanceof PyjObject pyjObject) {
+        var meth = pyjObject.__class__.instanceMethods.get(methodName);
+        if (meth != null && meth instanceof BoundFunction function) {
+          return function;
+        }
+      }
+      return null;
+    }
+
+    private static List<Object> resolveParams(Object[] params) {
       List<Object> paramValues = new ArrayList<>();
       KeywordArgs kwargsMap = null;
       for (var param : params) {
@@ -108,62 +181,16 @@ sealed interface Instruction {
       if (kwargsMap != null && !kwargsMap.isEmpty()) {
         paramValues.add(kwargsMap);
       }
-
-      if (caller instanceof Class<?> type) {
-        Function function;
-        if ((function = InterfaceProxy.getFunctionPassedToInterface(type, paramValues.toArray()))
-            != null) {
-          context.pushData(
-              InterfaceProxy.promoteFunctionToJavaInterface(context.env(), type, function));
-          ++context.ip;
-          return context;
-        }
-      }
-
-      // Effective caller may be a function that's being delegated to.
-      var effectiveCaller = caller;
-
-      // Specialize handling of BoundMethod so instructions can be interrupted.
-      if (caller instanceof Script.BoundMethod binding
-          && binding.object() instanceof PyjObject pyjObject) {
-        var method = pyjObject.__class__.instanceMethods.get(binding.methodName());
-        if (method != null && method instanceof BoundFunction function) {
-          var methodParams = new ArrayList<Object>(paramValues.size() + 1);
-          methodParams.add(pyjObject);
-          methodParams.addAll(paramValues);
-          return executeCompiledFunction(context, function, methodParams.toArray());
-        }
-
-        // If PyjObject's field is assigned to a function, make that function the effective caller.
-        var field = pyjObject.__dict__.get(binding.methodName());
-        if (field != null && field instanceof Function function) {
-          effectiveCaller = function;
-        }
-      }
-
-      // Specialize handling of BoundFunction so instructions can be interrupted.
-      if (effectiveCaller instanceof BoundFunction function) {
-        return executeCompiledFunction(context, function, paramValues.toArray());
-      }
-
-      if (effectiveCaller instanceof Function function) {
-        try {
-          context.enterFunction(filename, lineno);
-          context.pushData(function.call(context.env(), paramValues.toArray()));
-          ++context.ip;
-          return context;
-        } finally {
-          context.leaveFunction();
-        }
-      }
-
-      throw new IllegalArgumentException(
-          String.format(
-              "'%s' is not callable", caller == null ? "NoneType" : caller.getClass().getName()));
+      return paramValues;
     }
 
     private Context executeCompiledFunction(
         Context context, BoundFunction function, Object[] params) {
+      return executeCompiledFunction(filename, lineno, context, function, params);
+    }
+
+    public static Context executeCompiledFunction(
+        String filename, int lineno, Context context, BoundFunction function, Object[] params) {
       if (function.isHalted()) {
         ++context.ip;
         return context;
@@ -263,6 +290,28 @@ sealed interface Instruction {
     public Context execute(Context context) {
       var rhs = context.popData();
       var lhs = context.popData();
+
+      BoundFunction function =
+          switch (op) {
+            case ADD -> FunctionCall.getMethod(lhs, "__add__");
+            case SUB -> FunctionCall.getMethod(lhs, "__sub__");
+            case MUL -> FunctionCall.getMethod(lhs, "__mul__");
+            case DIV -> FunctionCall.getMethod(lhs, "__truediv__");
+            case FLOOR_DIV -> FunctionCall.getMethod(lhs, "__floordiv__");
+            case POW -> FunctionCall.getMethod(lhs, "__pow__");
+            case MOD -> FunctionCall.getMethod(lhs, "__mod__");
+            case LSHIFT -> FunctionCall.getMethod(lhs, "__lshift__");
+            case RSHIFT -> FunctionCall.getMethod(lhs, "__rshift__");
+          };
+
+      if (function != null) {
+        // TODO(maxuser): Use an accurate filename and line number.
+        var filename = "";
+        int lineno = -1;
+        return FunctionCall.executeCompiledFunction(
+            filename, lineno, context, function, List.of(lhs, rhs).toArray());
+      }
+
       context.pushData(Script.BinaryOp.doOp(context, op, lhs, rhs));
       ++context.ip;
       return context;

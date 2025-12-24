@@ -1075,6 +1075,33 @@ public class ScriptTest {
     assertEquals(getVariable("output"), "foobarbaz");
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void operators(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        class Foo:
+          def __init__(self, n):
+            self.n = n
+          def __add__(self, x): return self.n + x
+          def __len__(self):
+            return self.n
+          def __pow__(self, n):
+            return self.n ** n
+        foo = Foo(17)
+        addition = foo + 3
+        length = len(foo)
+        power = foo ** 2
+        power_of_2 = 2 ** 8
+        """);
+
+    assertEquals(getVariable("addition"), 20);
+    assertEquals(getVariable("length"), 17);
+    assertEquals(getVariable("power"), 289);
+    assertEquals(getVariable("power_of_2"), 256);
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
