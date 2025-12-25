@@ -9,6 +9,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import org.pyjinn.interpreter.Code.InstructionList;
 import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
@@ -17,8 +18,9 @@ class Compiler {
     compiler.compileStatement(statement, code);
   }
 
-  private static void compileFunctionBody(Statement statement, Code code) {
+  private static void compileFunctionBody(int lineno, Statement statement, Code code) {
     var compiler = new Compiler(/* withinFunction= */ true);
+    compiler.lineno = lineno;
     compiler.compileStatement(statement, code);
   }
 
@@ -29,6 +31,7 @@ class Compiler {
 
   private final boolean withinFunction;
   private final Deque<LoopState> loops = new ArrayDeque<>();
+  private int lineno = -1;
 
   private Compiler(boolean withinFunction) {
     this.withinFunction = withinFunction;
@@ -41,14 +44,13 @@ class Compiler {
 
   private record DeferredJump(int source, Instructor instructor) {}
 
-  private record DeferredJumpList(List<DeferredJump> jumps, List<Instruction> instructions) {
-    DeferredJumpList(List<Instruction> instructions) {
+  private record DeferredJumpList(List<DeferredJump> jumps, InstructionList instructions) {
+    DeferredJumpList(InstructionList instructions) {
       this(new ArrayList<>(), instructions);
     }
 
     void createDeferredJump(Instructor instructor) {
-      int jumpSource = instructions.size();
-      instructions.add(null);
+      int jumpSource = instructions.addPlaceholder();
       jumps.add(new DeferredJump(jumpSource, instructor));
     }
 
@@ -65,7 +67,7 @@ class Compiler {
     public final int continueTarget;
     private final DeferredJumpList deferredBreaks;
 
-    public LoopState(LoopType type, List<Instruction> instructions) {
+    public LoopState(LoopType type, InstructionList instructions) {
       this.type = type;
       continueTarget = instructions.size();
       deferredBreaks = new DeferredJumpList(instructions);
@@ -99,13 +101,17 @@ class Compiler {
   }
 
   private void compileStatement(Statement statement, Code code) {
+    if (statement.lineno() != -1) {
+      lineno = statement.lineno();
+    }
+
     if (statement instanceof StatementBlock block) {
       for (var s : block.statements()) {
         compileStatement(s, code);
       }
     } else if (statement instanceof Expression expr) {
-      compileExpression(expr, code.instructions());
-      code.instructions().add(new Instruction.PopData());
+      compileExpression(expr, code);
+      code.addInstruction(lineno, new Instruction.PopData());
     } else if (statement instanceof Assignment assign) {
       compileAssignment(assign, code);
     } else if (statement instanceof IfBlock ifBlock) {
@@ -136,12 +142,12 @@ class Compiler {
   private void compileAssignment(Assignment assign, Code code) {
     Expression lhs = assign.lhs();
     if (lhs instanceof Identifier identifier) {
-      compileExpression(assign.rhs(), code.instructions());
-      code.addInstruction(new Instruction.AssignVariable(identifier.name()));
+      compileExpression(assign.rhs(), code);
+      code.addInstruction(lineno, new Instruction.AssignVariable(identifier.name()));
     } else if (lhs instanceof FieldAccess fieldAccess) {
-      compileExpression(assign.rhs(), code.instructions());
-      compileExpression(fieldAccess.object(), code.instructions());
-      code.addInstruction(new Instruction.AssignField(fieldAccess.field().name()));
+      compileExpression(assign.rhs(), code);
+      compileExpression(fieldAccess.object(), code);
+      code.addInstruction(lineno, new Instruction.AssignField(fieldAccess.field().name()));
 
       /* TODO(maxuser)! support all forms of assignment
       } else if (lhs instanceof FieldAccess fieldAccess) {
@@ -179,19 +185,17 @@ class Compiler {
     // Note that each "eval" and "execute" operation may expand to multiple instructions.
 
     var instructions = code.instructions();
-    compileExpression(ifBlock.condition(), code.instructions());
+    compileExpression(ifBlock.condition(), code);
 
     // Add a placeholder null instruction to be filled in below when the jump target is known.
-    int jumpIfBlockSource = instructions.size();
-    instructions.add(null);
+    int jumpIfBlockSource = instructions.addPlaceholder();
     compileStatement(ifBlock.thenBody(), code);
 
     if (ifBlock.elseBody().isEmpty()) {
       int jumpIfBlockTarget = instructions.size();
       instructions.set(jumpIfBlockSource, new Instruction.PopJumpIfFalse(jumpIfBlockTarget));
     } else {
-      int jumpElseBlockSource = instructions.size();
-      instructions.add(null);
+      int jumpElseBlockSource = code.addPlaceholder();
       int jumpIfBlockTarget = instructions.size();
       compileStatement(ifBlock.elseBody().get(), code);
       int jumpElseBlockTarget = instructions.size();
@@ -214,12 +218,11 @@ class Compiler {
     // `continue` in BODY -> Jump 0
     // `break` in BODY -> Jump 4
 
-    var instructions = code.instructions();
-    loops.push(new LoopState(LoopType.WHILE, instructions));
-    compileExpression(whileBlock.condition(), instructions);
+    loops.push(new LoopState(LoopType.WHILE, code.instructions()));
+    compileExpression(whileBlock.condition(), code);
     addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget));
     compileStatement(whileBlock.body(), code);
-    instructions.add(new Instruction.Jump(continueTarget()));
+    code.addInstruction(lineno, new Instruction.Jump(continueTarget()));
     loops.pop().close();
   }
 
@@ -253,18 +256,17 @@ class Compiler {
     // `continue` in BODY -> Jump 1
     // `break` in BODY -> Jump 7
 
-    var instructions = code.instructions();
-    compileExpression(forBlock.iter(), instructions); // [0]
-    instructions.add(new Instruction.IterableIterator()); // [1]
-    loops.push(new LoopState(LoopType.FOR, instructions));
-    instructions.add(new Instruction.IteratorHasNext()); // [2]
+    compileExpression(forBlock.iter(), code); // [0]
+    code.addInstruction(lineno, new Instruction.IterableIterator()); // [1]
+    loops.push(new LoopState(LoopType.FOR, code.instructions()));
+    code.addInstruction(lineno, new Instruction.IteratorHasNext()); // [2]
     addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget)); // [3]
-    instructions.add(new Instruction.IteratorNext()); // [4]
-    instructions.add(iterVarAssignment); // [5]
+    code.addInstruction(lineno, new Instruction.IteratorNext()); // [4]
+    code.addInstruction(lineno, iterVarAssignment); // [5]
     compileStatement(forBlock.body(), code); // [6]
-    instructions.add(new Instruction.Jump(continueTarget())); // [7]
+    code.addInstruction(lineno, new Instruction.Jump(continueTarget())); // [7]
     loops.pop().close();
-    instructions.add(new Instruction.PopData()); // [8]
+    code.addInstruction(lineno, new Instruction.PopData()); // [8]
   }
 
   private void compileTryBlock(TryBlock tryBlock, Code code) {
@@ -304,14 +306,15 @@ class Compiler {
       // instruction rethrows the exception if it doesn't match the formal exception type of the
       // 'except' clause.
       if (handler.exceptionTypeSpec().isPresent()) {
-        compileExpression(handler.exceptionTypeSpec().get(), instructions);
-        instructions.add(
+        compileExpression(handler.exceptionTypeSpec().get(), code);
+        code.addInstruction(
+            lineno,
             new Instruction.CatchExceptionType(handler.exceptionVariable().map(Identifier::name)));
       }
       compileStatement(handler.body(), code);
       blockEnd = instructions.size();
 
-      instructions.add(new Instruction.SwallowException());
+      code.addInstruction(lineno, new Instruction.SwallowException());
       if (!isLastHandler) {
         if (hasFinally) {
           jumpsToFinally.createDeferredJump(Instruction.Jump::new);
@@ -326,45 +329,37 @@ class Compiler {
           blockStart, blockEnd, instructions.size(), Code.ExceptionClause.FINALLY);
       jumpsToFinally.finalizeJumps();
       compileStatement(tryBlock.finallyBlock().get(), code);
-      instructions.add(new Instruction.RethrowException());
+      code.addInstruction(lineno, new Instruction.RethrowException());
     } else {
       jumpsPastExceptionHandlers.finalizeJumps();
     }
   }
 
   private void compileFunctionDef(FunctionDef function, Code code) {
-    var functionCode = new Code();
-    compileFunctionBody(function.body(), functionCode);
-
-    // Add trailing null return in case there are no earlier returns or earlier returns don't cover
-    // all code paths.
-    functionCode.instructions().add(new Instruction.PushData(null));
-    functionCode.instructions().add(new Instruction.FunctionReturn());
-
-    code.instructions().add(new Instruction.BindFunction(function, compileFunction(function)));
+    code.addInstruction(lineno, new Instruction.BindFunction(function, compileFunction(function)));
   }
 
   private void compileClassDef(ClassDef classDef, Code code) {
-    code.instructions().add(new Instruction.DefineClass(classDef, Compiler::compileFunction));
+    code.addInstruction(lineno, new Instruction.DefineClass(classDef, this::compileFunction));
   }
 
   private void compileDataclassDefaultInit(DataclassDefaultInit dataclassInit, Code code) {
-    code.instructions().add(new Instruction.DataclassDefaultInit(dataclassInit));
+    code.addInstruction(lineno, new Instruction.DataclassDefaultInit(dataclassInit));
   }
 
-  private static Code compileFunction(FunctionDef function) {
+  private Code compileFunction(FunctionDef function) {
     var code = new Code();
-    compileFunctionBody(function.body(), code);
+    compileFunctionBody(function.lineno(), function.body(), code);
 
     // Add trailing null return in case there are no earlier returns or earlier returns don't cover
     // all code paths.
-    code.instructions().add(new Instruction.PushData(null));
-    code.instructions().add(new Instruction.FunctionReturn());
+    code.addInstruction(lineno, new Instruction.PushData(null));
+    code.addInstruction(lineno, new Instruction.FunctionReturn());
     return code;
   }
 
   private void compileContinueStatement(Continue continueStatement, Code code) {
-    code.addInstruction(new Instruction.Jump(continueTarget()));
+    code.addInstruction(lineno, new Instruction.Jump(continueTarget()));
   }
 
   private void compileBreakStatement(Break breakStatement) {
@@ -380,68 +375,69 @@ class Compiler {
     // because there can be instructions following this return statement along other branches.
     loops.stream()
         .filter(loop -> loop.type == LoopType.FOR)
-        .forEach(loop -> code.addInstruction(new Instruction.PopData()));
+        .forEach(loop -> code.addInstruction(lineno, new Instruction.PopData()));
 
-    compileExpression(returnStatement.returnValue(), code.instructions());
-    code.addInstruction(new Instruction.FunctionReturn());
+    compileExpression(returnStatement.returnValue(), code);
+    code.addInstruction(lineno, new Instruction.FunctionReturn());
   }
 
-  private void compileFunctionCall(FunctionCall call, List<Instruction> instructions) {
-    compileExpression(call.method(), instructions);
+  private void compileFunctionCall(FunctionCall call, Code code) {
+    compileExpression(call.method(), code);
     int numArgs = 0;
     for (var kwarg : call.kwargs().reversed()) {
-      instructions.add(new Instruction.PushData(kwarg));
+      code.addInstruction(lineno, new Instruction.PushData(kwarg));
       ++numArgs;
     }
     for (var param : call.params().reversed()) {
-      compileExpression(param, instructions);
+      compileExpression(param, code);
       ++numArgs;
     }
-    instructions.add(new Instruction.FunctionCall(call.filename(), call.lineno(), numArgs));
+    code.addInstruction(
+        lineno, new Instruction.FunctionCall(call.filename(), call.lineno(), numArgs));
   }
 
-  private void compileBoundMethod(
-      BoundMethodExpression boundMethod, List<Instruction> instructions) {
-    compileExpression(boundMethod.object(), instructions);
-    instructions.add(
+  private void compileBoundMethod(BoundMethodExpression boundMethod, Code code) {
+    compileExpression(boundMethod.object(), code);
+    code.addInstruction(
+        lineno,
         new Instruction.BoundMethod(
             boundMethod.methodId().name(), boundMethod.symbolCache(), boundMethod.object()));
   }
 
-  private void compileExpression(Expression expr, List<Instruction> instructions) {
+  private void compileExpression(Expression expr, Code code) {
     if (expr instanceof Identifier identifier) {
-      instructions.add(new Instruction.Identifier(identifier.name()));
+      code.addInstruction(lineno, new Instruction.Identifier(identifier.name()));
     } else if (expr instanceof TupleLiteral tuple) {
-      compileTupleLiteral(tuple, instructions);
+      compileTupleLiteral(tuple, code);
     } else if (expr instanceof ListLiteral list) {
-      compileListLiteral(list, instructions);
+      compileListLiteral(list, code);
     } else if (expr instanceof SetLiteral set) {
-      compileSetLiteral(set, instructions);
+      compileSetLiteral(set, code);
     } else if (expr instanceof FunctionCall functionCall) {
-      compileFunctionCall(functionCall, instructions);
+      compileFunctionCall(functionCall, code);
     } else if (expr instanceof BoundMethodExpression boundMethod) {
-      compileBoundMethod(boundMethod, instructions);
+      compileBoundMethod(boundMethod, code);
     } else if (expr instanceof StarredExpression starred) {
-      compileExpression(starred.value(), instructions);
-      instructions.add(new Instruction.Star());
+      compileExpression(starred.value(), code);
+      code.addInstruction(lineno, new Instruction.Star());
     } else if (expr instanceof ConstantExpression constant) {
-      instructions.add(new Instruction.Constant(constant.value()));
+      code.addInstruction(lineno, new Instruction.Constant(constant.value()));
     } else if (expr instanceof JavaClassCall javaClassCall) {
-      instructions.add(new Instruction.LoadJavaClass(javaClassCall));
+      code.addInstruction(lineno, new Instruction.LoadJavaClass(javaClassCall));
     } else if (expr instanceof UnaryOp unaryOp) {
-      compileExpression(unaryOp.operand(), instructions);
-      instructions.add(new Instruction.UnaryOp(unaryOp.op()));
+      compileExpression(unaryOp.operand(), code);
+      code.addInstruction(lineno, new Instruction.UnaryOp(unaryOp.op()));
     } else if (expr instanceof BinaryOp binaryOp) {
-      compileExpression(binaryOp.lhs(), instructions);
-      compileExpression(binaryOp.rhs(), instructions);
-      instructions.add(new Instruction.BinaryOp(binaryOp.op()));
+      compileExpression(binaryOp.lhs(), code);
+      compileExpression(binaryOp.rhs(), code);
+      code.addInstruction(lineno, new Instruction.BinaryOp(binaryOp.op()));
     } else if (expr instanceof Comparison comparison) {
-      compileExpression(comparison.lhs(), instructions);
-      compileExpression(comparison.rhs(), instructions);
-      instructions.add(new Instruction.Comparison(comparison.op()));
+      compileExpression(comparison.lhs(), code);
+      compileExpression(comparison.rhs(), code);
+      code.addInstruction(lineno, new Instruction.Comparison(comparison.op()));
     } else if (expr instanceof FieldAccess fieldAccess) {
-      compileExpression(fieldAccess.object(), instructions);
-      instructions.add(new Instruction.FieldAccess(fieldAccess));
+      compileExpression(fieldAccess.object(), code);
+      code.addInstruction(lineno, new Instruction.FieldAccess(fieldAccess));
     } else if (expr instanceof BoolOp boolOp) {
       // source: VALUE1 and VALUE2 and VALUE3...
       // [0] eval VALUE1
@@ -462,13 +458,13 @@ class Compiler {
       var values = boolOp.values();
       var placeholderJumps = new ArrayList<Integer>();
 
-      compileExpression(values.get(0), instructions);
+      compileExpression(values.get(0), code);
       for (int i = 1; i < values.size(); ++i) {
-        placeholderJumps.add(instructions.size());
-        instructions.add(null);
-        compileExpression(boolOp.values().get(i), instructions);
+        placeholderJumps.add(code.addPlaceholder());
+        compileExpression(boolOp.values().get(i), code);
       }
 
+      var instructions = code.instructions();
       int jumpTarget = instructions.size();
       var jumpInstruction =
           boolOp.op() == BoolOp.Op.AND
@@ -487,18 +483,17 @@ class Compiler {
       // [5] ...
       //
       // Note that each "eval" operation may expand to multiple instructions.
-      compileExpression(ifExpr.test(), instructions);
+      compileExpression(ifExpr.test(), code);
 
-      int elseJumpSource = instructions.size();
-      instructions.add(null);
+      int elseJumpSource = code.addPlaceholder();
 
-      compileExpression(ifExpr.body(), instructions);
+      compileExpression(ifExpr.body(), code);
 
-      int skipElseJumpSource = instructions.size();
-      instructions.add(null);
+      int skipElseJumpSource = code.addPlaceholder();
 
+      var instructions = code.instructions();
       int atElseJumpTarget = instructions.size();
-      compileExpression(ifExpr.orElse(), instructions);
+      compileExpression(ifExpr.orElse(), code);
       int afterElseJumpTarget = instructions.size();
 
       instructions.set(elseJumpSource, new Instruction.PopJumpIfFalse(atElseJumpTarget));
@@ -509,27 +504,27 @@ class Compiler {
     }
   }
 
-  private void compileTupleLiteral(TupleLiteral tuple, List<Instruction> instructions) {
+  private void compileTupleLiteral(TupleLiteral tuple, Code code) {
     // Push elements' values onto the stack in head to tail order.
     for (var element : tuple.elements()) {
-      compileExpression(element, instructions);
+      compileExpression(element, code);
     }
-    instructions.add(new Instruction.LoadTuple(tuple.elements().size()));
+    code.addInstruction(lineno, new Instruction.LoadTuple(tuple.elements().size()));
   }
 
-  private void compileListLiteral(ListLiteral list, List<Instruction> instructions) {
+  private void compileListLiteral(ListLiteral list, Code code) {
     // Push elements' values onto the stack in head to tail order.
     for (var element : list.elements()) {
-      compileExpression(element, instructions);
+      compileExpression(element, code);
     }
-    instructions.add(new Instruction.LoadList(list.elements().size()));
+    code.addInstruction(lineno, new Instruction.LoadList(list.elements().size()));
   }
 
-  private void compileSetLiteral(SetLiteral set, List<Instruction> instructions) {
+  private void compileSetLiteral(SetLiteral set, Code code) {
     // Push elements' values onto the stack in head to tail order.
     for (var element : set.elements()) {
-      compileExpression(element, instructions);
+      compileExpression(element, code);
     }
-    instructions.add(new Instruction.LoadSet(set.elements().size()));
+    code.addInstruction(lineno, new Instruction.LoadSet(set.elements().size()));
   }
 }

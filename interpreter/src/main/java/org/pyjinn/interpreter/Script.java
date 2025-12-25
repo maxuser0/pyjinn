@@ -162,9 +162,9 @@ public class Script {
     void log(String message, Object... args);
   }
 
-  private static DebugLogger logger = (message, args) -> {};
+  static DebugLogger logger = (message, args) -> {};
 
-  private static boolean debug = false;
+  static boolean debug = false;
 
   public static void setVerboseDebugging(boolean enable) {
     debug = enable;
@@ -6530,26 +6530,9 @@ public class Script {
         }
       } else {
         Context context = this;
-        while (context.hasMoreInstructions()) {
-          try {
-            context = context.executeNextInstruction();
-          } catch (RuntimeException e) {
-            context.exception = e;
-            Code.ExceptionalJump jump = null;
-            while ((jump = context.code.getExceptionalJump(context.ip)) == null
-                && context.callingContext() != null) {
-              var caller = context.callingContext();
-              caller.exception = context.exception;
-              context.exception = null;
-              context = context.callingContext();
-            }
-            if (jump == null) {
-              context.debugLogInstructions();
-              throw e;
-            } else {
-              context.ip = jump.jumpTarget();
-            }
-          }
+        var virtualMachine = VirtualMachine.getInstance();
+        while (virtualMachine.hasMoreInstructions(context)) {
+          context = virtualMachine.executeNextInstruction(context);
         }
       }
       globalStatements.clear();
@@ -6612,18 +6595,6 @@ public class Script {
 
     public Context callingContext() {
       return callingContext;
-    }
-
-    public boolean hasMoreInstructions() {
-      return ip < code.instructions().size();
-    }
-
-    public Context executeNextInstruction() {
-      var instruction = code.instructions().get(ip);
-      if (debug) {
-        logger.log("Executing instruction: [%d] %s", ip, instruction);
-      }
-      return instruction.execute(this);
     }
 
     public void pushData(Object data) {
@@ -6732,28 +6703,31 @@ public class Script {
       try {
         statement.exec(this);
       } catch (Exception e) {
-        var callStack = globals.getCallStack();
-        var stackTrace = e.getStackTrace();
-        if (stackTrace.length > 0 && !isPyjinnSource(stackTrace[0].getFileName())) {
-          var scriptStack = new ArrayList<CallSite>();
-          scriptStack.add(
-              new CallSite(classMethodName, globals.moduleFilename, statement.lineno()));
-          scriptStack.addAll(callStack);
-
-          var newStackTrace = new StackTraceElement[stackTrace.length + scriptStack.size()];
-          for (int i = 0; i < scriptStack.size(); ++i) {
-            var scriptFrame = scriptStack.get(i);
-            newStackTrace[i] =
-                new StackTraceElement(
-                    scriptFrame == null ? "<null>" : scriptFrame.classMethodName().type,
-                    scriptFrame == null ? "<null>" : scriptFrame.classMethodName().method,
-                    scriptFrame == null ? "<null>" : scriptFrame.filename,
-                    scriptFrame == null ? -1 : scriptFrame.lineno());
-          }
-          System.arraycopy(stackTrace, 0, newStackTrace, scriptStack.size(), stackTrace.length);
-          e.setStackTrace(newStackTrace);
-        }
+        appendScriptStack(statement.lineno(), e);
         throw e;
+      }
+    }
+
+    void appendScriptStack(int lineno, Exception e) {
+      var callStack = globals.getCallStack();
+      var stackTrace = e.getStackTrace();
+      if (stackTrace.length > 0 && !isPyjinnSource(stackTrace[0].getFileName())) {
+        var scriptStack = new ArrayList<CallSite>();
+        scriptStack.add(new CallSite(classMethodName, globals.moduleFilename, lineno));
+        scriptStack.addAll(callStack);
+
+        var newStackTrace = new StackTraceElement[stackTrace.length + scriptStack.size()];
+        for (int i = 0; i < scriptStack.size(); ++i) {
+          var scriptFrame = scriptStack.get(i);
+          newStackTrace[i] =
+              new StackTraceElement(
+                  scriptFrame == null ? "<null>" : scriptFrame.classMethodName().type,
+                  scriptFrame == null ? "<null>" : scriptFrame.classMethodName().method,
+                  scriptFrame == null ? "<null>" : scriptFrame.filename,
+                  scriptFrame == null ? -1 : scriptFrame.lineno());
+        }
+        System.arraycopy(stackTrace, 0, newStackTrace, scriptStack.size(), stackTrace.length);
+        e.setStackTrace(newStackTrace);
       }
     }
 
