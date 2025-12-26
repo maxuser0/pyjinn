@@ -1102,6 +1102,19 @@ public class ScriptTest {
     assertEquals(getVariable("power_of_2"), 256);
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void lambda(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        f = lambda x, y: x + y
+        output = f("foo", "bar")
+        """);
+
+    assertEquals(getVariable("output"), "foobar");
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

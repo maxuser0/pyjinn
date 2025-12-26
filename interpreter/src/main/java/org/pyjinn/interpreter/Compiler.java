@@ -438,6 +438,10 @@ class Compiler {
     } else if (expr instanceof FieldAccess fieldAccess) {
       compileExpression(fieldAccess.object(), code);
       code.addInstruction(lineno, new Instruction.FieldAccess(fieldAccess));
+    } else if (expr instanceof Lambda lambda) {
+      code.addInstruction(
+          lineno,
+          new Instruction.Lambda(lambda.functionDef(), compileFunction(lambda.functionDef())));
     } else if (expr instanceof BoolOp boolOp) {
       // source: VALUE1 and VALUE2 and VALUE3...
       // [0] eval VALUE1

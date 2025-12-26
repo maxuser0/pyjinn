@@ -9,10 +9,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
 import java.util.Set;
@@ -22,16 +20,14 @@ import org.pyjinn.parser.PyjinnParser;
 
 public class App {
   public static void main(String[] args) throws Exception {
-    List<String> argsList = new ArrayList<>(Arrays.asList(args));
-    Set<String> argsSet = new HashSet<>(argsList);
+    Set<String> argsSet = new HashSet<>(Arrays.asList(args));
 
     boolean compile = argsSet.contains("-c");
     if (compile) {
       argsSet.remove("-c");
-      argsList.remove("-c");
     }
 
-    if (argsSet.contains("-i")) {
+    if (argsSet.contains("-r")) {
       repl(compile);
       return;
     }
@@ -83,13 +79,6 @@ public class App {
         script.compile();
       }
       script.exec();
-
-      if (argsList.size() == 1) {
-        var func = script.getFunction(argsList.get(0));
-        System.out.println(func);
-        var returnValue = func.call(script.mainModule().globals());
-        System.out.println(returnValue);
-      }
     } finally {
       script.exit(); // Ensure that at-exit callbacks are run.
     }

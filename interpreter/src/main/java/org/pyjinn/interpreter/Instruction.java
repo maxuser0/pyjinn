@@ -222,11 +222,14 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+  }
 
+  record Lambda(FunctionDef function, Code code) implements Instruction {
     @Override
-    public String toString() {
-      return "BindFunction[function=%s, %d instructions]"
-          .formatted(function.identifier().name(), code.instructions().size());
+    public Context execute(Context context) {
+      context.pushData(new BoundFunction(function, context, code));
+      ++context.ip;
+      return context;
     }
   }
 

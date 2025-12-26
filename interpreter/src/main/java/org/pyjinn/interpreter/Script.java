@@ -1205,6 +1205,11 @@ public class Script {
       }
       return localContext;
     }
+
+    @Override
+    public String toString() {
+      return "<function %s at 0x%x>".formatted(function.identifier().name(), hashCode());
+    }
   }
 
   // `type` is an array of length 1 because CtorFunction needs to be instantiated before the
@@ -4557,54 +4562,28 @@ public class Script {
     }
   }
 
-  public record Lambda(
-      List<FunctionArg> args, Expression body, int lineno, AtomicInteger zombieCounter)
-      implements Expression {
+  public record Lambda(FunctionDef functionDef) implements Expression {
+
+    private static Identifier LAMBDA_IDENTIFIER = new Identifier("<lambda>");
+
+    // TODO(maxuser): Support arg defaults, *vararg, and **kwarg.
     public Lambda(List<FunctionArg> args, Expression body, int lineno) {
-      this(args, body, lineno, new AtomicInteger());
+      this(
+          new FunctionDef(
+              lineno,
+              /* enclosingClassName= */ "<>",
+              LAMBDA_IDENTIFIER,
+              /* decorators= */ List.of(),
+              args,
+              /* vararg= */ Optional.empty(),
+              /* kwarg= */ Optional.empty(),
+              /* defaults= */ List.of(),
+              new ReturnStatement(lineno, body)));
     }
 
     @Override
     public Object eval(Context context) {
-      return createFunction(context);
-    }
-
-    private Function createFunction(Context enclosingContext) {
-      return (env, params) -> {
-        if (enclosingContext.env().halted()) {
-          // TODO(maxuser): Clear lambda's internal state to avoid memory leak of the entire script.
-          var script = (Script) enclosingContext.env().get("__script__");
-          script.zombieCallbackHandler.handle(
-              script.mainModule().filename(),
-              "lambda from line " + lineno,
-              zombieCounter.incrementAndGet());
-          return null;
-        }
-
-        if (args.size() != params.length) {
-          throw new IllegalArgumentException(
-              String.format(
-                  "Invoking lambda with %d args but %d required", params.length, args.size()));
-        }
-
-        // TODO(maxuser): Either change the in-script call to this call() method to somehow pass the
-        // callingContext or eliminate this tree-walk implementation in favor of the compiled form
-        // in Instruction.java.
-        var localContext = enclosingContext.createLocalContext(/* callingContext= */ null);
-        for (int i = 0; i < args.size(); ++i) {
-          var arg = args.get(i);
-          var argValue = params[i];
-          localContext.set(arg.identifier().name(), argValue);
-        }
-        return body.eval(localContext);
-      };
-    }
-
-    @Override
-    public String toString() {
-      return String.format(
-          "lambda(%s): %s",
-          args.stream().map(a -> a.identifier().name()).collect(joining(", ")), body);
+      return new BoundFunction(functionDef, context);
     }
   }
 
