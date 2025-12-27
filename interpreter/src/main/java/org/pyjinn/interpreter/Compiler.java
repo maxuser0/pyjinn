@@ -434,7 +434,14 @@ class Compiler {
     } else if (expr instanceof Comparison comparison) {
       compileExpression(comparison.lhs(), code);
       compileExpression(comparison.rhs(), code);
-      code.addInstruction(lineno, new Instruction.Comparison(comparison.op()));
+      // If comparison is "lhs not in rhs", compile as "not (lhs in rhs)" to simplify use of rhs
+      // overload __contains__.
+      if (comparison.op() == Comparison.Op.NOT_IN) {
+        code.addInstruction(lineno, new Instruction.Comparison(Comparison.Op.IN));
+        code.addInstruction(lineno, new Instruction.UnaryOp(UnaryOp.Op.NOT));
+      } else {
+        code.addInstruction(lineno, new Instruction.Comparison(comparison.op()));
+      }
     } else if (expr instanceof FieldAccess fieldAccess) {
       compileExpression(fieldAccess.object(), code);
       code.addInstruction(lineno, new Instruction.FieldAccess(fieldAccess));

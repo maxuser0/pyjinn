@@ -2677,8 +2677,8 @@ public class Script {
           return !pyjEquals(lhsValue, rhsValue);
         case IN:
           {
-            if (lhsValue instanceof PyjObject pyjObject) {
-              var result = pyjObject.callMethod(context.globals, "__contains__", rhsValue);
+            if (rhsValue instanceof PyjObject pyjObject) {
+              var result = pyjObject.callMethod(context.globals, "__contains__", lhsValue);
               if (result != PyjObject.UNDEFINED_RESULT) {
                 return result;
               }
@@ -2690,8 +2690,8 @@ public class Script {
           }
         case NOT_IN:
           {
-            if (lhsValue instanceof PyjObject pyjObject) {
-              var result = pyjObject.callMethod(context.globals, "__contains__", rhsValue);
+            if (rhsValue instanceof PyjObject pyjObject) {
+              var result = pyjObject.callMethod(context.globals, "__contains__", lhsValue);
               if (result != PyjObject.UNDEFINED_RESULT && result instanceof Boolean contains) {
                 return !contains;
               }

@@ -326,6 +326,30 @@ sealed interface Instruction {
     public Context execute(Context context) {
       var rhs = context.popData();
       var lhs = context.popData();
+
+      BoundFunction function =
+          switch (op) {
+            case EQ -> FunctionCall.getMethod(lhs, "__eq__");
+            case LT -> FunctionCall.getMethod(lhs, "__lt__");
+            case LT_EQ -> FunctionCall.getMethod(lhs, "__le__");
+            case GT -> FunctionCall.getMethod(lhs, "__gt__");
+            case GT_EQ -> FunctionCall.getMethod(lhs, "__ge__");
+            case NOT_EQ -> FunctionCall.getMethod(lhs, "__ne__");
+            case IN -> FunctionCall.getMethod(rhs, "__contains__");
+            // NOT_IN handled as multiple instructions ("x not in y" compiled as "not (x in y)" in
+            // Compiler::compileExpression.
+            default -> null;
+          };
+
+      if (function != null) {
+        // TODO(maxuser): Use an accurate filename and line number.
+        var filename = "";
+        int lineno = -1;
+        List<Object> params = op == Script.Comparison.Op.IN ? List.of(rhs, lhs) : List.of(lhs, rhs);
+        return FunctionCall.executeCompiledFunction(
+            filename, lineno, context, function, params.toArray());
+      }
+
       context.pushData(Script.Comparison.doOp(context, op, lhs, rhs));
       ++context.ip;
       return context;

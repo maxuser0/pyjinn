@@ -1001,7 +1001,7 @@ public class ScriptTest {
     assertEquals(getVariable("gt"), "x > y");
     assertEquals(getVariable("ge"), "x >= y");
     assertEquals(getVariable("ne"), "x != y");
-    assertEquals(getVariable("contains"), "y in x");
+    assertEquals(getVariable("contains"), "x in y");
     assertEquals(getVariable("length"), "len(x)");
     assertEquals(getVariable("getitem"), "x[y]");
     assertEquals(getVariable("setitem"), "x[y] = z");
@@ -1113,6 +1113,27 @@ public class ScriptTest {
         """);
 
     assertEquals(getVariable("output"), "foobar");
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void comparison(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        @dataclass
+        class Foo:
+          x: list
+          def __contains__(self, other):
+            return other in self.x
+
+        foo = Foo([1, 3, 5])
+        is_in = 3 in foo
+        not_in = 3 not in foo
+        """);
+
+    assertEquals(getVariable("is_in"), true);
+    assertEquals(getVariable("not_in"), false);
   }
 
   private Object getVariable(String variableName) {
