@@ -148,14 +148,19 @@ class Compiler {
       compileExpression(assign.rhs(), code);
       compileExpression(fieldAccess.object(), code);
       code.addInstruction(lineno, new Instruction.AssignField(fieldAccess.field().name()));
-
-      /* TODO(maxuser)! support all forms of assignment
-      } else if (lhs instanceof FieldAccess fieldAccess) {
+      /* TODO(maxuser)! support array-index assignment
       } else if (lhs instanceof ArrayIndex arrayIndex) {
-      } else if (lhs instanceof TupleLiteral tuple) {
       */
+    } else if (lhs instanceof TupleLiteral lhsTuple) {
+      compileExpression(assign.rhs(), code);
+      code.addInstruction(
+          lineno,
+          new Instruction.AssignTuple(
+              lhsTuple.elements().stream().map(Identifier.class::cast).toList()));
     } else {
-      throw new IllegalArgumentException("Unsupported lhs of assignment: " + lhs.getClass());
+      throw new IllegalArgumentException(
+          "Cannot assign to %s (line %d)"
+              .formatted(lhs.getClass().getSimpleName(), assign.lineno()));
     }
   }
 

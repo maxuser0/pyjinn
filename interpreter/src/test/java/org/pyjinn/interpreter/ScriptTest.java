@@ -1136,6 +1136,19 @@ public class ScriptTest {
     assertEquals(getVariable("not_in"), false);
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void tupleAssignment(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        x, y = 7, 9
+        """);
+
+    assertEquals(getVariable("x"), 7);
+    assertEquals(getVariable("y"), 9);
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

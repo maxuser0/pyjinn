@@ -2195,21 +2195,18 @@ public class Script {
 
     public static void assignIdentifierTuple(
         Context context, List<Identifier> lhsVars, Object rhsValue) {
-      rhsValue = promoteArrayToTuple(rhsValue);
-      if (rhsValue instanceof ItemGetter getter && rhsValue instanceof Lengthable lengthable) {
-        int lengthToUnpack = lengthable.__len__();
-        if (lengthToUnpack != lhsVars.size()) {
+      var rhsIter = getIterable(rhsValue).iterator();
+      int numToAssign = lhsVars.size();
+      for (int i = 0; i < numToAssign; ++i) {
+        if (!rhsIter.hasNext()) {
           throw new IllegalArgumentException(
-              String.format(
-                  "Cannot unpack %d values into %d variables: %s",
-                  lengthToUnpack, lhsVars.size(), rhsValue));
+              "Not enough values to unpack (expected %d, got %d)".formatted(numToAssign, i));
         }
-        for (int i = 0; i < lengthToUnpack; ++i) {
-          context.set(lhsVars.get(i).name(), getter.__getitem__(i));
-        }
-      } else {
+        context.set(lhsVars.get(i).name(), rhsIter.next());
+      }
+      if (rhsIter.hasNext()) {
         throw new IllegalArgumentException(
-            "Cannot unpack value to tuple: " + PyjObjects.toString(rhsValue));
+            "Too many values to unpack (expected %d)".formatted(numToAssign));
       }
     }
 
