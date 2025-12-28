@@ -9,6 +9,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Optional;
 import org.pyjinn.interpreter.Code.InstructionList;
 import org.pyjinn.interpreter.Script.*;
 
@@ -514,6 +515,54 @@ class Compiler {
 
       instructions.set(elseJumpSource, new Instruction.PopJumpIfFalse(atElseJumpTarget));
       instructions.set(skipElseJumpSource, new Instruction.Jump(afterElseJumpTarget));
+    } else if (expr instanceof ListComprehension listComp) {
+      // source: [TRANSFORM for TARGET in ITER if IFS[0]...]
+      var vars = listComp.target();
+      final Instruction iterVarAssignment;
+      if (vars instanceof Identifier id) {
+        iterVarAssignment = new Instruction.AssignVariable(id.name());
+      } else if (vars instanceof TupleLiteral lhsTuple) {
+        iterVarAssignment =
+            new Instruction.AssignTuple(
+                lhsTuple.elements().stream().map(Identifier.class::cast).toList());
+      } else {
+        throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
+      }
+
+      var listCompCode = new Code();
+      listCompCode.addInstruction(lineno, new Instruction.LoadList(0));
+      compileExpression(listComp.iter(), listCompCode);
+      listCompCode.addInstruction(lineno, new Instruction.IterableIterator());
+      loops.push(new LoopState(LoopType.FOR, listCompCode.instructions()));
+      listCompCode.addInstruction(lineno, new Instruction.IteratorHasNext());
+      addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget));
+      listCompCode.addInstruction(lineno, new Instruction.IteratorNext());
+      listCompCode.addInstruction(lineno, iterVarAssignment);
+      for (var ifClause : listComp.ifs()) {
+        compileExpression(ifClause, listCompCode);
+        listCompCode.addInstruction(lineno, new Instruction.PopJumpIfFalse(continueTarget()));
+      }
+      compileExpression(listComp.transform(), listCompCode);
+      listCompCode.addInstruction(lineno, new Instruction.AppendListAtOffset(-3));
+      listCompCode.addInstruction(lineno, new Instruction.Jump(continueTarget()));
+      loops.pop().close();
+      listCompCode.addInstruction(lineno, new Instruction.PopData()); // pop iter
+      listCompCode.addInstruction(lineno, new Instruction.FunctionReturn());
+
+      var function =
+          new FunctionDef(
+              lineno,
+              /* enclosingClassName= */ "<>",
+              new Identifier("<listcomp>"),
+              /* decorators= */ List.of(),
+              /* args= */ List.of(),
+              /* vararg= */ Optional.empty(),
+              /* kwarg= */ Optional.empty(),
+              /* defaults= */ List.of(),
+              new Pass()); // Body statement is unused because listCompCode is executed directly.
+
+      code.addInstruction(
+          lineno, new Instruction.NullaryCompileOnlyFunctionCall(function, listCompCode));
     } else {
       throw new UnsupportedOperationException(
           "Expression type not supported: " + getSimpleTypeName(expr));

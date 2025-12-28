@@ -1254,7 +1254,13 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     var generators = new JsonArray();
     for (var clause : ctx.for_if_clauses().for_if_clause()) {
       var comprehension = createNode(clause, "comprehension");
-      comprehension.add("target", maybeSingleton(visitStar_targets(clause.star_targets())));
+      JsonElement target = maybeSingleton(visitStar_targets(clause.star_targets()));
+      if (target.isJsonArray()) {
+        var tuple = createNode("Tuple");
+        tuple.add("elts", target);
+        target = tuple;
+      }
+      comprehension.add("target", target);
       var ifs = new JsonArray();
       boolean first = true;
       for (var disjunction : clause.disjunction()) {

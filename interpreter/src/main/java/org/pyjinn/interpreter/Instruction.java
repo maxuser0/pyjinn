@@ -233,6 +233,18 @@ sealed interface Instruction {
     }
   }
 
+  /** Executes {@code code} as function with no params, using {@code function} for metadata only. */
+  record NullaryCompileOnlyFunctionCall(FunctionDef function, Code code) implements Instruction {
+    private static Object[] NO_PARAMS = new Object[] {};
+
+    @Override
+    public Context execute(Context context) {
+      var listCompFunc = new BoundFunction(function, /* enclosingContext= */ context, code);
+      return FunctionCall.executeCompiledFunction(
+          /* filename= */ "", /* lineno= */ -1, context, listCompFunc, NO_PARAMS);
+    }
+  }
+
   record DefineClass(ClassDef classDef, FunctionCompiler compiler) implements Instruction {
     @Override
     public Context execute(Context context) {
@@ -600,5 +612,16 @@ sealed interface Instruction {
       }
     }
     return list;
+  }
+
+  record AppendListAtOffset(int offset) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var list = (PyjList) context.getData(offset);
+      list.append(context.popData());
+
+      ++context.ip;
+      return context;
+    }
   }
 }

@@ -1149,6 +1149,23 @@ public class ScriptTest {
     assertEquals(getVariable("y"), 9);
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void listComprehension(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        x = 99
+        output = [x  for x, y in [(0, 1), (7, 9), (88, 44)] if x > 0]
+        """);
+
+    var output = getVariable(Script.PyjList.class, "output");
+    assertEquals(2, output.__len__());
+    assertEquals(7, output.__getitem__(0));
+    assertEquals(88, output.__getitem__(1));
+    assertEquals(99, getVariable("x"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

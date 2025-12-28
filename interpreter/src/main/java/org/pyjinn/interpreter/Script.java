@@ -6560,12 +6560,9 @@ public class Script {
     protected GlobalContext globals;
     protected final PyjDict vars = new PyjDict();
 
-    private Deque<Object> dataStack = new ArrayDeque<>();
+    private List<Object> dataStack = new ArrayList<>();
     Code code = null;
     int ip = 0; // instruction pointer
-
-    // NULL_INSTANCE stands in for null in dataStack since Deque cannot store nulls directly.
-    private static final Object NULL_INSTANCE = new Object();
 
     public RuntimeException exception; // Set when an exception is active in this context.
 
@@ -6575,23 +6572,30 @@ public class Script {
 
     public void pushData(Object data) {
       if (debug) logger.log("push: " + data);
-      dataStack.push(data == null ? NULL_INSTANCE : data);
+      dataStack.add(data);
     }
 
     public Object popData() {
-      var data = dataStack.pop();
-      data = data == NULL_INSTANCE ? null : data;
+      var data = dataStack.remove(dataStack.size() - 1);
       if (debug) logger.log("pop: " + data);
       return data;
     }
 
     public Object peekData() {
-      var data = dataStack.peek();
-      if (data == null) {
+      if (dataStack.isEmpty()) {
         throw new IllegalStateException("Context data stack is empty");
       }
-      data = data == NULL_INSTANCE ? null : data;
+      var data = dataStack.get(dataStack.size() - 1);
       if (debug) logger.log("peek: " + data);
+      return data;
+    }
+
+    public Object getData(int index) {
+      if (index < 0) {
+        index = dataStack.size() + index;
+      }
+      var data = dataStack.get(index);
+      if (debug) logger.log("get[%d]: %s", index, data);
       return data;
     }
 
