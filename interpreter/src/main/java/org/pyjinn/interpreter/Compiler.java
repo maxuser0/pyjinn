@@ -149,9 +149,11 @@ class Compiler {
       compileExpression(assign.rhs(), code);
       compileExpression(fieldAccess.object(), code);
       code.addInstruction(lineno, new Instruction.AssignField(fieldAccess.field().name()));
-      /* TODO(maxuser)! support array-index assignment
-      } else if (lhs instanceof ArrayIndex arrayIndex) {
-      */
+    } else if (lhs instanceof ArrayIndex arrayIndex) {
+      compileExpression(assign.rhs(), code);
+      compileExpression(arrayIndex.array(), code);
+      compileExpression(arrayIndex.index(), code);
+      code.addInstruction(lineno, new Instruction.AssignArrayIndex());
     } else if (lhs instanceof TupleLiteral lhsTuple) {
       compileExpression(assign.rhs(), code);
       code.addInstruction(
@@ -451,6 +453,10 @@ class Compiler {
     } else if (expr instanceof FieldAccess fieldAccess) {
       compileExpression(fieldAccess.object(), code);
       code.addInstruction(lineno, new Instruction.FieldAccess(fieldAccess));
+    } else if (expr instanceof ArrayIndex arrayIndex) {
+      compileExpression(arrayIndex.array(), code);
+      compileExpression(arrayIndex.index(), code);
+      code.addInstruction(lineno, new Instruction.ArrayIndex());
     } else if (expr instanceof Lambda lambda) {
       code.addInstruction(
           lineno,

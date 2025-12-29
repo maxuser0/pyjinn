@@ -189,6 +189,15 @@ sealed interface Instruction {
       return executeCompiledFunction(filename, lineno, context, function, params);
     }
 
+    // TODO(maxuser): Convert uses of this method to executeCompiledFunction() with an accurate
+    // filename and lineno.
+    @Deprecated
+    public static Context executeCompiledFunctionUnknownSource(
+        Context context, BoundFunction function, Object[] params) {
+      return executeCompiledFunction(
+          /* filename= */ "", /* lineno= */ -1, context, function, params);
+    }
+
     public static Context executeCompiledFunction(
         String filename, int lineno, Context context, BoundFunction function, Object[] params) {
       if (function.isHalted()) {
@@ -240,8 +249,7 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       var listCompFunc = new BoundFunction(function, /* enclosingContext= */ context, code);
-      return FunctionCall.executeCompiledFunction(
-          /* filename= */ "", /* lineno= */ -1, context, listCompFunc, NO_PARAMS);
+      return FunctionCall.executeCompiledFunctionUnknownSource(context, listCompFunc, NO_PARAMS);
     }
   }
 
@@ -320,11 +328,8 @@ sealed interface Instruction {
           };
 
       if (function != null) {
-        // TODO(maxuser): Use an accurate filename and line number.
-        var filename = "";
-        int lineno = -1;
-        return FunctionCall.executeCompiledFunction(
-            filename, lineno, context, function, List.of(lhs, rhs).toArray());
+        return FunctionCall.executeCompiledFunctionUnknownSource(
+            context, function, List.of(lhs, rhs).toArray());
       }
 
       context.pushData(Script.BinaryOp.doOp(context, op, lhs, rhs));
@@ -354,12 +359,9 @@ sealed interface Instruction {
           };
 
       if (function != null) {
-        // TODO(maxuser): Use an accurate filename and line number.
-        var filename = "";
-        int lineno = -1;
         List<Object> params = op == Script.Comparison.Op.IN ? List.of(rhs, lhs) : List.of(lhs, rhs);
-        return FunctionCall.executeCompiledFunction(
-            filename, lineno, context, function, params.toArray());
+        return FunctionCall.executeCompiledFunctionUnknownSource(
+            context, function, params.toArray());
       }
 
       context.pushData(Script.Comparison.doOp(context, op, lhs, rhs));
@@ -373,6 +375,24 @@ sealed interface Instruction {
     public Context execute(Context context) {
       var object = context.popData();
       context.pushData(expression.getField(object));
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record ArrayIndex() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var index = context.popData();
+      var array = context.popData();
+
+      var method = FunctionCall.getMethod(array, "__getitem__");
+      if (method != null) {
+        return FunctionCall.executeCompiledFunctionUnknownSource(
+            context, method, List.of(array, index).toArray());
+      }
+
+      context.pushData(Script.ArrayIndex.getItem(array, index));
       ++context.ip;
       return context;
     }
@@ -408,6 +428,25 @@ sealed interface Instruction {
             "Unsupported expression type for lhs of assignment: %s"
                 .formatted(getSimpleTypeName(object)));
       }
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record AssignArrayIndex() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var index = context.popData();
+      var array = context.popData();
+      var rhs = context.popData();
+
+      var method = FunctionCall.getMethod(array, "__setitem__");
+      if (method != null) {
+        return FunctionCall.executeCompiledFunctionUnknownSource(
+            context, method, List.of(array, index, rhs).toArray());
+      }
+
+      Assignment.assignArray(array, index, rhs);
       ++context.ip;
       return context;
     }

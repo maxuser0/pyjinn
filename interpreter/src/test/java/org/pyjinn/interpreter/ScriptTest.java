@@ -1166,6 +1166,26 @@ public class ScriptTest {
     assertEquals(99, getVariable("x"));
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void arrayIndex(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        @dataclass
+        class Foo:
+          data: list
+          def __getitem__(self, i): return self.data[i]
+          def __setitem__(self, i, x): self.data[i] = x
+
+        foo = Foo([6, 7])
+        foo[1] = 8
+        output = foo[1]
+        """);
+
+    assertEquals(8, getVariable("output"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

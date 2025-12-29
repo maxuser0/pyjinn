@@ -2193,6 +2193,25 @@ public class Script {
       assignIdentifierTuple(context, lhsVars, rhsValue);
     }
 
+    @SuppressWarnings("unchecked")
+    public static void assignArray(Object array, Object index, Object rhsValue) {
+      if (array.getClass().isArray()) {
+        Array.set(array, ((Number) index).intValue(), rhsValue);
+        return;
+      } else if (array instanceof ItemSetter itemSetter) {
+        itemSetter.__setitem__(index, rhsValue);
+        return;
+      } else if (array instanceof List list) {
+        list.set(((Number) index).intValue(), rhsValue);
+        return;
+      } else if (array instanceof Map map) {
+        map.put(index, rhsValue);
+        return;
+      }
+      throw new IllegalArgumentException(
+          "'%s' object does not support item assignment".formatted(getSimpleTypeName(array)));
+    }
+
     public static void assignIdentifierTuple(
         Context context, List<Identifier> lhsVars, Object rhsValue) {
       var rhsIter = getIterable(rhsValue).iterator();
@@ -2210,7 +2229,6 @@ public class Script {
       }
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void exec(Context context) {
       if (context.skipStatement()) {
@@ -2232,28 +2250,14 @@ public class Script {
       } else if (lhs instanceof ArrayIndex lhsArrayIndex) {
         var array = lhsArrayIndex.array().eval(context);
         var index = lhsArrayIndex.index().eval(context);
-        if (array.getClass().isArray()) {
-          Array.set(array, ((Number) index).intValue(), rhsValue);
+        if (array instanceof PyjObject pyjObject
+            && pyjObject.callMethod(context.globals, "__setitem__", new Object[] {index, rhsValue})
+                != PyjObject.UNDEFINED_RESULT) {
           return;
-        } else if (array instanceof ItemSetter itemSetter) {
-          itemSetter.__setitem__(index, rhsValue);
+        } else {
+          assignArray(array, index, rhsValue);
           return;
-        } else if (array instanceof List list) {
-          list.set(((Number) index).intValue(), rhsValue);
-          return;
-        } else if (array instanceof Map map) {
-          map.put(index, rhsValue);
-          return;
-        } else if (array instanceof PyjObject pyjObject) {
-          var result =
-              pyjObject.callMethod(context.globals, "__setitem__", new Object[] {index, rhsValue});
-          if (result != PyjObject.UNDEFINED_RESULT) {
-            return;
-          }
         }
-        throw new IllegalArgumentException(
-            "'%s' object does not support item assignment: %s = %s"
-                .formatted(getSimpleTypeName(array), lhs, rhs));
       }
       throw new IllegalArgumentException(
           "Unsupported expression type for lhs of assignment: '%s' (%s)"
@@ -3133,9 +3137,21 @@ public class Script {
     public Object eval(Context context) {
       var arrayValue = array.eval(context);
       var indexValue = index.eval(context);
+
+      if (arrayValue instanceof PyjObject pyjObject) {
+        var result = pyjObject.callMethod(context.globals, "__getitem__", indexValue);
+        if (result != PyjObject.UNDEFINED_RESULT) {
+          return result;
+        }
+      }
+
+      return getItem(arrayValue, indexValue);
+    }
+
+    public static Object getItem(Object arrayValue, Object indexValue) {
       if (arrayValue == null || indexValue == null) {
         throw new NullPointerException(
-            String.format("%s=%s, %s=%s in %s", array, arrayValue, index, indexValue, this));
+            String.format("%s[%s]", getSimpleTypeName(arrayValue), getSimpleTypeName(indexValue)));
       }
 
       if (arrayValue instanceof ItemGetter itemGetter) {
@@ -3180,17 +3196,10 @@ public class Script {
           int intKey = SliceValue.resolveIndex(((Number) indexValue).intValue(), jsonArray.size());
           return unboxJsonPrimitive(jsonArray.get(intKey));
         }
-      } else if (arrayValue instanceof PyjObject pyjObject) {
-        var result = pyjObject.callMethod(context.globals, "__getitem__", indexValue);
-        if (result != PyjObject.UNDEFINED_RESULT) {
-          return result;
-        }
       }
 
       throw new IllegalArgumentException(
-          String.format(
-              "'%s' object is not subscriptable: %s[%s]",
-              getSimpleTypeName(arrayValue), array, index));
+          String.format("'%s' is not subscriptable", getSimpleTypeName(arrayValue)));
     }
 
     @Override
