@@ -1186,6 +1186,29 @@ public class ScriptTest {
     assertEquals(8, getVariable("output"));
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {false})
+  public void sliceExpression(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        x = [100, 101, 102, 103]
+        slice_value = x[1:-1]
+        x[1:-1] = [2]
+        """);
+
+    var sliceValue = getVariable(Script.PyjList.class, "slice_value");
+    assertEquals(2, sliceValue.__len__());
+    assertEquals(101, sliceValue.__getitem__(0));
+    assertEquals(102, sliceValue.__getitem__(1));
+
+    var x = getVariable(Script.PyjList.class, "x");
+    assertEquals(3, x.__len__());
+    assertEquals(100, x.__getitem__(0));
+    assertEquals(2, x.__getitem__(1));
+    assertEquals(103, x.__getitem__(2));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

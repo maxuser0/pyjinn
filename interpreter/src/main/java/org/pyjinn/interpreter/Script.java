@@ -4054,7 +4054,7 @@ public class Script {
       } else if (key instanceof SliceValue sliceValue) {
         var slice = sliceValue.resolveIndices(list.size());
         // TODO(maxuser): SliceValue.step not supported.
-        return new PyjList(list.subList(slice.lower(), slice.upper()));
+        return new PyjList(new ArrayList<>(list.subList(slice.lower(), slice.upper())));
       }
       throw new IllegalArgumentException(
           String.format(
@@ -4062,17 +4062,34 @@ public class Script {
               key.getClass().getName(), key));
     }
 
-    // TODO(maxuser): Support slice notation.
     @Override
     public void __setitem__(Object key, Object value) {
       if (key instanceof Integer i) {
         list.set(i, value);
         return;
       }
+
+      if (key instanceof SliceValue sliceValue) {
+        var slice = sliceValue.resolveIndices(list.size());
+        // TODO(maxuser): SliceValue.step not supported.
+        list.subList(slice.lower(), slice.upper()).clear();
+        if (value instanceof Collection<?> collection) {
+          list.addAll(slice.lower(), collection);
+        } else if (value instanceof PyjList pyjList) {
+          list.addAll(slice.lower(), pyjList.getJavaList());
+        } else {
+          var sliceList = new ArrayList<Object>();
+          for (var item : getIterable(value)) {
+            sliceList.add(item);
+          }
+          list.addAll(slice.lower(), sliceList);
+        }
+        return;
+      }
+
       throw new IllegalArgumentException(
           String.format(
-              "list indices must be integers or slices, not %s (%s)",
-              key.getClass().getName(), key));
+              "list indices must be integers or slices, not %s (%s)", getSimpleTypeName(key), key));
     }
 
     public void append(Object object) {
@@ -5341,8 +5358,8 @@ public class Script {
     }
   }
 
-  public static List<Object> getJavaList(PyjList pyList) {
-    return pyList.getJavaList();
+  public static List<Object> getJavaList(PyjList pyjList) {
+    return pyjList.getJavaList();
   }
 
   public record JavaListFunction() implements Function {
