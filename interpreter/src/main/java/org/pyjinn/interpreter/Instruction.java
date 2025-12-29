@@ -414,6 +414,23 @@ sealed interface Instruction {
     }
   }
 
+  record FormattedString(int numValues) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var values = new ArrayList<Object>(numValues);
+      for (int i = 0; i < numValues; ++i) {
+        values.add(context.popData());
+      }
+      var str = new StringBuilder();
+      for (int i = numValues - 1; i >= 0; --i) {
+        str.append(values.get(i));
+      }
+      context.pushData(str.toString());
+      ++context.ip;
+      return context;
+    }
+  }
+
   record Star() implements Instruction {
     @Override
     public Context execute(Context context) {

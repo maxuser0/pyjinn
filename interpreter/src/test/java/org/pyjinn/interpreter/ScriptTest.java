@@ -1209,6 +1209,20 @@ public class ScriptTest {
     assertEquals(103, x.__getitem__(2));
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void formatString(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        x = 123
+        y = "foo"
+        output = f"x={x}, y={y}"
+        """);
+
+    assertEquals("x=123, y=foo", getVariable("output"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

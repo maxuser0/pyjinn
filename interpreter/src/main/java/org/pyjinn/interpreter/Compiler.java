@@ -470,6 +470,11 @@ class Compiler {
       compileExpressionOrPushNull(slice.upper(), code);
       compileExpressionOrPushNull(slice.step(), code);
       code.addInstruction(lineno, new Instruction.Slice());
+    } else if (expr instanceof FormattedString fstr) {
+      for (var value : fstr.values()) {
+        compileExpression(value, code);
+      }
+      code.addInstruction(lineno, new Instruction.FormattedString(fstr.values().size()));
     } else if (expr instanceof Lambda lambda) {
       code.addInstruction(
           lineno,
