@@ -398,6 +398,22 @@ sealed interface Instruction {
     }
   }
 
+  record Slice() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var step = context.popData();
+      var upper = context.popData();
+      var lower = context.popData();
+      context.pushData(
+          new SliceValue(
+              Optional.ofNullable(lower).map(Integer.class::cast),
+              Optional.ofNullable(upper).map(Integer.class::cast),
+              Optional.ofNullable(step).map(Integer.class::cast)));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record Star() implements Instruction {
     @Override
     public Context execute(Context context) {

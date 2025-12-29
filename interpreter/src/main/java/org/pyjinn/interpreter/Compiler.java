@@ -412,6 +412,14 @@ class Compiler {
             boundMethod.methodId().name(), boundMethod.symbolCache(), boundMethod.object()));
   }
 
+  private void compileExpressionOrPushNull(Optional<Expression> expr, Code code) {
+    if (expr.isPresent()) {
+      compileExpression(expr.get(), code);
+    } else {
+      code.addInstruction(lineno, new Instruction.PushData(null));
+    }
+  }
+
   private void compileExpression(Expression expr, Code code) {
     if (expr instanceof Identifier identifier) {
       code.addInstruction(lineno, new Instruction.Identifier(identifier.name()));
@@ -457,6 +465,11 @@ class Compiler {
       compileExpression(arrayIndex.array(), code);
       compileExpression(arrayIndex.index(), code);
       code.addInstruction(lineno, new Instruction.ArrayIndex());
+    } else if (expr instanceof SliceExpression slice) {
+      compileExpressionOrPushNull(slice.lower(), code);
+      compileExpressionOrPushNull(slice.upper(), code);
+      compileExpressionOrPushNull(slice.step(), code);
+      code.addInstruction(lineno, new Instruction.Slice());
     } else if (expr instanceof Lambda lambda) {
       code.addInstruction(
           lineno,

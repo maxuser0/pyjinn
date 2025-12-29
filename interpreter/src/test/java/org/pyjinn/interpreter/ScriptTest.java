@@ -1187,7 +1187,7 @@ public class ScriptTest {
   }
 
   @ParameterizedTest
-  @ValueSource(booleans = {false})
+  @ValueSource(booleans = {true, false})
   public void sliceExpression(boolean compile) throws Exception {
     execute(
         compile,
