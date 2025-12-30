@@ -80,6 +80,15 @@ sealed interface Instruction {
         }
       }
 
+      // Translate x(...) to x.__call__(...).
+      var callMethod = getMethod(caller, "__call__");
+      if (callMethod != null) {
+        var methodParams = new ArrayList<Object>(paramValues.size() + 1);
+        methodParams.add(caller);
+        methodParams.addAll(paramValues);
+        return executeCompiledFunction(context, callMethod, methodParams.toArray());
+      }
+
       // Effective caller may be a function that's being delegated to.
       var effectiveCaller = caller;
 
@@ -123,7 +132,7 @@ sealed interface Instruction {
     }
 
     static BoundFunction getMethod(Object object, String methodName) {
-      if (object instanceof PyjObject pyjObject) {
+      if (object instanceof PyjObject pyjObject && pyjObject.__class__ != null) {
         var meth = pyjObject.__class__.instanceMethods.get(methodName);
         if (meth != null && meth instanceof BoundFunction function) {
           return function;

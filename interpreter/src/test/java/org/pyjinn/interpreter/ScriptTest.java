@@ -928,9 +928,11 @@ public class ScriptTest {
     assertEquals(Script.PyjSet.TYPE, getVariable(Script.PyjClass.class, "set"));
   }
 
-  @Test
-  public void overloadedOperators() throws Exception {
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void overloadedOperators(boolean compile) throws Exception {
     execute(
+        compile,
         """
         class Thing:
           def __init__(self, value):
