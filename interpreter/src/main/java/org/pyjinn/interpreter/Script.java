@@ -2348,7 +2348,6 @@ public class Script {
       }
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void exec(Context context) {
       if (context.skipStatement()) {
@@ -2356,53 +2355,70 @@ public class Script {
       }
       Object rhsValue = rhs.eval(context);
       if (lhs instanceof Identifier lhsId) {
-        var oldValue = context.get(lhsId.name());
-        var newValue = op.apply(oldValue, rhsValue);
-        if (newValue != null) {
-          context.setVariable(lhsId, newValue);
-        }
+        augmentVariable(context, lhsId.name(), op, rhsValue);
         return;
       } else if (lhs instanceof ArrayIndex lhsArrayIndex) {
         var array = lhsArrayIndex.array().eval(context);
         var index = lhsArrayIndex.index().eval(context);
-        if (array.getClass().isArray()) {
-          int intKey = ((Number) index).intValue();
-          var oldValue = Array.get(array, intKey);
-          Array.set(array, intKey, op.apply(oldValue, rhsValue));
-          return;
-        } else if (array instanceof ItemGetter itemGetter
-            && array instanceof ItemSetter itemSetter) {
-          var oldValue = itemGetter.__getitem__(index);
-          itemSetter.__setitem__(index, op.apply(oldValue, rhsValue));
-          return;
-        } else if (array instanceof List list) {
-          int intKey = ((Number) index).intValue();
-          var oldValue = list.get(intKey);
-          list.set(intKey, op.apply(oldValue, rhsValue));
-          return;
-        } else if (array instanceof Map map) {
-          var oldValue = map.get(index);
-          map.put(index, op.apply(oldValue, rhsValue));
-          return;
-        }
+        augmentArrayIndex(array, index, op, rhsValue);
+        return;
       } else if (lhs instanceof FieldAccess lhsFieldAccess) {
         var lhsObject = lhsFieldAccess.object().eval(context);
-        if (lhsObject instanceof PyjObject pyObject) {
-          String fieldName = lhsFieldAccess.field().name();
-          if (pyObject.__class__.isFrozen) {
-            throw new FrozenInstanceError(
-                "cannot assign to field '%s' of type '%s'"
-                    .formatted(fieldName, pyObject.__class__.name));
-          }
-          var oldValue = pyObject.__dict__.__getitem__(fieldName);
-          pyObject.__dict__.__setitem__(fieldName, op.apply(oldValue, rhsValue));
-          return;
-        }
+        String fieldName = lhsFieldAccess.field().name();
+        augmentField(lhsObject, fieldName, op, rhsValue);
+        return;
       }
       throw new IllegalArgumentException(
           String.format(
-              "Unsupported expression type for lhs of assignment: `%s` (%s)",
+              "Unsupported expression type for lhs of assignment: '%s' (%s)",
               lhs, lhs.getClass().getSimpleName()));
+    }
+
+    public static void augmentVariable(Context context, String varName, Op op, Object rhs) {
+      var oldValue = context.get(varName);
+      var newValue = op.apply(oldValue, rhs);
+      if (newValue != null) {
+        context.set(varName, newValue);
+      }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static void augmentArrayIndex(Object array, Object index, Op op, Object rhsValue) {
+      if (array.getClass().isArray()) {
+        int intKey = ((Number) index).intValue();
+        var oldValue = Array.get(array, intKey);
+        Array.set(array, intKey, op.apply(oldValue, rhsValue));
+      } else if (array instanceof ItemGetter itemGetter && array instanceof ItemSetter itemSetter) {
+        var oldValue = itemGetter.__getitem__(index);
+        itemSetter.__setitem__(index, op.apply(oldValue, rhsValue));
+      } else if (array instanceof List list) {
+        int intKey = ((Number) index).intValue();
+        var oldValue = list.get(intKey);
+        list.set(intKey, op.apply(oldValue, rhsValue));
+      } else if (array instanceof Map map) {
+        var oldValue = map.get(index);
+        map.put(index, op.apply(oldValue, rhsValue));
+      } else {
+        throw new IllegalArgumentException(
+            "Unsupported expression type for lhs of assignment: %s[%s]"
+                .formatted(getSimpleTypeName(array), getSimpleTypeName(index)));
+      }
+    }
+
+    public static void augmentField(Object lhsObject, String fieldName, Op op, Object rhsValue) {
+      if (lhsObject instanceof PyjObject pyjObject) {
+        if (pyjObject.__class__.isFrozen) {
+          throw new FrozenInstanceError(
+              "cannot assign to field '%s' of type '%s'"
+                  .formatted(fieldName, pyjObject.__class__.name));
+        }
+        var oldValue = pyjObject.__dict__.__getitem__(fieldName);
+        pyjObject.__dict__.__setitem__(fieldName, op.apply(oldValue, rhsValue));
+        return;
+      }
+      throw new IllegalArgumentException(
+          "Unsupported expression type for lhs of assignment: %s.%s"
+              .formatted(getSimpleTypeName(lhsObject), fieldName));
     }
 
     @Override

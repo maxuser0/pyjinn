@@ -1225,6 +1225,33 @@ public class ScriptTest {
     assertEquals("x=123, y=foo", getVariable("output"));
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void augmentedAssignment(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        @dataclass
+        class Foo:
+          f: int
+
+        x = 40
+        x += 2
+
+        a = [40]
+        a[0] += 2
+        y = a[0]
+
+        foo = Foo(40)
+        foo.f += 2
+        z = foo.f
+        """);
+
+    assertEquals(42, getVariable("x"));
+    assertEquals(42, getVariable("y"));
+    assertEquals(42, getVariable("z"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
@@ -1283,7 +1310,6 @@ public class ScriptTest {
   // - passing script functions to Java methods taking functional params like Predicate<T>
   // - when checking methods of a non-public class, search for a public interface or superclass
   // - bound Python methods, e.g. `f = obj.func` where obj.func(...) is invoked by f(...)
-  // - AugAssign for field setters of PyObject, e.g. `self.x += 1`
   // - empty Java array treated as False in a bool context
   // - function defs and calls with default args and kwargs
 

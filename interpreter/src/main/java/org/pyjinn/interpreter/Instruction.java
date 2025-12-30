@@ -504,6 +504,39 @@ sealed interface Instruction {
     }
   }
 
+  record AugmentVariable(String varName, AugmentedAssignment.Op op) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var rhs = context.popData();
+      AugmentedAssignment.augmentVariable(context, varName, op, rhs);
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record AugmentField(String fieldName, AugmentedAssignment.Op op) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var object = context.popData();
+      var rhs = context.popData();
+      AugmentedAssignment.augmentField(object, fieldName, op, rhs);
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record AugmentArrayIndex(AugmentedAssignment.Op op) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var index = context.popData();
+      var array = context.popData();
+      var rhs = context.popData();
+      AugmentedAssignment.augmentArrayIndex(array, index, op, rhs);
+      ++context.ip;
+      return context;
+    }
+  }
+
   record IterableIterator() implements Instruction {
     @Override
     public Context execute(Context context) {

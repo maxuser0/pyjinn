@@ -115,6 +115,8 @@ class Compiler {
       code.addInstruction(lineno, new Instruction.PopData());
     } else if (statement instanceof Assignment assign) {
       compileAssignment(assign, code);
+    } else if (statement instanceof AugmentedAssignment augAssign) {
+      compileAugmentedAssignment(augAssign, code);
     } else if (statement instanceof IfBlock ifBlock) {
       compileIfBlock(ifBlock, code);
     } else if (statement instanceof WhileBlock whileBlock) {
@@ -160,6 +162,28 @@ class Compiler {
           lineno,
           new Instruction.AssignTuple(
               lhsTuple.elements().stream().map(Identifier.class::cast).toList()));
+    } else {
+      throw new IllegalArgumentException(
+          "Cannot assign to %s (line %d)"
+              .formatted(lhs.getClass().getSimpleName(), assign.lineno()));
+    }
+  }
+
+  private void compileAugmentedAssignment(AugmentedAssignment assign, Code code) {
+    Expression lhs = assign.lhs();
+    if (lhs instanceof Identifier identifier) {
+      compileExpression(assign.rhs(), code);
+      code.addInstruction(lineno, new Instruction.AugmentVariable(identifier.name(), assign.op()));
+    } else if (lhs instanceof FieldAccess fieldAccess) {
+      compileExpression(assign.rhs(), code);
+      compileExpression(fieldAccess.object(), code);
+      code.addInstruction(
+          lineno, new Instruction.AugmentField(fieldAccess.field().name(), assign.op()));
+    } else if (lhs instanceof ArrayIndex arrayIndex) {
+      compileExpression(assign.rhs(), code);
+      compileExpression(arrayIndex.array(), code);
+      compileExpression(arrayIndex.index(), code);
+      code.addInstruction(lineno, new Instruction.AugmentArrayIndex(assign.op()));
     } else {
       throw new IllegalArgumentException(
           "Cannot assign to %s (line %d)"
