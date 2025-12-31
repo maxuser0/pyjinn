@@ -7,9 +7,11 @@ import static org.pyjinn.interpreter.Script.convertToBool;
 import static org.pyjinn.interpreter.Script.getSimpleTypeName;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.pyjinn.interpreter.Script.*;
@@ -418,6 +420,50 @@ sealed interface Instruction {
               Optional.ofNullable(lower).map(Integer.class::cast),
               Optional.ofNullable(upper).map(Integer.class::cast),
               Optional.ofNullable(step).map(Integer.class::cast)));
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record CreateDict(int numItems) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var map = new HashMap<Object, Object>();
+      for (int i = 0; i < numItems; ++i) {
+        var value = context.popData();
+        var key = context.popData();
+        map.put(key, value);
+      }
+      context.pushData(new PyjDict(map));
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record DeleteVariable(String varName) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.del(varName);
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record DeleteArrayIndex() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var index = context.popData();
+      var array = context.popData();
+      if (array instanceof ItemDeleter deleter) {
+        deleter.__delitem__(index);
+      } else if (array instanceof List list) {
+        list.remove((int) (Integer) index);
+      } else if (array instanceof Map map) {
+        map.remove(index);
+      } else {
+        throw new IllegalArgumentException(
+            "Object does not support subscript deletion: " + array.getClass().getName());
+      }
       ++context.ip;
       return context;
     }

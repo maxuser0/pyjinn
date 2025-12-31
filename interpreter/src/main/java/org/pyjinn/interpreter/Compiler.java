@@ -137,6 +137,8 @@ class Compiler {
       compileBreakStatement(breakStatement);
     } else if (statement instanceof ReturnStatement returnStatement) {
       compileReturnStatement(returnStatement, code);
+    } else if (statement instanceof Deletion deletion) {
+      compileDeletion(deletion, code);
     } else {
       throw new IllegalArgumentException("Unsupported statement type: " + statement.getClass());
     }
@@ -413,6 +415,20 @@ class Compiler {
     code.addInstruction(lineno, new Instruction.FunctionReturn());
   }
 
+  private void compileDeletion(Deletion deletion, Code code) {
+    for (var target : deletion.targets()) {
+      if (target instanceof Identifier id) {
+        code.addInstruction(lineno, new Instruction.DeleteVariable(id.name()));
+      } else if (target instanceof ArrayIndex arrayIndex) {
+        compileExpression(arrayIndex.array(), code);
+        compileExpression(arrayIndex.index(), code);
+        code.addInstruction(lineno, new Instruction.DeleteArrayIndex());
+      } else {
+        throw new IllegalArgumentException("Cannot delete value: " + target.toString());
+      }
+    }
+  }
+
   private void compileFunctionCall(FunctionCall call, Code code) {
     compileExpression(call.method(), code);
     int numArgs = 0;
@@ -494,6 +510,15 @@ class Compiler {
       compileExpressionOrPushNull(slice.upper(), code);
       compileExpressionOrPushNull(slice.step(), code);
       code.addInstruction(lineno, new Instruction.Slice());
+    } else if (expr instanceof DictLiteral dict) {
+      int numItems = dict.keys().size();
+      var keys = dict.keys();
+      var values = dict.values();
+      for (int i = 0; i < numItems; ++i) {
+        compileExpression(keys.get(i), code);
+        compileExpression(values.get(i), code);
+      }
+      code.addInstruction(lineno, new Instruction.CreateDict(numItems));
     } else if (expr instanceof FormattedString fstr) {
       for (var value : fstr.values()) {
         compileExpression(value, code);

@@ -1252,6 +1252,28 @@ public class ScriptTest {
     assertEquals(42, getVariable("z"));
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void delOperator(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        d = {"foo": 1, "bar": 2, "baz": 3}
+        letters = ["alpha", "beta", "gamma"]
+        del d["foo"], d["baz"], letters[1]
+        keys = list(d.keys())
+        """);
+
+    var keys = getVariable(Script.PyjList.class, "keys");
+    assertEquals(1, keys.__len__());
+    assertEquals("bar", keys.__getitem__(0));
+
+    var letters = getVariable(Script.PyjList.class, "letters");
+    assertEquals(2, letters.__len__());
+    assertEquals("alpha", letters.__getitem__(0));
+    assertEquals("gamma", letters.__getitem__(1));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
