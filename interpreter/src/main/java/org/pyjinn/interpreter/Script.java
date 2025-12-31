@@ -2439,7 +2439,7 @@ public class Script {
           if (array instanceof ItemDeleter deleter) {
             deleter.__delitem__(index);
           } else if (array instanceof List list) {
-            list.remove((int) (Integer) index);
+            PyjList.deleteItem(list, index);
           } else if (array instanceof Map map) {
             map.remove(index);
           } else {
@@ -4034,7 +4034,19 @@ public class Script {
 
     @Override
     public void __delitem__(Object key) {
-      list.remove((int) (Integer) key);
+      deleteItem(list, key);
+    }
+
+    static void deleteItem(List<?> list, Object key) {
+      if (key instanceof Integer i) {
+        list.remove((int) i); // cast to int for remove(int) instead of remove(Object)
+      } else if (key instanceof SliceValue slice) {
+        var indices = slice.resolveIndices(list.size());
+        list.subList(indices.lower(), indices.upper()).clear();
+      } else {
+        throw new IllegalArgumentException(
+            "Expected del subscript to be int or slice but got " + getSimpleTypeName(key));
+      }
     }
 
     public boolean __eq__(Object value) {

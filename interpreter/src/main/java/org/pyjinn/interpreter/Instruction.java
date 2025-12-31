@@ -457,7 +457,7 @@ sealed interface Instruction {
       if (array instanceof ItemDeleter deleter) {
         deleter.__delitem__(index);
       } else if (array instanceof List list) {
-        list.remove((int) (Integer) index);
+        PyjList.deleteItem(list, index);
       } else if (array instanceof Map map) {
         map.remove(index);
       } else {

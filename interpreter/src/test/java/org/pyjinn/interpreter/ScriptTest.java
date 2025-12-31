@@ -5,6 +5,7 @@ package org.pyjinn.interpreter;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1260,7 +1261,9 @@ public class ScriptTest {
         """
         d = {"foo": 1, "bar": 2, "baz": 3}
         letters = ["alpha", "beta", "gamma"]
-        del d["foo"], d["baz"], letters[1]
+        words = ["first", "second", "third", "fourth", "last"]
+        java_words = JavaList(["first", "second", "third", "fourth", "last"])
+        del d["foo"], d["baz"], letters[1], words[1:-1], java_words[1:-1]
         keys = list(d.keys())
         """);
 
@@ -1272,6 +1275,16 @@ public class ScriptTest {
     assertEquals(2, letters.__len__());
     assertEquals("alpha", letters.__getitem__(0));
     assertEquals("gamma", letters.__getitem__(1));
+
+    var words = getVariable(Script.PyjList.class, "words");
+    assertEquals(2, letters.__len__());
+    assertEquals("first", words.__getitem__(0));
+    assertEquals("last", words.__getitem__(1));
+
+    var java_words = getVariable(List.class, "java_words");
+    assertEquals(2, java_words.size());
+    assertEquals("first", java_words.get(0));
+    assertEquals("last", java_words.get(1));
   }
 
   private Object getVariable(String variableName) {
