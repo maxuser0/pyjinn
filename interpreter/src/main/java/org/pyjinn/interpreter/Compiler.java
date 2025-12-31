@@ -506,8 +506,8 @@ class Compiler {
       compileExpression(arrayIndex.index(), code);
       code.addInstruction(lineno, new Instruction.ArrayIndex());
     } else if (expr instanceof SliceExpression slice) {
-      compileExpressionOrPushNull(slice.lower(), code);
-      compileExpressionOrPushNull(slice.upper(), code);
+      compileExpressionOrPushNull(slice.start(), code);
+      compileExpressionOrPushNull(slice.stop(), code);
       compileExpressionOrPushNull(slice.step(), code);
       code.addInstruction(lineno, new Instruction.Slice());
     } else if (expr instanceof DictLiteral dict) {

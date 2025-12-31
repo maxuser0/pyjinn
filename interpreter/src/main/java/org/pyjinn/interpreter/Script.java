@@ -3104,18 +3104,18 @@ public class Script {
   private static final long MAX_UNSIGNED_32_BIT_INTEGER = 0xFFFFFFFFL;
 
   public record SliceExpression(
-      Optional<Expression> lower, Optional<Expression> upper, Optional<Expression> step)
+      Optional<Expression> start, Optional<Expression> stop, Optional<Expression> step)
       implements Expression {
     @Override
     public Object eval(Context context) {
       try {
-        return new SliceValue(
-            lower.map(s -> (Integer) s.eval(context)),
-            upper.map(s -> (Integer) s.eval(context)),
-            step.map(s -> (Integer) s.eval(context)));
+        return new Slice(
+            start.map(s -> (Integer) s.eval(context)).orElse(null),
+            stop.map(s -> (Integer) s.eval(context)).orElse(null),
+            step.map(s -> (Integer) s.eval(context)).orElse(null));
       } catch (ClassCastException e) {
         var string =
-            Stream.of(lower, upper, step)
+            Stream.of(start, stop, step)
                 .map(x -> x.map(Object::toString).orElse(""))
                 .collect(joining(":", "[", "]"));
         throw new RuntimeException("Slice indices must be integers but got: %s".formatted(string));
@@ -3123,12 +3123,29 @@ public class Script {
     }
   }
 
-  public record SliceValue(
-      Optional<Integer> lower, Optional<Integer> upper, Optional<Integer> step) {
+  public static class Slice {
+    public final Integer start;
+    public final Integer stop;
+    public final Integer step;
+
+    public Slice(Integer start, Integer stop, Integer step) {
+      this.start = start;
+      this.stop = stop;
+      this.step = step;
+    }
+
+    @Override
+    public String toString() {
+      return "slice(%s, %s, %s)"
+          .formatted(
+              PyjObjects.toString(start), PyjObjects.toString(stop), PyjObjects.toString(step));
+    }
+
     public ResolvedSliceIndices resolveIndices(int sequenceLength) {
-      int normLower = lower.map(n -> n < 0 ? sequenceLength + n : n).orElse(0);
-      int normUpper = upper.map(n -> n < 0 ? sequenceLength + n : n).orElse(sequenceLength);
-      var indices = new ResolvedSliceIndices(normLower, normUpper, step.orElse(1));
+      int normStart = start == null ? 0 : (start < 0 ? sequenceLength + start : start);
+      int normStop = stop == null ? sequenceLength : (stop < 0 ? sequenceLength + stop : stop);
+      int normStep = step == null ? 1 : step;
+      var indices = new ResolvedSliceIndices(normStart, normStop, normStep);
       if (indices.step() != 1) {
         throw new IllegalArgumentException(
             "Slice steps other than 1 are not supported (got step=%d)".formatted(indices.step()));
@@ -3142,9 +3159,9 @@ public class Script {
   }
 
   /** Slice indices resolved for a particular length sequence to avoid negative or empty values. */
-  public record ResolvedSliceIndices(int lower, int upper, int step) {
+  public record ResolvedSliceIndices(int start, int stop, int step) {
     public int length() {
-      return upper - lower;
+      return stop - start;
     }
   }
 
@@ -3173,43 +3190,42 @@ public class Script {
       if (arrayValue instanceof ItemGetter itemGetter) {
         return itemGetter.__getitem__(indexValue);
       } else if (arrayValue.getClass().isArray()) {
-        if (indexValue instanceof SliceValue sliceValue) {
+        if (indexValue instanceof Slice sliceValue) {
           var slice = sliceValue.resolveIndices(Array.getLength(arrayValue));
           Object copiedArray =
               Array.newInstance(arrayValue.getClass().getComponentType(), slice.length());
-          System.arraycopy(arrayValue, slice.lower(), copiedArray, 0, slice.length());
+          System.arraycopy(arrayValue, slice.start(), copiedArray, 0, slice.length());
           return copiedArray;
         } else {
           int intKey =
-              SliceValue.resolveIndex(
-                  ((Number) indexValue).intValue(), Array.getLength(arrayValue));
+              Slice.resolveIndex(((Number) indexValue).intValue(), Array.getLength(arrayValue));
           return Array.get(arrayValue, intKey);
         }
       } else if (arrayValue instanceof List list) {
-        if (indexValue instanceof SliceValue sliceValue) {
+        if (indexValue instanceof Slice sliceValue) {
           var slice = sliceValue.resolveIndices(list.size());
-          return list.subList(slice.lower(), slice.upper());
+          return list.subList(slice.start(), slice.stop());
         } else {
-          int intKey = SliceValue.resolveIndex(((Number) indexValue).intValue(), list.size());
+          int intKey = Slice.resolveIndex(((Number) indexValue).intValue(), list.size());
           return list.get(intKey);
         }
       } else if (arrayValue instanceof Map map) {
         return map.get(indexValue);
       } else if (arrayValue instanceof String string) {
-        if (indexValue instanceof SliceValue sliceValue) {
+        if (indexValue instanceof Slice sliceValue) {
           var slice = sliceValue.resolveIndices(string.length());
-          return string.substring(slice.lower(), slice.upper());
+          return string.substring(slice.start(), slice.stop());
         } else {
           return String.valueOf(
-              string.charAt(SliceValue.resolveIndex((Integer) indexValue, string.length())));
+              string.charAt(Slice.resolveIndex((Integer) indexValue, string.length())));
         }
       } else if (enableSimplifiedJsonSyntax && arrayValue instanceof JsonArray jsonArray) {
-        if (indexValue instanceof SliceValue sliceValue) {
+        if (indexValue instanceof Slice sliceValue) {
           var list = jsonArray.asList();
           var slice = sliceValue.resolveIndices(list.size());
-          return list.subList(slice.lower(), slice.upper());
+          return list.subList(slice.start(), slice.stop());
         } else {
-          int intKey = SliceValue.resolveIndex(((Number) indexValue).intValue(), jsonArray.size());
+          int intKey = Slice.resolveIndex(((Number) indexValue).intValue(), jsonArray.size());
           return unboxJsonPrimitive(jsonArray.get(intKey));
         }
       }
@@ -3927,7 +3943,7 @@ public class Script {
     Object __getitem__(Object key);
 
     default int resolveIndex(int i) {
-      return SliceValue.resolveIndex(i, __len__());
+      return Slice.resolveIndex(i, __len__());
     }
   }
 
@@ -4040,9 +4056,9 @@ public class Script {
     static void deleteItem(List<?> list, Object key) {
       if (key instanceof Integer i) {
         list.remove((int) i); // cast to int for remove(int) instead of remove(Object)
-      } else if (key instanceof SliceValue slice) {
+      } else if (key instanceof Slice slice) {
         var indices = slice.resolveIndices(list.size());
-        list.subList(indices.lower(), indices.upper()).clear();
+        list.subList(indices.start(), indices.stop()).clear();
       } else {
         throw new IllegalArgumentException(
             "Expected del subscript to be int or slice but got " + getSimpleTypeName(key));
@@ -4078,11 +4094,11 @@ public class Script {
     @Override
     public Object __getitem__(Object key) {
       if (key instanceof Integer i) {
-        return list.get(SliceValue.resolveIndex(i, __len__()));
-      } else if (key instanceof SliceValue sliceValue) {
+        return list.get(Slice.resolveIndex(i, __len__()));
+      } else if (key instanceof Slice sliceValue) {
         var slice = sliceValue.resolveIndices(list.size());
         // TODO(maxuser): SliceValue.step not supported.
-        return new PyjList(new ArrayList<>(list.subList(slice.lower(), slice.upper())));
+        return new PyjList(new ArrayList<>(list.subList(slice.start(), slice.stop())));
       }
       throw new IllegalArgumentException(
           String.format(
@@ -4097,20 +4113,20 @@ public class Script {
         return;
       }
 
-      if (key instanceof SliceValue sliceValue) {
+      if (key instanceof Slice sliceValue) {
         var slice = sliceValue.resolveIndices(list.size());
         // TODO(maxuser): SliceValue.step not supported.
-        list.subList(slice.lower(), slice.upper()).clear();
+        list.subList(slice.start(), slice.stop()).clear();
         if (value instanceof Collection<?> collection) {
-          list.addAll(slice.lower(), collection);
+          list.addAll(slice.start(), collection);
         } else if (value instanceof PyjList pyjList) {
-          list.addAll(slice.lower(), pyjList.getJavaList());
+          list.addAll(slice.start(), pyjList.getJavaList());
         } else {
           var sliceList = new ArrayList<Object>();
           for (var item : getIterable(value)) {
             sliceList.add(item);
           }
-          list.addAll(slice.lower(), sliceList);
+          list.addAll(slice.start(), sliceList);
         }
         return;
       }
@@ -4553,10 +4569,10 @@ public class Script {
     public Object __getitem__(Object key) {
       if (key instanceof Integer i) {
         return array[i];
-      } else if (key instanceof SliceValue sliceValue) {
+      } else if (key instanceof Slice sliceValue) {
         var slice = sliceValue.resolveIndices(array.length);
         // TODO(maxuser): SliceValue.step not supported.
-        return new PyjTuple(Arrays.copyOfRange(array, slice.lower(), slice.upper()));
+        return new PyjTuple(Arrays.copyOfRange(array, slice.start(), slice.stop()));
       }
       throw new IllegalArgumentException(
           String.format(

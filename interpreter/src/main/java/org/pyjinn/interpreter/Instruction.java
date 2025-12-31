@@ -413,13 +413,13 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       var step = context.popData();
-      var upper = context.popData();
-      var lower = context.popData();
+      var stop = context.popData();
+      var start = context.popData();
       context.pushData(
-          new SliceValue(
-              Optional.ofNullable(lower).map(Integer.class::cast),
-              Optional.ofNullable(upper).map(Integer.class::cast),
-              Optional.ofNullable(step).map(Integer.class::cast)));
+          new Script.Slice(
+              start == null ? null : (Integer) start,
+              stop == null ? null : (Integer) stop,
+              step == null ? null : (Integer) step));
       ++context.ip;
       return context;
     }
