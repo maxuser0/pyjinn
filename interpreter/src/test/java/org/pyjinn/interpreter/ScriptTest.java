@@ -1218,12 +1218,14 @@ public class ScriptTest {
     execute(
         compile,
         """
-        x = 123
-        y = "foo"
-        output = f"x={x}, y={y}"
+        x = "foo"
+        y = "yoyo"
+        z = 63
+        w = 3.14159
+        output = f"x={x}, {y=}, {z=:#08x}, {2*w=:.2f}"
         """);
 
-    assertEquals("x=123, y=foo", getVariable("output"));
+    assertEquals("x=foo, y=yoyo, z=0x00003f, 2*w=6.28", getVariable("output"));
   }
 
   @ParameterizedTest

@@ -2354,6 +2354,48 @@ class PyjinnParserTest {
     assertEquals("int", value.get("typename").getAsString());
   }
 
+  @Test
+  void formattedString() throws Exception {
+    var parserOutput = parseTrees("f'foo {bar=:.2f} baz'");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var value = expr.get("value").getAsJsonObject();
+    assertEquals("JoinedStr", value.get("type").getAsString());
+
+    var values = value.get("values").getAsJsonArray();
+    assertEquals(3, values.size());
+
+    var constant1 = values.get(0).getAsJsonObject();
+    assertEquals("Constant", constant1.get("type").getAsString());
+    assertEquals("foo bar=", constant1.get("value").getAsString());
+    assertEquals("str", constant1.get("typename").getAsString());
+
+    var formattedValue = values.get(1).getAsJsonObject();
+    assertEquals("FormattedValue", formattedValue.get("type").getAsString());
+
+    var formattedValueInner = formattedValue.get("value").getAsJsonObject();
+    assertEquals("Name", formattedValueInner.get("type").getAsString());
+    assertEquals("bar", formattedValueInner.get("id").getAsString());
+
+    var formatSpec = formattedValue.get("format_spec").getAsJsonObject();
+    assertEquals("JoinedStr", formatSpec.get("type").getAsString());
+
+    var formatValues = formatSpec.get("values").getAsJsonArray();
+    assertEquals(1, formatValues.size());
+    var fsConstant = formatValues.get(0).getAsJsonObject();
+    assertEquals("Constant", fsConstant.get("type").getAsString());
+    assertEquals(".2f", fsConstant.get("value").getAsString());
+    assertEquals("str", fsConstant.get("typename").getAsString());
+
+    var constant2 = values.get(2).getAsJsonObject();
+    assertEquals("Constant", constant2.get("type").getAsString());
+    assertEquals(" baz", constant2.get("value").getAsString());
+    assertEquals("str", constant2.get("typename").getAsString());
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());

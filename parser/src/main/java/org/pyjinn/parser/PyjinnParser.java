@@ -1333,6 +1333,17 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     return defaultResult(ctx);
   }
 
+  private static void debugPrint(ParserRuleContext ctx) {
+    debugPrint(ctx, "");
+  }
+
+  private static void debugPrint(ParseTree node, String indent) {
+    System.out.printf("%s%s: '%s'\n", indent, node.getClass().getSimpleName(), node.getText());
+    for (int i = 0; i < node.getChildCount(); ++i) {
+      debugPrint(node.getChild(i), indent + "  ");
+    }
+  }
+
   @Override
   public JsonElement visitStrings(PythonParser.StringsContext ctx) {
     JsonArray joinedStrValues = new JsonArray();
@@ -1342,6 +1353,17 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
         for (var middle : fstring.fstring_middle()) {
           var replacementField = middle.fstring_replacement_field();
           if (replacementField != null) {
+            var equal = replacementField.EQUAL();
+            if (equal != null && equal.toString().equals("=")) {
+              int n = replacementField.getChildCount();
+              for (int i = 0; i < n; ++i) {
+                var c = replacementField.getChild(i);
+                if (i > 1 && c.getText().equals("=")) {
+                  runningConstant += replacementField.getChild(i - 1).getText();
+                  runningConstant += "=";
+                }
+              }
+            }
             var expressions = replacementField.star_expressions();
             if (expressions != null) {
               if (!runningConstant.isEmpty()) {
@@ -1351,6 +1373,20 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
               var formattedValue = createNode(expressions, "FormattedValue");
               formattedValue.add("value", maybeSingleton(visitStar_expressions(expressions)));
               joinedStrValues.add(formattedValue);
+
+              var fullFormatSpec = replacementField.fstring_full_format_spec();
+              if (fullFormatSpec != null && !fullFormatSpec.fstring_format_spec().isEmpty()) {
+                var formatSpecNode = createNode(fullFormatSpec, "JoinedStr");
+                var formatSpecValues = new JsonArray();
+                formatSpecNode.add("values", formatSpecValues);
+                for (var formatSpec : fullFormatSpec.fstring_format_spec()) {
+                  var formatConstant = createNode("Constant");
+                  formatConstant.addProperty("value", formatSpec.getText());
+                  formatConstant.addProperty("typename", "str");
+                  formatSpecValues.add(formatConstant);
+                }
+                formattedValue.add("format_spec", formatSpecNode);
+              }
             }
           } else {
             runningConstant += unescapeString(middle.getText());

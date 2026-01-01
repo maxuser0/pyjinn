@@ -524,6 +524,9 @@ class Compiler {
         compileExpression(value, code);
       }
       code.addInstruction(lineno, new Instruction.FormattedString(fstr.values().size()));
+    } else if (expr instanceof FormattedValue formattedValue) {
+      compileExpression(formattedValue.value(), code);
+      code.addInstruction(lineno, new Instruction.FormattedValue(formattedValue.format()));
     } else if (expr instanceof Lambda lambda) {
       code.addInstruction(
           lineno,

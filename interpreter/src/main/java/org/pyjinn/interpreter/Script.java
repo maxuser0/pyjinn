@@ -944,12 +944,30 @@ public class Script {
         case "JoinedStr":
           return new FormattedString(
               StreamSupport.stream(getAttr(element, "values").getAsJsonArray().spliterator(), false)
-                  .map(
-                      v ->
-                          getType(v).equals("FormattedValue")
-                              ? parseExpression(getAttr(v, "value"))
-                              : parseExpression(v))
+                  .map(this::parseExpression)
                   .toList());
+
+        case "FormattedValue":
+          {
+            Optional<String> formatString = Optional.empty();
+            var formatSpecJson = getAttr(element, "format_spec");
+            if (formatSpecJson != null
+                && !formatSpecJson.isJsonNull()
+                && getType(formatSpecJson).equals("JoinedStr")) {
+              var formatSpecValues = getAttr(formatSpecJson, "values");
+              if (formatSpecValues != null && formatSpecValues.isJsonArray()) {
+                var valuesArray = formatSpecValues.getAsJsonArray();
+                if (!valuesArray.isEmpty()) {
+                  var value = valuesArray.get(0);
+                  if (getType(value).equals("Constant")
+                      && getAttr(value, "typename").getAsString().equals("str")) {
+                    formatString = Optional.of(getAttr(value, "value").getAsString());
+                  }
+                }
+              }
+            }
+            return new FormattedValue(parseExpression(getAttr(element, "value")), formatString);
+          }
 
         case "NamedExpr":
           {
@@ -1661,6 +1679,8 @@ public class Script {
     public static String toString(Object value) {
       if (value == null) {
         return "None";
+      } else if (value instanceof String str) {
+        return str;
       } else if (value.getClass().isArray()) {
         var out = new StringBuilder("[");
         int length = Array.getLength(value);
@@ -4651,6 +4671,23 @@ public class Script {
     @Override
     public Object eval(Context context) {
       return new BoundFunction(functionDef, context);
+    }
+  }
+
+  public record FormattedValue(Expression value, Optional<String> format) implements Expression {
+    @Override
+    public Object eval(Context context) {
+      return format(value.eval(context), format);
+    }
+
+    public static String format(Object value, Optional<String> format) {
+      if (format.isEmpty()) {
+        return PyjObjects.toString(value);
+      } else {
+        // Prepend the Python format spec with "%" and interpret it as a Java format spec. This
+        // doesn't work for all format specs, but covers the most common ones.
+        return String.format("%" + format.get(), value);
+      }
     }
   }
 
