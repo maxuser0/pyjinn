@@ -308,6 +308,8 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     var node = createNode(ctx, "FunctionDef");
     node.addProperty("name", ctx.NAME().getText());
 
+    // Implementation is nearly identical to visitLambda_parameters() but with properties that lack
+    // a lambda_ prefix.
     var arguments = createNode("arguments");
     var args = new JsonArray();
     var defaults = new JsonArray();
@@ -1100,18 +1102,60 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitLambda_parameters(PythonParser.Lambda_parametersContext ctx) {
-    JsonObject args = createNode(ctx, "arguments");
-    JsonArray argList = new JsonArray();
-    if (ctx.lambda_param_no_default() != null) {
-      for (var param : ctx.lambda_param_no_default()) {
-        var lp = param.lambda_param();
-        JsonObject argNode = createNode(lp, "arg");
-        argNode.addProperty("arg", lp.NAME().getText());
-        argList.add(argNode);
+    // Implementation is nearly identical to visitFunction_def_raw() but with lambda_-prefixed
+    // properties.
+    JsonObject arguments = createNode(ctx, "arguments");
+    var args = new JsonArray();
+    var defaults = new JsonArray();
+
+    var parameters = ctx;
+    if (parameters != null) {
+      var paramList = parameters.lambda_param_no_default();
+      if (paramList != null && !paramList.isEmpty()) {
+        for (var param : paramList) {
+          var argNode = createNode(param, "arg");
+          argNode.addProperty("arg", param.lambda_param().NAME().getText());
+          args.add(argNode);
+        }
+      }
+
+      var star = parameters.lambda_star_etc();
+      if (star == null) {
+        arguments.add("vararg", JsonNull.INSTANCE);
+        arguments.add("kwarg", JsonNull.INSTANCE);
+      } else {
+        if (star.getChild(0).getText().equals("*")) {
+          var vararg = createNode(star, "arg");
+          vararg.addProperty("arg", star.getChild(1).getText().replaceAll(",", ""));
+          arguments.add("vararg", vararg);
+        } else {
+          arguments.add("vararg", JsonNull.INSTANCE);
+        }
+
+        if (star.lambda_kwds() != null) {
+          var kwarg = createNode(star.lambda_kwds(), "arg");
+          // Assume: star.kwds().getChild(0).getText().equals("**")
+          kwarg.addProperty("arg", star.lambda_kwds().getChild(1).getText());
+          arguments.add("kwarg", kwarg);
+        } else {
+          arguments.add("kwarg", JsonNull.INSTANCE);
+        }
+      }
+
+      var defaultParamList = parameters.lambda_param_with_default();
+      if (defaultParamList != null && !defaultParamList.isEmpty()) {
+        for (var defaultParam : defaultParamList) {
+          var argNode = createNode(defaultParam, "arg");
+          argNode.addProperty("arg", defaultParam.lambda_param().NAME().getText());
+          args.add(argNode);
+          defaults.add(visitExpression(defaultParam.default_assignment().expression()));
+        }
       }
     }
-    args.add("args", argList);
-    return args;
+
+    arguments.add("args", args);
+    arguments.add("defaults", defaults);
+    return arguments;
   }
 
   @Override

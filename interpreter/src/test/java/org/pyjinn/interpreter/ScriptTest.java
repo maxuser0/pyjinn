@@ -1112,11 +1112,15 @@ public class ScriptTest {
     execute(
         compile,
         """
-        f = lambda x, y: x + y
-        output = f("foo", "bar")
+        f = lambda i, k, *args, **kwargs: args[i] + kwargs[k]
+        star_args = f(2, "two", "foo", "bar", "baz", two="boz")
+
+        g = lambda x="foo", y="bar": x + y
+        default_args = g(y="baz")
         """);
 
-    assertEquals(getVariable("output"), "foobar");
+    assertEquals("bazboz", getVariable("star_args"));
+    assertEquals("foobaz", getVariable("default_args"));
   }
 
   @ParameterizedTest

@@ -490,8 +490,11 @@ public class Script {
     }
 
     private List<Decorator> getDecorators(JsonElement element) {
-      return StreamSupport.stream(
-              getAttr(element, "decorator_list").getAsJsonArray().spliterator(), false)
+      var decorators = getAttr(element, "decorator_list");
+      if (decorators == null || decorators.isJsonNull()) {
+        return List.of();
+      }
+      return StreamSupport.stream(decorators.getAsJsonArray().spliterator(), false)
           .map(
               e -> {
                 String type = getType(e);
@@ -513,7 +516,13 @@ public class Script {
     }
 
     private FunctionDef parseFunctionDef(String enclosingClassName, JsonElement element) {
-      var identifier = new Identifier(getAttr(element, "name").getAsString());
+      var functionName = getAttr(element, "name").getAsString();
+      Statement body = parseStatementBlock(getBody(element));
+      return parsePartialFunctionDef(enclosingClassName, functionName, element, body);
+    }
+
+    private FunctionDef parsePartialFunctionDef(
+        String enclosingClassName, String functionName, JsonElement element, Statement body) {
       var decorators = getDecorators(element);
       var argsObject = getAttr(element, "args").getAsJsonObject();
       List<FunctionArg> args = parseFunctionArgs(getAttr(argsObject, "args").getAsJsonArray());
@@ -543,19 +552,16 @@ public class Script {
                           .toList())
               .orElse(List.of());
 
-      Statement body = parseStatementBlock(getBody(element));
-      var func =
-          new FunctionDef(
-              getLineno(element),
-              enclosingClassName,
-              identifier,
-              decorators,
-              args,
-              vararg,
-              kwarg,
-              defaults,
-              body);
-      return func;
+      return new FunctionDef(
+          getLineno(element),
+          enclosingClassName,
+          new Identifier(functionName),
+          decorators,
+          args,
+          vararg,
+          kwarg,
+          defaults,
+          body);
     }
 
     public Statement parseStatements(JsonElement element) {
@@ -934,11 +940,14 @@ public class Script {
 
         case "Lambda":
           {
+            int lineno = getLineno(element);
+            var body = parseExpression(getAttr(element, "body"));
             return new Lambda(
-                parseFunctionArgs(
-                    getAttr(getAttr(element, "args").getAsJsonObject(), "args").getAsJsonArray()),
-                parseExpression(getAttr(element, "body")),
-                getLineno(element));
+                parsePartialFunctionDef(
+                    /* enclosingClassName= */ "<>",
+                    "<lambda>",
+                    element,
+                    new ReturnStatement(lineno, body)));
           }
 
         case "JoinedStr":
@@ -4650,24 +4659,6 @@ public class Script {
   }
 
   public record Lambda(FunctionDef functionDef) implements Expression {
-
-    private static Identifier LAMBDA_IDENTIFIER = new Identifier("<lambda>");
-
-    // TODO(maxuser): Support arg defaults, *vararg, and **kwarg.
-    public Lambda(List<FunctionArg> args, Expression body, int lineno) {
-      this(
-          new FunctionDef(
-              lineno,
-              /* enclosingClassName= */ "<>",
-              LAMBDA_IDENTIFIER,
-              /* decorators= */ List.of(),
-              args,
-              /* vararg= */ Optional.empty(),
-              /* kwarg= */ Optional.empty(),
-              /* defaults= */ List.of(),
-              new ReturnStatement(lineno, body)));
-    }
-
     @Override
     public Object eval(Context context) {
       return new BoundFunction(functionDef, context);
