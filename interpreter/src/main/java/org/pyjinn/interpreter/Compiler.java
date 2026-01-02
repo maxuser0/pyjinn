@@ -370,7 +370,9 @@ class Compiler {
   }
 
   private void compileFunctionDef(FunctionDef function, Code code) {
-    code.addInstruction(lineno, new Instruction.BindFunction(function, compileFunction(function)));
+    code.addInstruction(
+        lineno, new Instruction.CreateFunction(function, compileFunction(function)));
+    code.addInstruction(lineno, new Instruction.AssignVariable(function.identifier().name()));
   }
 
   private void compileClassDef(ClassDef classDef, Code code) {
@@ -530,7 +532,8 @@ class Compiler {
     } else if (expr instanceof Lambda lambda) {
       code.addInstruction(
           lineno,
-          new Instruction.Lambda(lambda.functionDef(), compileFunction(lambda.functionDef())));
+          new Instruction.CreateFunction(
+              lambda.functionDef(), compileFunction(lambda.functionDef())));
     } else if (expr instanceof WalrusExpression walrusExpr) {
       compileExpression(walrusExpr.rhs(), code);
       code.addInstruction(lineno, new Instruction.WalrusOperator(walrusExpr.identifier().name()));

@@ -235,16 +235,7 @@ sealed interface Instruction {
     }
   }
 
-  record BindFunction(FunctionDef function, Code code) implements Instruction {
-    @Override
-    public Context execute(Context context) {
-      context.setBoundFunction(new BoundFunction(function, context, code));
-      ++context.ip;
-      return context;
-    }
-  }
-
-  record Lambda(FunctionDef function, Code code) implements Instruction {
+  record CreateFunction(FunctionDef function, Code code) implements Instruction {
     @Override
     public Context execute(Context context) {
       context.pushData(new BoundFunction(function, context, code));
