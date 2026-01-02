@@ -7,9 +7,9 @@ import static org.pyjinn.interpreter.Script.convertToBool;
 import static org.pyjinn.interpreter.Script.getSimpleTypeName;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -771,19 +771,20 @@ sealed interface Instruction {
   // Note that numElements does not reflect the number of elements of starred expressions, so
   // (a, *b, c) counts as 3 elements.
   private static List<Object> loadSequence(Context context, int numElements) {
-    var list = new LinkedList<Object>();
+    var list = new ArrayList<Object>();
     for (int i = 0; i < numElements; ++i) {
       var element = context.popData();
       if (element instanceof StarredValue starred) {
         var values = new ArrayList<Object>();
         Script.getIterable(starred.value()).forEach(values::add);
         for (var value : values.reversed()) {
-          list.addFirst(value);
+          list.add(value);
         }
       } else {
-        list.addFirst(element);
+        list.add(element);
       }
     }
+    Collections.reverse(list);
     return list;
   }
 
