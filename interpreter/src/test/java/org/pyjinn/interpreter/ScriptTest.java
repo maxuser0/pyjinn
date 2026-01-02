@@ -1312,7 +1312,7 @@ public class ScriptTest {
   }
 
   private Script.Environment execute(String source) throws Exception {
-    return execute(/* compile= */ false, source);
+    return execute(/* compile= */ true, source);
   }
 
   private Script.Environment execute(boolean compile, String source) throws Exception {

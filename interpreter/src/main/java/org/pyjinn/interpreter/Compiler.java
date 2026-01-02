@@ -139,6 +139,8 @@ class Compiler {
       compileReturnStatement(returnStatement, code);
     } else if (statement instanceof Deletion deletion) {
       compileDeletion(deletion, code);
+    } else if (statement instanceof GlobalVarDecl globalVarDecl) {
+      code.addInstruction(lineno, new Instruction.GlobalVarDecl(globalVarDecl.globalVars()));
     } else {
       throw new IllegalArgumentException("Unsupported statement type: " + statement.getClass());
     }
@@ -148,21 +150,21 @@ class Compiler {
     Expression lhs = assign.lhs();
     if (lhs instanceof Identifier identifier) {
       compileExpression(assign.rhs(), code);
-      code.addInstruction(lineno, new Instruction.AssignVariable(identifier.name()));
+      code.addInstruction(lineno, new Instruction.StoreToVariable(identifier.name()));
     } else if (lhs instanceof FieldAccess fieldAccess) {
       compileExpression(assign.rhs(), code);
       compileExpression(fieldAccess.object(), code);
-      code.addInstruction(lineno, new Instruction.AssignField(fieldAccess.field().name()));
+      code.addInstruction(lineno, new Instruction.StoreToField(fieldAccess.field().name()));
     } else if (lhs instanceof ArrayIndex arrayIndex) {
       compileExpression(assign.rhs(), code);
       compileExpression(arrayIndex.array(), code);
       compileExpression(arrayIndex.index(), code);
-      code.addInstruction(lineno, new Instruction.AssignArrayIndex());
+      code.addInstruction(lineno, new Instruction.StoreToArrayIndex());
     } else if (lhs instanceof TupleLiteral lhsTuple) {
       compileExpression(assign.rhs(), code);
       code.addInstruction(
           lineno,
-          new Instruction.AssignTuple(
+          new Instruction.StoreToVariableTuple(
               lhsTuple.elements().stream().map(Identifier.class::cast).toList()));
     } else {
       throw new IllegalArgumentException(
@@ -264,10 +266,10 @@ class Compiler {
     var vars = forBlock.vars();
     final Instruction iterVarAssignment;
     if (vars instanceof Identifier id) {
-      iterVarAssignment = new Instruction.AssignVariable(id.name());
+      iterVarAssignment = new Instruction.StoreToVariable(id.name());
     } else if (vars instanceof TupleLiteral lhsTuple) {
       iterVarAssignment =
-          new Instruction.AssignTuple(
+          new Instruction.StoreToVariableTuple(
               lhsTuple.elements().stream().map(Identifier.class::cast).toList());
     } else {
       throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
@@ -372,7 +374,7 @@ class Compiler {
   private void compileFunctionDef(FunctionDef function, Code code) {
     code.addInstruction(
         lineno, new Instruction.CreateFunction(function, compileFunction(function)));
-    code.addInstruction(lineno, new Instruction.AssignVariable(function.identifier().name()));
+    code.addInstruction(lineno, new Instruction.StoreToVariable(function.identifier().name()));
   }
 
   private void compileClassDef(ClassDef classDef, Code code) {
@@ -464,7 +466,7 @@ class Compiler {
 
   private void compileExpression(Expression expr, Code code) {
     if (expr instanceof Identifier identifier) {
-      code.addInstruction(lineno, new Instruction.Identifier(identifier.name()));
+      code.addInstruction(lineno, new Instruction.LoadFromVariable(identifier.name()));
     } else if (expr instanceof TupleLiteral tuple) {
       compileTupleLiteral(tuple, code);
     } else if (expr instanceof ListLiteral list) {
@@ -602,10 +604,10 @@ class Compiler {
       var vars = listComp.target();
       final Instruction iterVarAssignment;
       if (vars instanceof Identifier id) {
-        iterVarAssignment = new Instruction.AssignVariable(id.name());
+        iterVarAssignment = new Instruction.StoreToVariable(id.name());
       } else if (vars instanceof TupleLiteral lhsTuple) {
         iterVarAssignment =
-            new Instruction.AssignTuple(
+            new Instruction.StoreToVariableTuple(
                 lhsTuple.elements().stream().map(Identifier.class::cast).toList());
       } else {
         throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());

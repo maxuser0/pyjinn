@@ -284,7 +284,7 @@ sealed interface Instruction {
     }
   }
 
-  record Identifier(String name) implements Instruction {
+  record LoadFromVariable(String name) implements Instruction {
     @Override
     public Context execute(Context context) {
       context.pushData(context.get(name));
@@ -471,6 +471,15 @@ sealed interface Instruction {
     }
   }
 
+  record GlobalVarDecl(List<Identifier> varNames) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      Script.GlobalVarDecl.declare(context, varNames);
+      ++context.ip;
+      return context;
+    }
+  }
+
   record FormattedString(int numValues) implements Instruction {
     @Override
     public Context execute(Context context) {
@@ -509,7 +518,7 @@ sealed interface Instruction {
     }
   }
 
-  record AssignVariable(String varName) implements Instruction {
+  record StoreToVariable(String varName) implements Instruction {
     @Override
     public Context execute(Context context) {
       var rhs = context.popData();
@@ -519,7 +528,7 @@ sealed interface Instruction {
     }
   }
 
-  record AssignField(String fieldName) implements Instruction {
+  record StoreToField(String fieldName) implements Instruction {
     @Override
     public Context execute(Context context) {
       var object = context.popData();
@@ -534,7 +543,7 @@ sealed interface Instruction {
     }
   }
 
-  record AssignArrayIndex() implements Instruction {
+  record StoreToArrayIndex() implements Instruction {
     @Override
     public Context execute(Context context) {
       var index = context.popData();
@@ -553,7 +562,7 @@ sealed interface Instruction {
     }
   }
 
-  record AssignTuple(List<Script.Identifier> varNames) implements Instruction {
+  record StoreToVariableTuple(List<Identifier> varNames) implements Instruction {
     @Override
     public Context execute(Context context) {
       var value = context.popData();

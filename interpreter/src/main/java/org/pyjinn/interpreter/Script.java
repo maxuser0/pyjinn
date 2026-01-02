@@ -2490,7 +2490,11 @@ public class Script {
   public record GlobalVarDecl(int lineno, List<Identifier> globalVars) implements Statement {
     @Override
     public void exec(Context context) {
-      for (var identifier : globalVars) {
+      declare(context, globalVars);
+    }
+
+    public static void declare(Context context, List<Identifier> varNames) {
+      for (var identifier : varNames) {
         context.declareGlobalVar(identifier.name());
       }
     }
