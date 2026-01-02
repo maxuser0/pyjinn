@@ -253,6 +253,17 @@ sealed interface Instruction {
     }
   }
 
+  record WalrusOperator(String varName) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var value = context.popData();
+      context.set(varName, value);
+      context.pushData(value);
+      ++context.ip;
+      return context;
+    }
+  }
+
   /** Executes {@code code} as function with no params, using {@code function} for metadata only. */
   record NullaryCompileOnlyFunctionCall(FunctionDef function, Code code) implements Instruction {
     private static Object[] NO_PARAMS = new Object[] {};

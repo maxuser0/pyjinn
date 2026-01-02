@@ -531,6 +531,9 @@ class Compiler {
       code.addInstruction(
           lineno,
           new Instruction.Lambda(lambda.functionDef(), compileFunction(lambda.functionDef())));
+    } else if (expr instanceof WalrusExpression walrusExpr) {
+      compileExpression(walrusExpr.rhs(), code);
+      code.addInstruction(lineno, new Instruction.WalrusOperator(walrusExpr.identifier().name()));
     } else if (expr instanceof BoolOp boolOp) {
       // source: VALUE1 and VALUE2 and VALUE3...
       // [0] eval VALUE1
