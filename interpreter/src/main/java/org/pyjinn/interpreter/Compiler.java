@@ -14,13 +14,13 @@ import org.pyjinn.interpreter.Code.InstructionList;
 import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
-  public static void compile(Statement statement, Code code) {
-    var compiler = new Compiler(/* withinFunction= */ false);
+  public static void compile(boolean interactiveMode, Statement statement, Code code) {
+    var compiler = new Compiler(interactiveMode, /* withinFunction= */ false);
     compiler.compileStatement(statement, code);
   }
 
-  private static void compileFunctionBody(int lineno, Statement statement, Code code) {
-    var compiler = new Compiler(/* withinFunction= */ true);
+  private void compileFunctionBody(int lineno, Statement statement, Code code) {
+    var compiler = new Compiler(interactiveMode, /* withinFunction= */ true);
     compiler.lineno = lineno;
     compiler.compileStatement(statement, code);
   }
@@ -30,11 +30,15 @@ class Compiler {
     FOR
   }
 
+  // If enabled, assign values of expression statements to {@code $expr} for REPL output.
+  private final boolean interactiveMode;
+
   private final boolean withinFunction;
   private final Deque<LoopState> loops = new ArrayDeque<>();
   private int lineno = -1;
 
-  private Compiler(boolean withinFunction) {
+  private Compiler(boolean interactiveMode, boolean withinFunction) {
+    this.interactiveMode = interactiveMode;
     this.withinFunction = withinFunction;
   }
 
@@ -112,7 +116,11 @@ class Compiler {
       }
     } else if (statement instanceof Expression expr) {
       compileExpression(expr, code);
-      code.addInstruction(lineno, new Instruction.PopData());
+      if (interactiveMode) {
+        code.addInstruction(lineno, new Instruction.StoreToVariable("$expr"));
+      } else {
+        code.addInstruction(lineno, new Instruction.PopData());
+      }
     } else if (statement instanceof Assignment assign) {
       compileAssignment(assign, code);
     } else if (statement instanceof AugmentedAssignment augAssign) {

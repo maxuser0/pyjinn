@@ -104,7 +104,7 @@ public class Script {
 
     public Module(Script script, String filename, String name) {
       this.name = name;
-      this.globals = GlobalContext.create(filename, script.symbolCache);
+      this.globals = GlobalContext.create(script, filename, script.symbolCache);
       globals.set("__script__", script);
       globals.set("__name__", name);
     }
@@ -122,23 +122,11 @@ public class Script {
     }
 
     public void parse(JsonElement element, String scriptFilename) {
-      if (globals.get("__script__") instanceof Script script) {
-        var parser =
-            new JsonAstParser(
-                this,
-                scriptFilename,
-                script.moduleHandler,
-                script.classLoader,
-                globals.symbolCache);
-        parser.parseGlobals(element, globals);
-      } else {
-        throw new IllegalStateException(
-            "Expected module %s to have global __script__ of type %s but got %s"
-                .formatted(
-                    name,
-                    Script.class.getSimpleName(),
-                    globals.get("__script__").getClass().getSimpleName()));
-      }
+      var script = globals.script;
+      var parser =
+          new JsonAstParser(
+              this, scriptFilename, script.moduleHandler, script.classLoader, globals.symbolCache);
+      parser.parseGlobals(element, globals);
     }
 
     public void compile() {
@@ -146,9 +134,7 @@ public class Script {
     }
 
     public void exec() {
-      if (globals.get("__script__") instanceof Script script) {
-        script.moduleHandler.onExecModule(this);
-      }
+      globals.script.moduleHandler.onExecModule(this);
       globals.execGlobalStatements();
     }
   }
@@ -236,6 +222,9 @@ public class Script {
   // For use by apps that need to share custom data across modules.
   public final PyjDict vars = new PyjDict();
 
+  // If enabled, assign values of expression statements to {@code $expr} for REPL output.
+  private boolean interactiveMode = false;
+
   public Script() {
     this(
         "<stdin>",
@@ -263,6 +252,11 @@ public class Script {
         new SymbolCache(
             toRuntimeClassName, toPrettyClassName, toRuntimeFieldName, toRuntimeMethodNames);
     this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, scriptFilename, MAIN_MODULE_NAME));
+  }
+
+  /** If enabled, assign values of expression statements to {@code $expr} for REPL output. */
+  public void setInteractiveMode(boolean interactiveMode) {
+    this.interactiveMode = interactiveMode;
   }
 
   /**
@@ -1118,7 +1112,7 @@ public class Script {
     boolean isHalted() {
       if (enclosingContext.env().halted()) {
         // TODO(maxuser): Clear function's internal state to avoid memory leak of the entire script.
-        var script = (Script) enclosingContext.env().get("__script__");
+        var script = enclosingContext.env().script();
         script.zombieCallbackHandler.handle(
             script.mainModule().filename(),
             "function '%s'".formatted(function.identifier().name()),
@@ -1311,29 +1305,28 @@ public class Script {
     @Override
     public void exec(Context context) {
       try {
-        if (context.globals.get("__script__") instanceof Script script) {
-          for (var importModule : modules) {
-            var module = script.importModule(importModule.name());
+        var script = context.globals.script();
+        for (var importModule : modules) {
+          var module = script.importModule(importModule.name());
 
-            // To support modules with dots in their name, e.g. `import foo.bar.baz`,
-            // iterate the name parts in reverse order. For the last part (`baz`),
-            // create a PyjObject whose __dict__ is the imported module's global vars
-            // and wrap each previous name part in a PyjObject's __dict__. It's equivalent to:
-            //
-            // baz = imported_module.globals()
-            // _bar = object()
-            // _bar.__dict__["baz"] = _baz  # Note that Python doesn't create __dict__ for object().
-            // foo = object()
-            // foo.__dict__["bar"] = _bar
-            String[] nameParts = importModule.importedName().split("\\.");
-            var object = new PyjObject(PyjClass.MODULE_TYPE, module.globals().vars());
-            for (int i = nameParts.length - 1; i > 0; --i) {
-              var prevObject = object;
-              object = new PyjObject(PyjClass.MODULE_TYPE);
-              object.__dict__.__setitem__(nameParts[i], prevObject);
-            }
-            context.set(nameParts[0], object);
+          // To support modules with dots in their name, e.g. `import foo.bar.baz`,
+          // iterate the name parts in reverse order. For the last part (`baz`),
+          // create a PyjObject whose __dict__ is the imported module's global vars
+          // and wrap each previous name part in a PyjObject's __dict__. It's equivalent to:
+          //
+          // baz = imported_module.globals()
+          // _bar = object()
+          // _bar.__dict__["baz"] = _baz  # Note that Python doesn't create __dict__ for object().
+          // foo = object()
+          // foo.__dict__["bar"] = _bar
+          String[] nameParts = importModule.importedName().split("\\.");
+          var object = new PyjObject(PyjClass.MODULE_TYPE, module.globals().vars());
+          for (int i = nameParts.length - 1; i > 0; --i) {
+            var prevObject = object;
+            object = new PyjObject(PyjClass.MODULE_TYPE);
+            object.__dict__.__setitem__(nameParts[i], prevObject);
           }
+          context.set(nameParts[0], object);
         }
       } catch (Exception e) {
         throw new RuntimeException(e);
@@ -1345,22 +1338,21 @@ public class Script {
     @Override
     public void exec(Context context) {
       try {
-        if (context.globals.get("__script__") instanceof Script script) {
-          var module = script.importModule(module());
-          if (names().size() == 1 && names().get(0).name().equals("*")) {
-            for (var entry : module.globals().vars().getJavaMap().entrySet()) {
-              var name = (String) entry.getKey();
-              if (name.startsWith("__")) {
-                continue; // Skip special module variables like __name__.
-              }
-              var value = entry.getValue();
-              context.set(name, value);
+        var script = context.globals.script();
+        var module = script.importModule(module());
+        if (names().size() == 1 && names().get(0).name().equals("*")) {
+          for (var entry : module.globals().vars().getJavaMap().entrySet()) {
+            var name = (String) entry.getKey();
+            if (name.startsWith("__")) {
+              continue; // Skip special module variables like __name__.
             }
-          } else {
-            for (var importName : names()) {
-              var importedEntity = module.globals().get(importName.name());
-              context.set(importName.importedName(), importedEntity);
-            }
+            var value = entry.getValue();
+            context.set(name, value);
+          }
+        } else {
+          for (var importName : names()) {
+            var importedEntity = module.globals().get(importName.name());
+            context.set(importName.importedName(), importedEntity);
           }
         }
       } catch (Exception e) {
@@ -2144,8 +2136,11 @@ public class Script {
       if (context.skipStatement()) {
         return;
       }
-      // Set $expr variable for interactive interpreter to print result of expression statements.
-      context.set("$expr", eval(context));
+      var result = eval(context);
+      if (context.globals.script.interactiveMode) {
+        // Set $expr variable for interactive interpreter to print result of expression statements.
+        context.set("$expr", result);
+      }
     }
 
     default JsonElement astNode() {
@@ -5220,7 +5215,7 @@ public class Script {
     public Object call(Environment env, Object... params) {
       int numParams = params.length;
       var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
-      var script = (Script) env.get("__script__");
+      var script = env.script();
       final Consumer<String> out;
       if (kwargs == null) {
         out = script.stdout;
@@ -5260,7 +5255,7 @@ public class Script {
       expectMinParams(params, 1);
       var value = params[0];
       if (value instanceof Function callback) {
-        var script = (Script) env.get("__script__");
+        var script = env.script();
         script.registerAtExit(
             new AtExitCallback(callback, env, Arrays.copyOfRange(params, 1, params.length)));
         return null;
@@ -5280,7 +5275,7 @@ public class Script {
       expectNumParams(params, 1);
       var value = params[0];
       if (value instanceof Function callback) {
-        var script = (Script) env.get("__script__");
+        var script = env.script();
         script.unregisterAtExit(callback);
         return null;
       } else {
@@ -5519,11 +5514,9 @@ public class Script {
     public Object call(Environment env, Object... params) {
       expectMinParams(params, 0);
       expectMaxParams(params, 1);
-      if (env.get("__script__") instanceof Script script) {
-        int status =
-            (params.length == 1 && params[0] != null) ? ((Number) params[0]).intValue() : 0;
-        script.exit(status);
-      }
+      int status = (params.length == 1 && params[0] != null) ? ((Number) params[0]).intValue() : 0;
+      var script = env.script();
+      script.exit(status);
       return null;
     }
   }
@@ -6490,6 +6483,8 @@ public class Script {
   }
 
   public interface Environment {
+    Script script();
+
     Object get(String name);
 
     void set(String name, Object value);
@@ -6510,24 +6505,31 @@ public class Script {
   }
 
   private static class GlobalContext extends Context implements Environment {
+    private final Script script;
     private final String moduleFilename;
     private final SymbolCache symbolCache;
     private final List<Statement> globalStatements = new ArrayList<>();
     private boolean halted = false; // If true, the script is exiting and this module must halt.
 
-    private GlobalContext(String moduleFilename, SymbolCache symbolCache) {
+    private GlobalContext(Script script, String moduleFilename, SymbolCache symbolCache) {
       globals = this;
+      this.script = script;
       this.moduleFilename = moduleFilename;
       this.symbolCache = symbolCache;
     }
 
+    @Override
+    public Script script() {
+      return script;
+    }
+
     public Deque<CallSite> getCallStack() {
-      var script = (Script) get("__script__");
       return script.callStack.get();
     }
 
-    public static GlobalContext create(String moduleFilename, SymbolCache symbolCache) {
-      var context = new GlobalContext(moduleFilename, symbolCache);
+    public static GlobalContext create(
+        Script script, String moduleFilename, SymbolCache symbolCache) {
+      var context = new GlobalContext(script, moduleFilename, symbolCache);
 
       // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
       // globals.
@@ -6592,7 +6594,7 @@ public class Script {
         code = new Code();
       }
       for (var statement : globalStatements) {
-        Compiler.compile(statement, code);
+        Compiler.compile(script.interactiveMode, statement, code);
       }
       globalStatements.clear();
     }

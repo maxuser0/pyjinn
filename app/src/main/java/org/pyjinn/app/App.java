@@ -22,12 +22,12 @@ public class App {
   public static void main(String[] args) throws Exception {
     Set<String> argsSet = new HashSet<>(Arrays.asList(args));
 
-    boolean compile = argsSet.contains("-c");
-    if (compile) {
-      argsSet.remove("-c");
+    boolean compile = !argsSet.contains("--no-compile");
+    if (!compile) {
+      argsSet.remove("--no-compile");
     }
 
-    if (argsSet.contains("-r")) {
+    if (argsSet.contains("-i")) {
       repl(compile);
       return;
     }
@@ -90,6 +90,7 @@ public class App {
     System.out.printf("[Java %s]\n", version.javaVersion());
 
     var script = new Script();
+    script.setInteractiveMode(true);
     try (var scanner = new Scanner(System.in)) {
       String stdinString = "";
       boolean isCodeIncomplete = false;
