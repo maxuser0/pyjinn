@@ -168,6 +168,8 @@ class Compiler {
       compileExpression(arrayIndex.array(), code);
       compileExpression(arrayIndex.index(), code);
       code.addInstruction(lineno, new Instruction.StoreToArrayIndex());
+      // Pop ignored value from StoreToArrayIndex for consistency with __setitem__().
+      code.addInstruction(lineno, new Instruction.PopData());
     } else if (lhs instanceof TupleLiteral lhsTuple) {
       compileExpression(assign.rhs(), code);
       code.addInstruction(
@@ -325,6 +327,11 @@ class Compiler {
     compileStatement(tryBlock.tryBody(), code);
     int blockEnd = instructions.size();
 
+    int initialStackDepth = 0;
+    for (int i = 0; i < blockStart; ++i) {
+      initialStackDepth += instructions.get(i).stackOffset();
+    }
+
     // No need to jump to finally unless there are except handlers between try and finally.
     if (hasFinally) {
       if (numHandlers > 0) {
@@ -343,7 +350,11 @@ class Compiler {
       // inserted at its beginning that checks if the thrown exception matches the declared
       // exception type.
       code.registerExceptionalJump(
-          blockStart, blockEnd, instructions.size(), Code.ExceptionClause.EXCEPT);
+          blockStart,
+          blockEnd,
+          initialStackDepth,
+          instructions.size(),
+          Code.ExceptionClause.EXCEPT);
 
       blockStart = instructions.size();
       // CatchExceptionType instruction must be inside the [blockStart, blockEnd) range because that
@@ -370,7 +381,11 @@ class Compiler {
 
     if (hasFinally) {
       code.registerExceptionalJump(
-          blockStart, blockEnd, instructions.size(), Code.ExceptionClause.FINALLY);
+          blockStart,
+          blockEnd,
+          initialStackDepth,
+          instructions.size(),
+          Code.ExceptionClause.FINALLY);
       jumpsToFinally.finalizeJumps();
       compileStatement(tryBlock.finallyBlock().get(), code);
       code.addInstruction(lineno, new Instruction.RethrowException());

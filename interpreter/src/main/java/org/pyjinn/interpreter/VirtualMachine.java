@@ -47,8 +47,16 @@ public class VirtualMachine {
         context = context.callingContext();
       }
       if (jump == null) {
+        context.exception = null;
+        while (context.dataStackSize() > 0) {
+          context.popData();
+        }
+        context.ip = context.code.instructions().size();
         throw e;
       } else {
+        while (context.dataStackSize() > jump.initialStackDepth()) {
+          context.popData();
+        }
         context.ip = jump.jumpTarget();
       }
     }

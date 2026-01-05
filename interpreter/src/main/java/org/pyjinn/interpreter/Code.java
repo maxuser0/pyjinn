@@ -18,7 +18,11 @@ public class Code {
   }
 
   public record ExceptionalJump(
-      int startInstruction, int endInstruction, int jumpTarget, ExceptionClause clauseType) {}
+      int startInstruction,
+      int endInstruction,
+      int initialStackDepth,
+      int jumpTarget,
+      ExceptionClause clauseType) {}
 
   // Using class instead of record so endInstruction is mutable.
   public static class LineInfo {
@@ -100,8 +104,14 @@ public class Code {
   }
 
   void registerExceptionalJump(
-      int startInstruction, int endInstruction, int jumpTarget, ExceptionClause clauseType) {
-    jumpTable.add(new ExceptionalJump(startInstruction, endInstruction, jumpTarget, clauseType));
+      int startInstruction,
+      int endInstruction,
+      int initialStackDepth,
+      int jumpTarget,
+      ExceptionClause clauseType) {
+    jumpTable.add(
+        new ExceptionalJump(
+            startInstruction, endInstruction, initialStackDepth, jumpTarget, clauseType));
   }
 
   /**

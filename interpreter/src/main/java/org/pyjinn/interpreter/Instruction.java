@@ -19,12 +19,27 @@ import org.pyjinn.interpreter.Script.*;
 sealed interface Instruction {
   Context execute(Context context) throws RuntimeException;
 
+  /**
+   * Offset of stack depth from before this instruction to after it executes.
+   *
+   * <p>-1 for each value popped from the context's data stack. +1 for each value pushed onto the
+   * context's data stack.
+   */
+  default int stackOffset() {
+    return 0;
+  }
+
   record PushData(Object value) implements Instruction {
     @Override
     public Context execute(Context context) {
       context.pushData(value);
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
     }
   }
 
@@ -36,6 +51,11 @@ sealed interface Instruction {
       context.pushData(new Script.BoundMethod(object, methodName, symbolCache, objectExpression));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
     }
   }
 
@@ -59,6 +79,11 @@ sealed interface Instruction {
       }
       var function = context.popData();
       return call(context, function, params);
+    }
+
+    @Override
+    public int stackOffset() {
+      return -numArgs + 1; // +1 for return value
     }
 
     private Context call(Context context, Object caller, Object[] params) {
@@ -233,6 +258,11 @@ sealed interface Instruction {
       ++callingContext.ip;
       return callingContext;
     }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
   }
 
   record CreateFunction(FunctionDef function, Code code) implements Instruction {
@@ -241,6 +271,11 @@ sealed interface Instruction {
       context.pushData(new BoundFunction(function, context, code));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
     }
   }
 
@@ -264,6 +299,11 @@ sealed interface Instruction {
       var listCompFunc = new BoundFunction(function, /* enclosingContext= */ context, code);
       return FunctionCall.executeCompiledFunctionUnknownSource(context, listCompFunc, NO_PARAMS);
     }
+
+    @Override
+    public int stackOffset() {
+      return 1; // +1 for return value from synthetic function call
+    }
   }
 
   record DefineClass(ClassDef classDef, FunctionCompiler compiler) implements Instruction {
@@ -282,6 +322,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
   }
 
   record LoadFromVariable(String name) implements Instruction {
@@ -290,6 +335,11 @@ sealed interface Instruction {
       context.pushData(context.get(name));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
     }
   }
 
@@ -300,6 +350,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
   }
 
   record LoadJavaClass(JavaClassCall javaClassCall) implements Instruction {
@@ -308,6 +363,11 @@ sealed interface Instruction {
       context.pushData(javaClassCall.eval(context));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
     }
   }
 
@@ -349,6 +409,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -2 + 1;
+    }
   }
 
   record Comparison(Script.Comparison.Op op) implements Instruction {
@@ -381,6 +446,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -2 + 1;
+    }
   }
 
   record FieldAccess(Script.FieldAccess expression) implements Instruction {
@@ -409,6 +479,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -2 + 1;
+    }
   }
 
   record Slice() implements Instruction {
@@ -425,6 +500,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -3 + 1;
+    }
   }
 
   record CreateDict(int numItems) implements Instruction {
@@ -439,6 +519,11 @@ sealed interface Instruction {
       context.pushData(new PyjDict(map));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -2 * numItems + 1;
     }
   }
 
@@ -469,6 +554,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -2;
+    }
   }
 
   record GlobalVarDecl(List<Identifier> varNames) implements Instruction {
@@ -494,6 +584,11 @@ sealed interface Instruction {
       context.pushData(str.toString());
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -numValues + 1;
     }
   }
 
@@ -526,6 +621,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
   }
 
   record StoreToField(String fieldName) implements Instruction {
@@ -540,6 +640,11 @@ sealed interface Instruction {
       }
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -2;
     }
   }
 
@@ -557,8 +662,17 @@ sealed interface Instruction {
       }
 
       Assignment.assignArray(array, index, rhs);
+
+      // Push an empty value for consistency with __setitem__() which returns a value on the stack.
+      context.pushData(null);
+
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -3 + 1;
     }
   }
 
@@ -570,6 +684,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
   }
 
   record AugmentVariable(String varName, AugmentedAssignment.Op op) implements Instruction {
@@ -579,6 +698,11 @@ sealed interface Instruction {
       AugmentedAssignment.augmentVariable(context, varName, op, rhs);
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
     }
   }
 
@@ -591,6 +715,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -2;
+    }
   }
 
   record AugmentArrayIndex(AugmentedAssignment.Op op) implements Instruction {
@@ -602,6 +731,11 @@ sealed interface Instruction {
       AugmentedAssignment.augmentArrayIndex(array, index, op, rhs);
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -3;
     }
   }
 
@@ -628,6 +762,11 @@ sealed interface Instruction {
       }
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
   }
 
   record IteratorNext() implements Instruction {
@@ -643,6 +782,11 @@ sealed interface Instruction {
       }
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
   }
 
   record PopJumpIfFalse(int jumpTarget) implements Instruction {
@@ -655,6 +799,11 @@ sealed interface Instruction {
         context.ip = jumpTarget;
       }
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
     }
   }
 
@@ -670,6 +819,11 @@ sealed interface Instruction {
       }
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
   }
 
   record JumpIfFalseOrPop(int jumpTarget) implements Instruction {
@@ -683,6 +837,11 @@ sealed interface Instruction {
         context.ip = jumpTarget;
       }
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
     }
   }
 
@@ -711,6 +870,11 @@ sealed interface Instruction {
       }
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
     }
   }
 
@@ -745,6 +909,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
   }
 
   record LoadTuple(int numElements) implements Instruction {
@@ -754,6 +923,11 @@ sealed interface Instruction {
       context.pushData(new PyjTuple(list.toArray()));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -numElements + 1;
     }
   }
 
@@ -765,6 +939,11 @@ sealed interface Instruction {
       ++context.ip;
       return context;
     }
+
+    @Override
+    public int stackOffset() {
+      return -numElements + 1;
+    }
   }
 
   record LoadSet(int numElements) implements Instruction {
@@ -774,6 +953,11 @@ sealed interface Instruction {
       context.pushData(new PyjSet(Set.copyOf(list)));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -numElements + 1;
     }
   }
 
@@ -805,6 +989,11 @@ sealed interface Instruction {
 
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
     }
   }
 }

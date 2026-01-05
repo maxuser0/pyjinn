@@ -6703,6 +6703,10 @@ public class Script {
       return data;
     }
 
+    public int dataStackSize() {
+      return dataStack.size();
+    }
+
     public void debugLogInstructions() {
       if (debug && code != null) {
         for (int i = 0; i < code.instructions().size(); ++i) {

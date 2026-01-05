@@ -22,6 +22,12 @@ public class App {
   public static void main(String[] args) throws Exception {
     Set<String> argsSet = new HashSet<>(Arrays.asList(args));
 
+    String debug = System.getenv("PYJINN_DEBUG");
+    if (debug != null && !debug.equals("") && !debug.equals("0")) {
+      Script.setDebugLogger((message, params) -> System.out.printf(message + "\n", params));
+      Script.setVerboseDebugging(true);
+    }
+
     boolean compile = !argsSet.contains("--no-compile");
     if (!compile) {
       argsSet.remove("--no-compile");
@@ -36,12 +42,6 @@ public class App {
         new BufferedReader(new InputStreamReader(System.in))
             .lines()
             .collect(Collectors.joining("\n"));
-
-    String debug = System.getenv("PYJINN_DEBUG");
-    if (debug != null && !debug.equals("") && !debug.equals("0")) {
-      Script.setDebugLogger((message, params) -> System.out.printf(message + "\n", params));
-      Script.setVerboseDebugging(true);
-    }
 
     JsonElement jsonAst = null;
     if (argsSet.contains("read-ast")) {
