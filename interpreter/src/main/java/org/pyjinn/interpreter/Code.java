@@ -54,11 +54,6 @@ public class Code {
       return instructions.get(i);
     }
 
-    public int addPlaceholder() {
-      instructions.add(null);
-      return instructions.size() - 1;
-    }
-
     public Instruction set(int i, Instruction instruction) {
       return instructions.set(i, instruction);
     }
@@ -71,6 +66,16 @@ public class Code {
     private void add(Instruction instruction) {
       instructions.add(instruction);
     }
+
+    public String toStringWithInstructionPointer(int ip) {
+      var output = new StringBuilder();
+      for (int i = 0; i < size(); ++i) {
+        var instruction = get(i);
+        String prefix = i == ip ? "> " : "  ";
+        output.append("%s[%d] %s\n".formatted(prefix, i, instruction));
+      }
+      return output.toString();
+    }
   }
 
   List<LineInfo> getLineInfos() {
@@ -81,11 +86,8 @@ public class Code {
     return instructions;
   }
 
-  int addPlaceholder() {
-    return instructions.addPlaceholder();
-  }
-
-  void addInstruction(int lineno, Instruction instruction) {
+  /** Adds an instruction, returning the instruction pointer of the added instruction. */
+  int addInstruction(int lineno, Instruction instruction) {
     int pos = instructions.size();
     if (lineInfos.isEmpty()) {
       lineInfos.add(new LineInfo(pos, pos, lineno));
@@ -101,6 +103,7 @@ public class Code {
       }
     }
     instructions.add(instruction);
+    return pos;
   }
 
   void registerExceptionalJump(

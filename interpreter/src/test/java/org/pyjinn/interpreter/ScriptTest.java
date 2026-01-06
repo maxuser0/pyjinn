@@ -1038,6 +1038,31 @@ public class ScriptTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {true, false})
+  public void exceptionInLoop(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        normal_output = []
+        for i in (-1, 0, 1):
+          try:
+            if i == 0:
+              None.foo()
+            else:
+              normal_output.append(i)
+          except:
+            exception_output = f"Caught exception for {i=}"
+        """);
+
+    var normalOutput = getVariable(Script.PyjList.class, "normal_output");
+    assertEquals(2, normalOutput.__len__());
+    assertEquals(-1, normalOutput.__getitem__(0));
+    assertEquals(1, normalOutput.__getitem__(1));
+
+    assertEquals("Caught exception for i=0", getVariable("exception_output"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
   public void methodCalls(boolean compile) throws Exception {
     execute(
         compile,

@@ -6709,11 +6709,7 @@ public class Script {
 
     public void debugLogInstructions() {
       if (debug && code != null) {
-        for (int i = 0; i < code.instructions().size(); ++i) {
-          var instruction = code.instructions().get(i);
-          String prefix = i == ip ? "> " : "  ";
-          logger.log("%s[%d] %s", prefix, i, instruction);
-        }
+        logger.log(code.instructions().toStringWithInstructionPointer(ip));
       }
     }
 

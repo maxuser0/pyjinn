@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
-import org.pyjinn.interpreter.Code.InstructionList;
+import org.pyjinn.interpreter.Instruction.JumpPlaceholder;
 import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
@@ -42,27 +42,23 @@ class Compiler {
     this.withinFunction = withinFunction;
   }
 
-  // Interface for deferring creation of a jump instruction.
-  interface Instructor {
-    Instruction createInstruction(int jumpTarget);
-  }
+  private record DeferredJump(int source, JumpPlaceholder placeholder) {}
 
-  private record DeferredJump(int source, Instructor instructor) {}
-
-  private record DeferredJumpList(List<DeferredJump> jumps, InstructionList instructions) {
-    DeferredJumpList(InstructionList instructions) {
-      this(new ArrayList<>(), instructions);
+  private record DeferredJumpList(List<DeferredJump> jumps, Code code) {
+    DeferredJumpList(Code code) {
+      this(new ArrayList<>(), code);
     }
 
-    void createDeferredJump(Instructor instructor) {
-      int jumpSource = instructions.addPlaceholder();
-      jumps.add(new DeferredJump(jumpSource, instructor));
+    void createDeferredJump(int lineno, JumpPlaceholder placeholder) {
+      int jumpSource = code.instructions().size();
+      code.addInstruction(lineno, placeholder);
+      jumps.add(new DeferredJump(jumpSource, placeholder));
     }
 
     void finalizeJumps() {
-      int jumpTarget = instructions.size();
+      int jumpTarget = code.instructions().size();
       for (var jump : jumps) {
-        instructions.set(jump.source, jump.instructor.createInstruction(jumpTarget));
+        code.instructions().set(jump.source, jump.placeholder.createJumpTo(jumpTarget));
       }
     }
   }
@@ -72,14 +68,14 @@ class Compiler {
     public final int continueTarget;
     private final DeferredJumpList deferredBreaks;
 
-    public LoopState(LoopType type, InstructionList instructions) {
+    public LoopState(LoopType type, Code code) {
       this.type = type;
-      continueTarget = instructions.size();
-      deferredBreaks = new DeferredJumpList(instructions);
+      continueTarget = code.instructions().size();
+      deferredBreaks = new DeferredJumpList(code);
     }
 
-    public void addBreak(Instructor breakInstructor) {
-      deferredBreaks.createDeferredJump(breakInstructor);
+    public void addBreak(int lineno, JumpPlaceholder breakPlaceholder) {
+      deferredBreaks.createDeferredJump(lineno, breakPlaceholder);
     }
 
     public void close() {
@@ -91,11 +87,11 @@ class Compiler {
     return loops.peek();
   }
 
-  private void addBreak(Instructor breakInstructor) {
+  private void addBreak(JumpPlaceholder breakPlaceholder) {
     if (loops.isEmpty()) {
       throw new IllegalStateException("break statement outside of loop");
     }
-    loop().addBreak(breakInstructor);
+    loop().addBreak(lineno, breakPlaceholder);
   }
 
   private int continueTarget() {
@@ -233,20 +229,24 @@ class Compiler {
     var instructions = code.instructions();
     compileExpression(ifBlock.condition(), code);
 
-    // Add a placeholder null instruction to be filled in below when the jump target is known.
-    int jumpIfBlockSource = instructions.addPlaceholder();
+    // Add a placeholder instruction to be filled in below when the jump target is known.
+    var jumpIfPlaceholder = new Instruction.PopJumpIfFalse.Placeholder();
+    int jumpIfBlockSource = code.addInstruction(lineno, jumpIfPlaceholder);
+
     compileStatement(ifBlock.thenBody(), code);
 
     if (ifBlock.elseBody().isEmpty()) {
       int jumpIfBlockTarget = instructions.size();
-      instructions.set(jumpIfBlockSource, new Instruction.PopJumpIfFalse(jumpIfBlockTarget));
+      instructions.set(jumpIfBlockSource, jumpIfPlaceholder.createJumpTo(jumpIfBlockTarget));
     } else {
-      int jumpElseBlockSource = code.addPlaceholder();
+      var jumpElsePlaceholder = new Instruction.Jump.Placeholder();
+      int jumpElseBlockSource = code.addInstruction(lineno, jumpElsePlaceholder);
+
       int jumpIfBlockTarget = instructions.size();
       compileStatement(ifBlock.elseBody().get(), code);
       int jumpElseBlockTarget = instructions.size();
-      instructions.set(jumpIfBlockSource, new Instruction.PopJumpIfFalse(jumpIfBlockTarget));
-      instructions.set(jumpElseBlockSource, new Instruction.Jump(jumpElseBlockTarget));
+      instructions.set(jumpIfBlockSource, jumpIfPlaceholder.createJumpTo(jumpIfBlockTarget));
+      instructions.set(jumpElseBlockSource, jumpElsePlaceholder.createJumpTo(jumpElseBlockTarget));
     }
   }
 
@@ -264,9 +264,9 @@ class Compiler {
     // `continue` in BODY -> Jump 0
     // `break` in BODY -> Jump 4
 
-    loops.push(new LoopState(LoopType.WHILE, code.instructions()));
+    loops.push(new LoopState(LoopType.WHILE, code));
     compileExpression(whileBlock.condition(), code);
-    addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget));
+    addBreak(new Instruction.PopJumpIfFalse.Placeholder());
     compileStatement(whileBlock.body(), code);
     code.addInstruction(lineno, new Instruction.Jump(continueTarget()));
     loops.pop().close();
@@ -304,9 +304,9 @@ class Compiler {
 
     compileExpression(forBlock.iter(), code); // [0]
     code.addInstruction(lineno, new Instruction.IterableIterator()); // [1]
-    loops.push(new LoopState(LoopType.FOR, code.instructions()));
+    loops.push(new LoopState(LoopType.FOR, code));
     code.addInstruction(lineno, new Instruction.IteratorHasNext()); // [2]
-    addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget)); // [3]
+    addBreak(new Instruction.PopJumpIfFalse.Placeholder()); // [3]
     code.addInstruction(lineno, new Instruction.IteratorNext()); // [4]
     code.addInstruction(lineno, iterVarAssignment); // [5]
     compileStatement(forBlock.body(), code); // [6]
@@ -318,27 +318,34 @@ class Compiler {
   private void compileTryBlock(TryBlock tryBlock, Code code) {
     var instructions = code.instructions();
     boolean hasFinally = tryBlock.finallyBlock().isPresent();
-    var jumpsToFinally = hasFinally ? new DeferredJumpList(instructions) : null;
-    var jumpsPastExceptionHandlers = hasFinally ? null : new DeferredJumpList(instructions);
+    var jumpsToFinally = hasFinally ? new DeferredJumpList(code) : null;
+    var jumpsPastExceptionHandlers = hasFinally ? null : new DeferredJumpList(code);
     var exceptionHandlers = tryBlock.exceptionHandlers();
     int numHandlers = exceptionHandlers.size();
 
     int blockStart = instructions.size();
-    compileStatement(tryBlock.tryBody(), code);
-    int blockEnd = instructions.size();
-
     int initialStackDepth = 0;
     for (int i = 0; i < blockStart; ++i) {
+      if (instructions.get(i) == null) {
+        throw new RuntimeException(
+            "Instruction at index "
+                + i
+                + " is null:\n"
+                + instructions.toStringWithInstructionPointer(i));
+      }
       initialStackDepth += instructions.get(i).stackOffset();
     }
+
+    compileStatement(tryBlock.tryBody(), code);
+    int blockEnd = instructions.size();
 
     // No need to jump to finally unless there are except handlers between try and finally.
     if (hasFinally) {
       if (numHandlers > 0) {
-        jumpsToFinally.createDeferredJump(Instruction.Jump::new);
+        jumpsToFinally.createDeferredJump(lineno, new Instruction.Jump.Placeholder());
       }
     } else {
-      jumpsPastExceptionHandlers.createDeferredJump(Instruction.Jump::new);
+      jumpsPastExceptionHandlers.createDeferredJump(lineno, new Instruction.Jump.Placeholder());
     }
 
     for (int i = 0; i < numHandlers; ++i) {
@@ -372,9 +379,9 @@ class Compiler {
       code.addInstruction(lineno, new Instruction.SwallowException());
       if (!isLastHandler) {
         if (hasFinally) {
-          jumpsToFinally.createDeferredJump(Instruction.Jump::new);
+          jumpsToFinally.createDeferredJump(lineno, new Instruction.Jump.Placeholder());
         } else {
-          jumpsPastExceptionHandlers.createDeferredJump(Instruction.Jump::new);
+          jumpsPastExceptionHandlers.createDeferredJump(lineno, new Instruction.Jump.Placeholder());
         }
       }
     }
@@ -424,7 +431,7 @@ class Compiler {
   }
 
   private void compileBreakStatement(Break breakStatement) {
-    addBreak(breakTarget -> new Instruction.Jump(breakTarget));
+    addBreak(new Instruction.Jump.Placeholder());
   }
 
   private void compileReturnStatement(ReturnStatement returnStatement, Code code) {
@@ -580,21 +587,22 @@ class Compiler {
       // [5] ...
 
       var values = boolOp.values();
-      var placeholderJumps = new ArrayList<Integer>();
+      var placeholderJump =
+          boolOp.op() == BoolOp.Op.AND
+              ? new Instruction.JumpIfFalseOrPop.Placeholder()
+              : new Instruction.JumpIfTrueOrPop.Placeholder();
+      var placeholderJumpPositions = new ArrayList<Integer>();
 
       compileExpression(values.get(0), code);
       for (int i = 1; i < values.size(); ++i) {
-        placeholderJumps.add(code.addPlaceholder());
+        placeholderJumpPositions.add(code.addInstruction(lineno, placeholderJump));
         compileExpression(boolOp.values().get(i), code);
       }
 
       var instructions = code.instructions();
       int jumpTarget = instructions.size();
-      var jumpInstruction =
-          boolOp.op() == BoolOp.Op.AND
-              ? new Instruction.JumpIfFalseOrPop(jumpTarget)
-              : new Instruction.JumpIfTrueOrPop(jumpTarget);
-      for (int jumpSource : placeholderJumps) {
+      var jumpInstruction = placeholderJump.createJumpTo(jumpTarget);
+      for (int jumpSource : placeholderJumpPositions) {
         instructions.set(jumpSource, jumpInstruction);
       }
     } else if (expr instanceof IfExpression ifExpr) {
@@ -609,19 +617,22 @@ class Compiler {
       // Note that each "eval" operation may expand to multiple instructions.
       compileExpression(ifExpr.test(), code);
 
-      int elseJumpSource = code.addPlaceholder();
+      var elseJumpPlaceholder = new Instruction.PopJumpIfFalse.Placeholder();
+      int elseJumpSource = code.addInstruction(lineno, elseJumpPlaceholder);
 
       compileExpression(ifExpr.body(), code);
 
-      int skipElseJumpSource = code.addPlaceholder();
+      var skipElseJumpPlaceholder = new Instruction.Jump.Placeholder();
+      int skipElseJumpSource = code.addInstruction(lineno, skipElseJumpPlaceholder);
 
       var instructions = code.instructions();
       int atElseJumpTarget = instructions.size();
       compileExpression(ifExpr.orElse(), code);
       int afterElseJumpTarget = instructions.size();
 
-      instructions.set(elseJumpSource, new Instruction.PopJumpIfFalse(atElseJumpTarget));
-      instructions.set(skipElseJumpSource, new Instruction.Jump(afterElseJumpTarget));
+      instructions.set(elseJumpSource, elseJumpPlaceholder.createJumpTo(atElseJumpTarget));
+      instructions.set(
+          skipElseJumpSource, skipElseJumpPlaceholder.createJumpTo(afterElseJumpTarget));
     } else if (expr instanceof ListComprehension listComp) {
       // source: [TRANSFORM for TARGET in ITER if IFS[0]...]
       var vars = listComp.target();
@@ -640,9 +651,9 @@ class Compiler {
       listCompCode.addInstruction(lineno, new Instruction.LoadList(0));
       compileExpression(listComp.iter(), listCompCode);
       listCompCode.addInstruction(lineno, new Instruction.IterableIterator());
-      loops.push(new LoopState(LoopType.FOR, listCompCode.instructions()));
+      loops.push(new LoopState(LoopType.FOR, listCompCode));
       listCompCode.addInstruction(lineno, new Instruction.IteratorHasNext());
-      addBreak(breakTarget -> new Instruction.PopJumpIfFalse(breakTarget));
+      addBreak(new Instruction.PopJumpIfFalse.Placeholder());
       listCompCode.addInstruction(lineno, new Instruction.IteratorNext());
       listCompCode.addInstruction(lineno, iterVarAssignment);
       for (var ifClause : listComp.ifs()) {

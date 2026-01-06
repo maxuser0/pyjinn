@@ -29,6 +29,15 @@ sealed interface Instruction {
     return 0;
   }
 
+  sealed interface JumpPlaceholder extends Instruction {
+    @Override
+    default Context execute(Context context) {
+      throw new UnsupportedOperationException("Placeholder instruction cannot be executed");
+    }
+
+    Instruction createJumpTo(int jumpTarget);
+  }
+
   record PushData(Object value) implements Instruction {
     @Override
     public Context execute(Context context) {
@@ -790,6 +799,20 @@ sealed interface Instruction {
   }
 
   record PopJumpIfFalse(int jumpTarget) implements Instruction {
+    public static final int STACK_OFFSET = -1;
+
+    record Placeholder() implements JumpPlaceholder {
+      @Override
+      public Instruction createJumpTo(int jumpTarget) {
+        return new PopJumpIfFalse(jumpTarget);
+      }
+
+      @Override
+      public int stackOffset() {
+        return STACK_OFFSET;
+      }
+    }
+
     @Override
     public Context execute(Context context) {
       var condition = context.popData();
@@ -803,11 +826,25 @@ sealed interface Instruction {
 
     @Override
     public int stackOffset() {
-      return -1;
+      return STACK_OFFSET;
     }
   }
 
   record JumpIfTrueOrPop(int jumpTarget) implements Instruction {
+    public static final int STACK_OFFSET = -1;
+
+    record Placeholder() implements JumpPlaceholder {
+      @Override
+      public Instruction createJumpTo(int jumpTarget) {
+        return new JumpIfTrueOrPop(jumpTarget);
+      }
+
+      @Override
+      public int stackOffset() {
+        return STACK_OFFSET;
+      }
+    }
+
     @Override
     public Context execute(Context context) {
       var value = context.peekData();
@@ -822,11 +859,25 @@ sealed interface Instruction {
 
     @Override
     public int stackOffset() {
-      return -1;
+      return STACK_OFFSET;
     }
   }
 
   record JumpIfFalseOrPop(int jumpTarget) implements Instruction {
+    public static final int STACK_OFFSET = -1;
+
+    record Placeholder() implements JumpPlaceholder {
+      @Override
+      public Instruction createJumpTo(int jumpTarget) {
+        return new JumpIfFalseOrPop(jumpTarget);
+      }
+
+      @Override
+      public int stackOffset() {
+        return STACK_OFFSET;
+      }
+    }
+
     @Override
     public Context execute(Context context) {
       var value = context.peekData();
@@ -841,15 +892,34 @@ sealed interface Instruction {
 
     @Override
     public int stackOffset() {
-      return -1;
+      return STACK_OFFSET;
     }
   }
 
   record Jump(int jumpTarget) implements Instruction {
+    public static final int STACK_OFFSET = 0;
+
+    record Placeholder() implements JumpPlaceholder {
+      @Override
+      public Instruction createJumpTo(int jumpTarget) {
+        return new Jump(jumpTarget);
+      }
+
+      @Override
+      public int stackOffset() {
+        return STACK_OFFSET;
+      }
+    }
+
     @Override
     public Context execute(Context context) {
       context.ip = jumpTarget;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return STACK_OFFSET;
     }
   }
 
