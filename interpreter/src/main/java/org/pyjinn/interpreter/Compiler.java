@@ -145,6 +145,8 @@ class Compiler {
       compileDeletion(deletion, code);
     } else if (statement instanceof GlobalVarDecl globalVarDecl) {
       code.addInstruction(lineno, new Instruction.GlobalVarDecl(globalVarDecl.globalVars()));
+    } else if (statement instanceof Pass) {
+      code.addInstruction(lineno, new Instruction.Nop());
     } else {
       throw new IllegalArgumentException("Unsupported statement type: " + statement.getClass());
     }

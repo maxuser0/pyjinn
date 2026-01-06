@@ -579,6 +579,15 @@ sealed interface Instruction {
     }
   }
 
+  record Nop() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      // Do nothing but advance the instruction pointer.
+      ++context.ip;
+      return context;
+    }
+  }
+
   record FormattedString(int numValues) implements Instruction {
     @Override
     public Context execute(Context context) {
