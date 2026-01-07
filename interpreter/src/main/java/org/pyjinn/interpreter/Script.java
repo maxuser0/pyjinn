@@ -892,7 +892,7 @@ public class Script {
             var generator = getAttr(element, "generators").getAsJsonArray().get(0);
             var generatorType = getType(generator);
             if (!generatorType.equals("comprehension")) {
-              throw new UnsupportedOperationException(
+              throw new IllegalArgumentException(
                   "Unsupported expression type in list comprehension: " + generatorType);
             }
             return new ListComprehension(
@@ -1329,7 +1329,7 @@ public class Script {
           context.set(nameParts[0], object);
         }
       } catch (Exception e) {
-        throw new RuntimeException(e);
+        throw new PyjException(e);
       }
     }
   }
@@ -1356,7 +1356,7 @@ public class Script {
           }
         }
       } catch (Exception e) {
-        throw new RuntimeException(e);
+        throw new PyjException(e);
       }
     }
   }
@@ -2011,12 +2011,7 @@ public class Script {
       } catch (Exception e) {
         // PyjException exists only to prevent all eval/exec/invoke methods from declaring that they
         // throw Exception.  Unwrap the underlying exception here.
-        final Object exception;
-        if (e instanceof PyjException pe) {
-          exception = pe.thrown;
-        } else {
-          exception = e;
-        }
+        Object exception = PyjException.unwrap(e);
         boolean handled = false;
         for (var handler : exceptionHandlers) {
           var exceptionType = handler.exceptionTypeSpec().map(t -> t.eval(context));
@@ -2099,19 +2094,6 @@ public class Script {
             out.append("  " + fb.toString().replaceAll("\n", "\n  ") + "\n");
           });
       return out.toString();
-    }
-  }
-
-  /**
-   * RuntimeException subclass that allows arbitrary Exception types to be thrown without requiring
-   * all eval/exec/invoke methods to declare that they throw Exception.
-   */
-  public static class PyjException extends RuntimeException {
-    public final Object thrown;
-
-    public PyjException(Object thrown) {
-      super(PyjObjects.toString(thrown));
-      this.thrown = thrown;
     }
   }
 
@@ -2602,9 +2584,9 @@ public class Script {
         && lhs.getClass() == rhs.getClass()) {
       return lhsComp.compareTo(rhs);
     }
-    throw new UnsupportedOperationException(
+    throw new IllegalArgumentException(
         String.format(
-            "Comparison op not implemented for types: %s %s %s",
+            "Comparison op not supported for types: %s %s %s",
             getSimpleTypeName(lhs), op, getSimpleTypeName(rhs)));
   }
 
@@ -3146,7 +3128,8 @@ public class Script {
             Stream.of(start, stop, step)
                 .map(x -> x.map(Object::toString).orElse(""))
                 .collect(joining(":", "[", "]"));
-        throw new RuntimeException("Slice indices must be integers but got: %s".formatted(string));
+        throw new IllegalArgumentException(
+            "Slice indices must be integers but got: %s".formatted(string));
       }
     }
   }
@@ -5111,7 +5094,7 @@ public class Script {
       try {
         return ctor.newInstance(env, params);
       } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-        throw new RuntimeException(e);
+        throw new PyjException(e);
       }
     }
   }
@@ -5895,7 +5878,7 @@ public class Script {
         try {
           return matchedMethod.get().invoke(env, object, params);
         } catch (IllegalAccessException | InvocationTargetException e) {
-          throw new RuntimeException(e);
+          throw new PyjException(e);
         }
       } else {
         // Re-run type checker with the same args but with error diagnostics for creating exception.
@@ -6379,7 +6362,7 @@ public class Script {
       try {
         return memberAccessor.from(objectValue);
       } catch (ReflectiveOperationException e) {
-        throw new RuntimeException(e);
+        throw new PyjException(e);
       }
     }
 

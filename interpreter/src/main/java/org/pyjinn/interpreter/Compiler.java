@@ -141,6 +141,8 @@ class Compiler {
       compileBreakStatement(breakStatement);
     } else if (statement instanceof ReturnStatement returnStatement) {
       compileReturnStatement(returnStatement, code);
+    } else if (statement instanceof RaiseStatement raiseStatement) {
+      compileRaiseStatement(raiseStatement, code);
     } else if (statement instanceof Deletion deletion) {
       compileDeletion(deletion, code);
     } else if (statement instanceof GlobalVarDecl globalVarDecl) {
@@ -449,6 +451,11 @@ class Compiler {
 
     compileExpression(returnStatement.returnValue(), code);
     code.addInstruction(lineno, new Instruction.FunctionReturn());
+  }
+
+  private void compileRaiseStatement(RaiseStatement raiseStatement, Code code) {
+    compileExpression(raiseStatement.exception(), code);
+    code.addInstruction(lineno, new Instruction.RaiseException());
   }
 
   private void compileDeletion(Deletion deletion, Code code) {

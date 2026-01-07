@@ -1063,6 +1063,40 @@ public class ScriptTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {true, false})
+  public void exceptClauses(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        Math = JavaClass("java.lang.Math")
+        NullPointerException = JavaClass("java.lang.NullPointerException")
+        ArithmeticException = JavaClass("java.lang.ArithmeticException")
+        UnsupportedOperationException = JavaClass("java.lang.UnsupportedOperationException")
+
+        def call_func(f, *args):
+          try:
+            f(*args)
+            return "no exception"
+          except ArithmeticException as e:
+            return "caught ArithmeticException"
+          except NullPointerException as e:
+            return "caught NullPointerException"
+          except UnsupportedOperationException as e:
+            return "caught UnsupportedOperationException"
+          except Exception as e:
+            return "caught Exception"
+
+        arithmetic = call_func(lambda x, y: Math.floorDiv(x, y), 7, 0)
+        null_pointer = call_func(lambda: None.foo)
+        unsupported_op = call_func(lambda x, y: x + y, None, 2)
+        """);
+
+    assertEquals("caught ArithmeticException", getVariable("arithmetic"));
+    assertEquals("caught NullPointerException", getVariable("null_pointer"));
+    assertEquals("caught UnsupportedOperationException", getVariable("unsupported_op"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
   public void methodCalls(boolean compile) throws Exception {
     execute(
         compile,

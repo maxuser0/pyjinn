@@ -274,6 +274,19 @@ sealed interface Instruction {
     }
   }
 
+  record RaiseException() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var exception = context.popData();
+      throw new PyjException(exception);
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
+  }
+
   record CreateFunction(FunctionDef function, Code code) implements Instruction {
     @Override
     public Context execute(Context context) {
@@ -940,9 +953,10 @@ sealed interface Instruction {
             "Trying to execute 'except' clause with no active exception in this calling context");
       }
       var exceptionTypeSpec = context.popData();
+      var unwrappedException = PyjException.unwrap(context.exception);
       if (TryBlock.matchesExceptionSpec(
-          exceptionTypeSpec, context.exception, /* allowTuple= */ true)) {
-        variableName.ifPresent(e -> context.set(e, context.exception));
+          exceptionTypeSpec, unwrappedException, /* allowTuple= */ true)) {
+        variableName.ifPresent(e -> context.set(e, unwrappedException));
         context.exception = null;
       } else {
         throw context.exception;
