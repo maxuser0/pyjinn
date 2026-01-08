@@ -82,7 +82,7 @@ public class Code {
     return lineInfos;
   }
 
-  InstructionList instructions() {
+  public InstructionList instructions() {
     return instructions;
   }
 

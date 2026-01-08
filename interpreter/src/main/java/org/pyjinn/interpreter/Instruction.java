@@ -87,7 +87,7 @@ sealed interface Instruction {
         }
       }
       var function = context.popData();
-      return call(context, function, params);
+      return call(filename, lineno, context, function, params);
     }
 
     @Override
@@ -95,7 +95,12 @@ sealed interface Instruction {
       return -numArgs + 1; // +1 for return value
     }
 
-    private Context call(Context context, Object caller, Object[] params) {
+    public static Context debugCall(Context context, Object caller, Object[] params) {
+      return call(/* filename= */ "", /* lineno= */ -1, context, caller, params);
+    }
+
+    private static Context call(
+        String filename, int lineno, Context context, Object caller, Object[] params) {
       List<Object> paramValues = resolveParams(params);
       if (caller instanceof Class<?> type) {
         Function function;
@@ -112,7 +117,8 @@ sealed interface Instruction {
       if (caller instanceof LenFunction && paramValues.size() == 1) {
         var function = getMethod(paramValues.get(0), "__len__");
         if (function != null) {
-          return executeCompiledFunction(context, function, paramValues.toArray());
+          return executeCompiledFunction(
+              filename, lineno, context, function, paramValues.toArray());
         }
       }
 
@@ -122,7 +128,8 @@ sealed interface Instruction {
         var methodParams = new ArrayList<Object>(paramValues.size() + 1);
         methodParams.add(caller);
         methodParams.addAll(paramValues);
-        return executeCompiledFunction(context, callMethod, methodParams.toArray());
+        return executeCompiledFunction(
+            filename, lineno, context, callMethod, methodParams.toArray());
       }
 
       // Effective caller may be a function that's being delegated to.
@@ -136,7 +143,8 @@ sealed interface Instruction {
           var methodParams = new ArrayList<Object>(paramValues.size() + 1);
           methodParams.add(pyjObject);
           methodParams.addAll(paramValues);
-          return executeCompiledFunction(context, function, methodParams.toArray());
+          return executeCompiledFunction(
+              filename, lineno, context, function, methodParams.toArray());
         }
 
         // If PyjObject's field is assigned to a function, make that function the effective caller.
@@ -148,7 +156,7 @@ sealed interface Instruction {
 
       // Specialize handling of BoundFunction so instructions can be interrupted.
       if (effectiveCaller instanceof BoundFunction function) {
-        return executeCompiledFunction(context, function, paramValues.toArray());
+        return executeCompiledFunction(filename, lineno, context, function, paramValues.toArray());
       }
 
       if (effectiveCaller instanceof Function function) {
@@ -227,11 +235,6 @@ sealed interface Instruction {
         paramValues.add(kwargsMap);
       }
       return paramValues;
-    }
-
-    private Context executeCompiledFunction(
-        Context context, BoundFunction function, Object[] params) {
-      return executeCompiledFunction(filename, lineno, context, function, params);
     }
 
     // TODO(maxuser): Convert uses of this method to executeCompiledFunction() with an accurate
@@ -383,6 +386,20 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       context.pushData(javaClassCall.eval(context));
+      ++context.ip;
+      return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
+  }
+
+  record ContextIdentifier() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.pushData(context);
       ++context.ip;
       return context;
     }

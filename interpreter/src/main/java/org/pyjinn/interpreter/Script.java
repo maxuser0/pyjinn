@@ -814,6 +814,8 @@ public class Script {
             Identifier id = getId(element);
             if (id.name().equals("JavaClass")) {
               return new JavaClassKeyword();
+            } else if (id.name().equals("__context__")) {
+              return new ContextIdentifier();
             } else {
               return id;
             }
@@ -4875,6 +4877,18 @@ public class Script {
     }
   }
 
+  public record ContextIdentifier() implements Expression {
+    @Override
+    public Object eval(Context context) {
+      return context;
+    }
+
+    @Override
+    public String toString() {
+      return "__context__";
+    }
+  }
+
   public interface Function {
     Object call(Environment env, Object... params);
 
@@ -6648,8 +6662,8 @@ public class Script {
     protected final PyjDict vars = new PyjDict();
 
     private List<Object> dataStack = new ArrayList<>();
-    Code code = null;
-    int ip = 0; // instruction pointer
+    public Code code = null;
+    public int ip = 0; // instruction pointer
 
     public RuntimeException exception; // Set when an exception is active in this context.
 

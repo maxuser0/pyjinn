@@ -523,6 +523,8 @@ class Compiler {
       code.addInstruction(lineno, new Instruction.Constant(constant.value()));
     } else if (expr instanceof JavaClassCall javaClassCall) {
       code.addInstruction(lineno, new Instruction.LoadJavaClass(javaClassCall));
+    } else if (expr instanceof ContextIdentifier) {
+      code.addInstruction(lineno, new Instruction.ContextIdentifier());
     } else if (expr instanceof UnaryOp unaryOp) {
       compileExpression(unaryOp.operand(), code);
       code.addInstruction(lineno, new Instruction.UnaryOp(unaryOp.op()));
