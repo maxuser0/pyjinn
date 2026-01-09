@@ -1123,10 +1123,30 @@ public class Script {
         return null;
       }
 
-      // TODO(maxuser)! Check if ((Context) env).code is non-null and execute it with VM.
-      var localContext = initLocalContext(/* callingContext= */ null, params, isCtor);
-      localContext.exec(function.body);
-      return localContext.returnValue();
+      if (code == null) {
+        // AST tree-walk evaluation.
+        var localContext = initLocalContext(/* callingContext= */ null, params, isCtor);
+        localContext.exec(function.body);
+        return localContext.returnValue();
+      } else {
+        // Virtual machine instruction execution.
+        var callingContext = (Context) env;
+        var context =
+            Instruction.FunctionCall.executeCompiledFunction(
+                function.enclosingClassName(), function.lineno(), callingContext, this, params);
+
+        var vm = VirtualMachine.getInstance();
+        while (context != callingContext && vm.hasMoreInstructions(context)) {
+          context = vm.executeNextInstruction(context);
+        }
+        if (context == callingContext) {
+          // Return value was pushed onto the calling context's data stack by FunctionReturn
+          // instruction executed within the local context created within executeCompiledFunction().
+          return callingContext.popData();
+        } else {
+          throw new IllegalStateException("Unexpected context returning from function " + this);
+        }
+      }
     }
 
     boolean isHalted() {
