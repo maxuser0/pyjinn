@@ -417,6 +417,7 @@ class Compiler {
 
   private void compileDataclassDefaultInit(DataclassDefaultInit dataclassInit, Code code) {
     code.addInstruction(lineno, new Instruction.DataclassDefaultInit(dataclassInit));
+    code.addInstruction(lineno, new Instruction.FunctionReturn());
   }
 
   private Code compileFunction(FunctionDef function) {

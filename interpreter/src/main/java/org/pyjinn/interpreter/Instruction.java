@@ -135,8 +135,22 @@ sealed interface Instruction {
       // Effective caller may be a function that's being delegated to.
       var effectiveCaller = caller;
 
+      // Specialize handling of CtorFunction so instructions can be interrupted.
+      if (effectiveCaller instanceof Script.PyjClass pyjClass) {
+        if (pyjClass.ctor instanceof CtorFunction ctor) {
+          var ctorParams = new ArrayList<Object>(paramValues.size() + 1);
+          ctorParams.add(new PyjObject(pyjClass));
+          ctorParams.addAll(paramValues);
+          return executeCompiledFunction(
+              filename, lineno, context, ctor.function(), ctorParams.toArray());
+        }
+        if (pyjClass.ctor instanceof BoundFunction func) {
+          return executeCompiledFunction(filename, lineno, context, func, paramValues.toArray());
+        }
+      }
+
       // Specialize handling of BoundMethod so instructions can be interrupted.
-      if (caller instanceof Script.BoundMethod binding
+      if (effectiveCaller instanceof Script.BoundMethod binding
           && binding.object() instanceof PyjObject pyjObject) {
         var method = pyjObject.__class__.instanceMethods.get(binding.methodName());
         if (method != null && method instanceof BoundFunction function) {
@@ -253,7 +267,8 @@ sealed interface Instruction {
         return context;
       } else {
         context.enterFunction(filename, lineno);
-        var localContext = function.initLocalContext(/* callingContext= */ context, params);
+        var localContext =
+            function.initLocalContext(/* callingContext= */ context, params, function.isCtor());
         localContext.code = function.code();
         return localContext;
       }
@@ -264,7 +279,7 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       context.leaveFunction();
-      var returnValue = context.popData();
+      var returnValue = context.checkCtorResult(context.popData());
       var callingContext = context.callingContext();
       callingContext.pushData(returnValue);
       ++callingContext.ip;

@@ -65,7 +65,12 @@ public class Script {
     JavaClass.install(new StrClass());
   }
 
-  private record ClassMethodName(String type, String method) {}
+  record ClassMethodName(String type, String method) {
+    @Override
+    public String toString() {
+      return "%s.%s".formatted(type, method);
+    }
+  }
 
   private record CallSite(ClassMethodName classMethodName, String filename, int lineno) {
     @Override
@@ -1078,6 +1083,7 @@ public class Script {
       Context enclosingContext,
       List<Object> defaults,
       Code code,
+      boolean isCtor, // If true, require null return value and swap new instance in its place.
       AtomicInteger zombieCounter)
       implements Function {
     public BoundFunction(FunctionDef function, Context enclosingContext) {
@@ -1086,6 +1092,7 @@ public class Script {
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
           /* code= */ null,
+          /* isCtor= */ false,
           new AtomicInteger());
     }
 
@@ -1095,6 +1102,18 @@ public class Script {
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
           code,
+          /* isCtor= */ false,
+          new AtomicInteger());
+    }
+
+    public BoundFunction(
+        FunctionDef function, Context enclosingContext, Code code, boolean isCtor) {
+      this(
+          function,
+          enclosingContext,
+          function.evalArgDefaults(enclosingContext),
+          code,
+          isCtor,
           new AtomicInteger());
     }
 
@@ -1103,10 +1122,9 @@ public class Script {
       if (isHalted()) {
         return null;
       }
-      // TODO(maxuser): Either change the in-script call to this call() method to somehow pass the
-      // callingContext or eliminate this tree-walk implementation in favor of the compiled form in
-      // Instruction.java.
-      var localContext = initLocalContext(/* callingContext= */ null, params);
+
+      // TODO(maxuser)! Check if ((Context) env).code is non-null and execute it with VM.
+      var localContext = initLocalContext(/* callingContext= */ null, params, isCtor);
       localContext.exec(function.body);
       return localContext.returnValue();
     }
@@ -1125,10 +1143,23 @@ public class Script {
       }
     }
 
-    Context initLocalContext(Context callingContext, Object[] params) {
+    Context initLocalContext(Context callingContext, Object[] params, boolean isCtor) {
       var localContext =
           enclosingContext.createLocalContext(
               callingContext, function.enclosingClassName, function.identifier.name());
+
+      if (isCtor) {
+        if (params.length == 0) {
+          throw new IllegalArgumentException(
+              "Constructor %s should take at least one parameter, but %d were given"
+                  .formatted(function.identifier().name(), params.length));
+        }
+        if (params[0] == null) {
+          throw new IllegalArgumentException(
+              "First param to %s (constructor) is None".formatted(function.identifier().name()));
+        }
+        localContext.ctorResult = params[0];
+      }
 
       final List<FunctionArg> args = function.args;
       int numParams = params.length;
@@ -1422,7 +1453,9 @@ public class Script {
         if ("__init__".equals(methodName)) {
           ctor =
               new CtorFunction(
-                  type, new BoundFunction(methodDef, context, compiler.compile(methodDef)));
+                  type,
+                  new BoundFunction(
+                      methodDef, context, compiler.compile(methodDef), /* isCtor= */ true));
           instanceMethods.put(methodName, ctor);
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("classmethod"))) {
           classLevelMethods.put(
@@ -6653,6 +6686,7 @@ public class Script {
     private Set<String> globalVarNames = null;
     private Set<String> nonlocalVarNames = null;
     private Object returnValue;
+    private Object ctorResult; // Non-null if this is a ctor.
     private boolean returned = false;
     private int loopDepth = 0;
     private boolean breakingLoop = false;
@@ -6742,6 +6776,19 @@ public class Script {
 
     public void leaveFunction() {
       globals.getCallStack().pop();
+    }
+
+    public Object checkCtorResult(Object returnValue) {
+      if (ctorResult == null) {
+        return returnValue;
+      } else {
+        if (returnValue != null) {
+          throw new IllegalArgumentException(
+              "%s() should return None, not '%s'"
+                  .formatted(classMethodName, getSimpleTypeName(returnValue)));
+        }
+        return ctorResult;
+      }
     }
 
     public Context createLocalContext(

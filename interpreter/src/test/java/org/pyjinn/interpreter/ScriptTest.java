@@ -1353,6 +1353,28 @@ public class ScriptTest {
     assertEquals("last", java_words.get(1));
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void callMethodFromCtor(boolean compile) throws Exception {
+    execute(
+        compile,
+        """
+        bar_called = False
+
+        class Foo:
+          def __init__(self):
+            self.bar()
+
+          def bar(self):
+            global bar_called
+            bar_called = True
+
+        foo = Foo()
+        """);
+
+    assertEquals(true, getVariable("bar_called"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
