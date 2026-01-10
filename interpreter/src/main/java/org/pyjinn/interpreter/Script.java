@@ -6699,15 +6699,14 @@ public class Script {
   }
 
   static class Context {
-    private static final Object NOT_FOUND = new Object();
+    private static final Object NOT_ASSIGNED = new Object();
     private final Context callingContext; // for returning to caller in compiled mode
     private final Context enclosingContext; // for resolving variables
     private final ClassMethodName classMethodName;
     private Set<String> globalVarNames = null;
     private Set<String> nonlocalVarNames = null;
-    private Object returnValue;
+    private Object returnValue = NOT_ASSIGNED; // NOT_ASSIGNED when no return value yet.
     private Object ctorResult; // Non-null if this is a ctor.
-    private boolean returned = false;
     private int loopDepth = 0;
     private boolean breakingLoop = false;
     private boolean continuingLoop = false;
@@ -6903,8 +6902,8 @@ public class Script {
       if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
         return globals.get(name);
       }
-      var value = vars.get(name, NOT_FOUND);
-      if (value != NOT_FOUND) {
+      var value = vars.get(name, NOT_ASSIGNED);
+      if (value != NOT_ASSIGNED) {
         return value;
       } else if (enclosingContext != null) {
         return enclosingContext.get(name);
@@ -6958,11 +6957,10 @@ public class Script {
         throw new IllegalStateException("'return' outside function");
       }
       this.returnValue = returnValue;
-      this.returned = true;
     }
 
     public boolean skipStatement() {
-      return returned || breakingLoop || continuingLoop || globals.halted();
+      return hasReturnValue() || breakingLoop || continuingLoop || globals.halted();
     }
 
     public boolean shouldBreak() {
@@ -6977,8 +6975,12 @@ public class Script {
       return continuingLoop = false;
     }
 
+    public boolean hasReturnValue() {
+      return returnValue != NOT_ASSIGNED;
+    }
+
     public Object returnValue() {
-      return returnValue;
+      return hasReturnValue() ? returnValue : null;
     }
   }
 }

@@ -278,12 +278,31 @@ sealed interface Instruction {
   record FunctionReturn() implements Instruction {
     @Override
     public Context execute(Context context) {
+      return returnToCallingContext(context);
+    }
+
+    private static Context returnToCallingContext(Context context) {
       context.leaveFunction();
       var returnValue = context.checkCtorResult(context.popData());
       var callingContext = context.callingContext();
       callingContext.pushData(returnValue);
       ++callingContext.ip;
       return callingContext;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
+  }
+
+  /** Instruction for setting a provisional return value in try block followed by finally clause. */
+  record ProvisionalReturn() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.returnWithValue(context.popData());
+      ++context.ip;
+      return context;
     }
 
     @Override
@@ -1015,15 +1034,19 @@ sealed interface Instruction {
     }
   }
 
-  /** Rethrows the active exception if there is one. */
-  record RethrowException() implements Instruction {
+  /** Rethrows the active exception or returns the provisional return value, if they exist. */
+  record ExitFinallyBlock() implements Instruction {
     @Override
     public Context execute(Context context) {
       if (context.exception != null) {
         throw context.exception;
+      } else if (context.hasReturnValue()) {
+        context.pushData(context.returnValue());
+        return FunctionReturn.returnToCallingContext(context);
+      } else {
+        ++context.ip;
+        return context;
       }
-      ++context.ip;
-      return context;
     }
   }
 

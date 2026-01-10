@@ -35,6 +35,8 @@ class Compiler {
 
   private final boolean withinFunction;
   private final Deque<LoopState> loops = new ArrayDeque<>();
+  private final Deque<DeferredJumpList> jumpsToFinallyFromReturnsInTryBlockStack =
+      new ArrayDeque<>();
   private int lineno = -1;
 
   private Compiler(boolean interactiveMode, boolean withinFunction) {
@@ -340,7 +342,18 @@ class Compiler {
       initialStackDepth += instructions.get(i).stackOffset();
     }
 
+    // Track try blocks with finally clauses for checking whether to treat return statements as
+    // provisional returns which need to be followed by code in the following finally block.
+    if (hasFinally) {
+      jumpsToFinallyFromReturnsInTryBlockStack.push(jumpsToFinally);
+    }
+
     compileStatement(tryBlock.tryBody(), code);
+
+    if (hasFinally) {
+      jumpsToFinallyFromReturnsInTryBlockStack.pop();
+    }
+
     int blockEnd = instructions.size();
 
     // No need to jump to finally unless there are except handlers between try and finally.
@@ -399,7 +412,7 @@ class Compiler {
           Code.ExceptionClause.FINALLY);
       jumpsToFinally.finalizeJumps();
       compileStatement(tryBlock.finallyBlock().get(), code);
-      code.addInstruction(lineno, new Instruction.RethrowException());
+      code.addInstruction(lineno, new Instruction.ExitFinallyBlock());
     } else {
       jumpsPastExceptionHandlers.finalizeJumps();
     }
@@ -451,7 +464,14 @@ class Compiler {
         .forEach(loop -> code.addInstruction(lineno, new Instruction.PopData()));
 
     compileExpression(returnStatement.returnValue(), code);
-    code.addInstruction(lineno, new Instruction.FunctionReturn());
+    if (jumpsToFinallyFromReturnsInTryBlockStack.isEmpty()) {
+      code.addInstruction(lineno, new Instruction.FunctionReturn());
+    } else {
+      code.addInstruction(lineno, new Instruction.ProvisionalReturn());
+      jumpsToFinallyFromReturnsInTryBlockStack
+          .peek()
+          .createDeferredJump(lineno, new Instruction.Jump.Placeholder());
+    }
   }
 
   private void compileRaiseStatement(RaiseStatement raiseStatement, Code code) {

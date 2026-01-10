@@ -1375,6 +1375,43 @@ public class ScriptTest {
     assertEquals(true, getVariable("bar_called"));
   }
 
+  @Test
+  public void finallyAfterReturn() throws Exception {
+    execute(
+        """
+        finally_called = False
+        reached_unreachable = False
+        def foo():
+          global reached_unreachable
+          try:
+            return 42
+            reached_unreachable = True
+          finally:
+            global finally_called
+            finally_called = True
+        output = foo()
+        """);
+
+    assertVariableValue(false, "reached_unreachable");
+    assertVariableValue(true, "finally_called");
+    assertVariableValue(42, "output");
+  }
+
+  @Test
+  public void secondReturnFromFinally() throws Exception {
+    execute(
+        """
+        def foo():
+          try:
+            return 1
+          finally:
+            return 2
+        output = foo()
+        """);
+
+    assertVariableValue(2, "output");
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
@@ -1388,7 +1425,6 @@ public class ScriptTest {
 
   private void assertVariableValue(Object expectedValue, String variableName) {
     Object object = env.get(variableName);
-    assertNotNull(object);
     assertEquals(expectedValue, object);
   }
 
@@ -1409,9 +1445,7 @@ public class ScriptTest {
   }
 
   // TODO(maxuser): Add tests for:
-  // - classes
   // - dataclasses (mutable @dataclass, immutable @dataclass(Frozen=True))
-  // - classes with custom __init__ method
   // - assignment to class instance fields
   // - assignment to class-level fields
   // - calling instance methods
@@ -1429,7 +1463,6 @@ public class ScriptTest {
   // - tuple and list constructors which take no params or String, array, or Iterable<?>
   // - tuple assignment from Java array
   // - enforce immutability of tuples (unless Java array is explicitly accessed)
-  // - fix bug where -= was behaving like +=
   // - passing script functions to Java methods taking functional params like Predicate<T>
   // - when checking methods of a non-public class, search for a public interface or superclass
   // - bound Python methods, e.g. `f = obj.func` where obj.func(...) is invoked by f(...)
