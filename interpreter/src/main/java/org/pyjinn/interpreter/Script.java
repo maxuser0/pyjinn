@@ -5543,6 +5543,31 @@ public class Script {
     }
   }
 
+  public static class IterFunction implements Function {
+    public static final IterFunction INSTANCE = new IterFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      return getIterable(params[0]).iterator();
+    }
+  }
+
+  public static class NextFunction implements Function {
+    public static final NextFunction INSTANCE = new NextFunction();
+
+    @Override
+    public Object call(Environment env, Object... params) {
+      expectNumParams(params, 1);
+      var iter = (Iterator<?>) params[0];
+      if (iter.hasNext()) {
+        return iter.next();
+      } else {
+        throw new StopIteration();
+      }
+    }
+  }
+
   public static class EnumerateFunction implements Function {
     public static final EnumerateFunction INSTANCE = new EnumerateFunction();
 
@@ -6591,6 +6616,7 @@ public class Script {
       context.set("JavaMap", JavaMapFunction.INSTANCE);
       context.set("JavaSet", JavaSetFunction.INSTANCE);
       context.set("JavaString", JavaStringFunction.INSTANCE);
+      context.set("StopIteration", JavaClass.of(StopIteration.class));
       context.set("__atexit_register__", AtexitRegsisterFunction.INSTANCE);
       context.set("__atexit_unregister__", AtexitUnregsisterFunction.INSTANCE);
       context.set("__exit__", ExitFunction.INSTANCE);
@@ -6605,10 +6631,12 @@ public class Script {
       context.set("hex", HexFunction.INSTANCE);
       context.set("isinstance", IsinstanceFunction.INSTANCE);
       context.set("int", JavaClass.of(PyjInt.class));
+      context.set("iter", IterFunction.INSTANCE);
       context.set("len", LenFunction.INSTANCE);
       context.set("list", PyjList.TYPE);
       context.set("max", MaxFunction.INSTANCE);
       context.set("min", MinFunction.INSTANCE);
+      context.set("next", NextFunction.INSTANCE);
       context.set("ord", OrdFunction.INSTANCE);
       context.set("print", PrintFunction.INSTANCE);
       context.set("range", RangeFunction.INSTANCE);

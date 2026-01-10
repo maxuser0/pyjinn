@@ -1412,6 +1412,27 @@ public class ScriptTest {
     assertVariableValue(2, "output");
   }
 
+  @Test
+  public void iter() throws Exception {
+    execute(
+        """
+        input = [2, 4, 6]
+        it = iter(input)
+        output = []
+        while True:
+          try:
+            output.append(next(it))
+          except StopIteration:
+            break
+        """);
+
+    var output = getVariable(Script.PyjList.class, "output");
+    assertEquals(3, output.__len__());
+    assertEquals(2, output.__getitem__(0));
+    assertEquals(4, output.__getitem__(1));
+    assertEquals(6, output.__getitem__(2));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
