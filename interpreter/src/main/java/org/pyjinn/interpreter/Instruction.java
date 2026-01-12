@@ -92,7 +92,7 @@ sealed interface Instruction {
 
     @Override
     public int stackOffset() {
-      return -numArgs + 1; // +1 for return value
+      return -numArgs; // -1 for caller and +1 for return value cancel out.
     }
 
     public static Context debugCall(Context context, Object caller, Object[] params) {
@@ -114,12 +114,23 @@ sealed interface Instruction {
       }
 
       // Translate len(x) to x.__len__().
-      if (caller instanceof LenFunction && paramValues.size() == 1) {
+      if (caller == LenFunction.INSTANCE && paramValues.size() == 1) {
         var function = getMethod(paramValues.get(0), "__len__");
         if (function != null) {
           return executeCompiledFunction(
               filename, lineno, context, function, paramValues.toArray());
         }
+      }
+
+      // Special handling for next(generator).
+      if (caller == NextFunction.INSTANCE
+          && paramValues.size() == 1
+          && paramValues.get(0) instanceof Generator generator) {
+        context.enterFunction(filename, lineno);
+        if (generator.context().ip > 0) {
+          generator.context().pushData(null); // Send None to yield expression.
+        }
+        return generator.context();
       }
 
       // Translate x(...) to x.__call__(...).
@@ -265,6 +276,14 @@ sealed interface Instruction {
       if (function.isHalted()) {
         ++context.ip;
         return context;
+      } else if (function.functionDef().hasYieldExpression()) {
+        // Treat functions with yield expressions as generators.
+        var localContext =
+            function.initLocalContext(/* callingContext= */ context, params, function.isCtor());
+        localContext.code = function.code();
+        context.pushData(new Generator(localContext));
+        ++context.ip;
+        return context;
       } else {
         context.enterFunction(filename, lineno);
         var localContext =
@@ -284,6 +303,9 @@ sealed interface Instruction {
     private static Context returnToCallingContext(Context context) {
       context.leaveFunction();
       var returnValue = context.checkCtorResult(context.popData());
+      if (context.isGenerator()) {
+        throw new StopIteration(returnValue);
+      }
       var callingContext = context.callingContext();
       callingContext.pushData(returnValue);
       ++callingContext.ip;
@@ -293,6 +315,24 @@ sealed interface Instruction {
     @Override
     public int stackOffset() {
       return 1;
+    }
+  }
+
+  record Yield() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.leaveFunction();
+      var yieldValue = context.popData();
+      ++context.ip;
+      var callingContext = context.callingContext();
+      callingContext.pushData(yieldValue);
+      ++callingContext.ip;
+      return callingContext;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
     }
   }
 

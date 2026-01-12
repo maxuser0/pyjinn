@@ -181,6 +181,19 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
   }
 
   @Override
+  public JsonElement visitYield_expr(PythonParser.Yield_exprContext ctx) {
+    var node = createNode(ctx, "Yield");
+    if (ctx.expression() != null) {
+      node.add("value", visitExpression(ctx.expression()));
+    } else if (ctx.star_expressions() != null) {
+      node.add("value", singletonOrTuple(visitStar_expressions(ctx.star_expressions())));
+    } else {
+      node.add("value", JsonNull.INSTANCE);
+    }
+    return node;
+  }
+
+  @Override
   public JsonElement visitGlobal_stmt(PythonParser.Global_stmtContext ctx) {
     var node = createNode(ctx, "Global");
     var names = new JsonArray();
@@ -454,6 +467,11 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
     if (ctx.import_stmt() != null) {
       return visitImport_stmt(ctx.import_stmt());
+    }
+    if (ctx.yield_stmt() != null) {
+      var node = createNode(ctx, "Expr");
+      node.add("value", visitYield_expr(ctx.yield_stmt().yield_expr()));
+      return node;
     }
     if (ctx.star_expressions() != null) {
       var node = createNode(ctx, "Expr");

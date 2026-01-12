@@ -130,7 +130,12 @@ public class Script {
       var script = globals.script;
       var parser =
           new JsonAstParser(
-              this, scriptFilename, script.moduleHandler, script.classLoader, globals.symbolCache);
+              this,
+              scriptFilename,
+              script.moduleHandler,
+              script.classLoader,
+              globals.symbolCache,
+              new ArrayDeque<FunctionParseState>());
       parser.parseGlobals(element, globals);
     }
 
@@ -382,12 +387,17 @@ public class Script {
     return (BoundFunction) mainModule().globals.get(name);
   }
 
+  private static class FunctionParseState {
+    public boolean hasYieldExpression = false;
+  }
+
   public record JsonAstParser(
       Module module,
       String filename,
       ModuleHandler moduleHandler,
       ClassLoader classLoader,
-      SymbolCache symbolCache) {
+      SymbolCache symbolCache,
+      Deque<FunctionParseState> functionParseStateStack) {
 
     public void parseGlobals(JsonElement element, GlobalContext globals) {
       String type = getType(element);
@@ -516,8 +526,13 @@ public class Script {
 
     private FunctionDef parseFunctionDef(String enclosingClassName, JsonElement element) {
       var functionName = getAttr(element, "name").getAsString();
-      Statement body = parseStatementBlock(getBody(element));
-      return parsePartialFunctionDef(enclosingClassName, functionName, element, body);
+      functionParseStateStack.push(new FunctionParseState());
+      try {
+        var body = parseStatementBlock(getBody(element));
+        return parsePartialFunctionDef(enclosingClassName, functionName, element, body);
+      } finally {
+        functionParseStateStack.pop();
+      }
     }
 
     private FunctionDef parsePartialFunctionDef(
@@ -551,6 +566,9 @@ public class Script {
                           .toList())
               .orElse(List.of());
 
+      boolean hasYieldExpression =
+          !functionParseStateStack.isEmpty() && functionParseStateStack.peek().hasYieldExpression;
+
       return new FunctionDef(
           getLineno(element),
           enclosingClassName,
@@ -560,7 +578,8 @@ public class Script {
           vararg,
           kwarg,
           defaults,
-          body);
+          body,
+          hasYieldExpression);
     }
 
     public Statement parseStatements(JsonElement element) {
@@ -942,7 +961,13 @@ public class Script {
         case "Lambda":
           {
             int lineno = getLineno(element);
-            var body = parseExpression(getAttr(element, "body"));
+            final Expression body;
+            try {
+              functionParseStateStack.push(new FunctionParseState());
+              body = parseExpression(getAttr(element, "body"));
+            } finally {
+              functionParseStateStack.pop();
+            }
             return new Lambda(
                 parsePartialFunctionDef(
                     /* enclosingClassName= */ "<>",
@@ -983,6 +1008,14 @@ public class Script {
           {
             return new WalrusExpression(
                 getId(getAttr(element, "target")), parseExpression(getAttr(element, "value")));
+          }
+
+        case "Yield":
+          {
+            if (!functionParseStateStack.isEmpty()) {
+              functionParseStateStack.peek().hasYieldExpression = true;
+            }
+            return new YieldExpression(parseExpression(getAttr(element, "value")));
           }
       }
       throw new IllegalArgumentException("Unknown expression type: " + element.toString());
@@ -1079,7 +1112,7 @@ public class Script {
   public record Decorator(String name, List<JsonElement> keywords) {}
 
   public record BoundFunction(
-      FunctionDef function,
+      FunctionDef functionDef,
       Context enclosingContext,
       List<Object> defaults,
       Code code,
@@ -1126,14 +1159,18 @@ public class Script {
       if (code == null) {
         // AST tree-walk evaluation.
         var localContext = initLocalContext(/* callingContext= */ null, params, isCtor);
-        localContext.exec(function.body);
+        localContext.exec(functionDef.body);
         return localContext.returnValue();
       } else {
         // Virtual machine instruction execution.
         var callingContext = (Context) env;
         var context =
             Instruction.FunctionCall.executeCompiledFunction(
-                function.enclosingClassName(), function.lineno(), callingContext, this, params);
+                functionDef.enclosingClassName(),
+                functionDef.lineno(),
+                callingContext,
+                this,
+                params);
 
         var vm = VirtualMachine.getInstance();
         while (context != callingContext && vm.hasMoreInstructions(context)) {
@@ -1155,7 +1192,7 @@ public class Script {
         var script = enclosingContext.env().script();
         script.zombieCallbackHandler.handle(
             script.mainModule().filename(),
-            "function '%s'".formatted(function.identifier().name()),
+            "function '%s'".formatted(functionDef.identifier().name()),
             zombieCounter.incrementAndGet());
         return true;
       } else {
@@ -1166,22 +1203,25 @@ public class Script {
     Context initLocalContext(Context callingContext, Object[] params, boolean isCtor) {
       var localContext =
           enclosingContext.createLocalContext(
-              callingContext, function.enclosingClassName, function.identifier.name());
+              callingContext,
+              functionDef.enclosingClassName,
+              functionDef.identifier.name(),
+              functionDef.hasYieldExpression());
 
       if (isCtor) {
         if (params.length == 0) {
           throw new IllegalArgumentException(
               "Constructor %s should take at least one parameter, but %d were given"
-                  .formatted(function.identifier().name(), params.length));
+                  .formatted(functionDef.identifier().name(), params.length));
         }
         if (params[0] == null) {
           throw new IllegalArgumentException(
-              "First param to %s (constructor) is None".formatted(function.identifier().name()));
+              "First param to %s (constructor) is None".formatted(functionDef.identifier().name()));
         }
         localContext.ctorResult = params[0];
       }
 
-      final List<FunctionArg> args = function.args;
+      final List<FunctionArg> args = functionDef.args;
       int numParams = params.length;
       var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
       if (kwargs != null) {
@@ -1192,12 +1232,12 @@ public class Script {
       Set<String> unassignedArgs = args.stream().map(a -> a.identifier().name()).collect(toSet());
 
       // Assign additional args to vararg if there is one.
-      if (function.vararg().isPresent()) {
+      if (functionDef.vararg().isPresent()) {
         if (numParams < args.size()) {
           throw new IllegalArgumentException(
               "%s() missing %d required positional argument%s"
                   .formatted(
-                      function.identifier,
+                      functionDef.identifier,
                       args.size() - numParams,
                       (args.size() - numParams) == 1 ? "" : "s"));
         }
@@ -1205,13 +1245,13 @@ public class Script {
         for (int i = args.size(); i < numParams; ++i) {
           vararg[i - args.size()] = params[i];
         }
-        localContext.set(function.vararg().get().identifier().name(), new PyjTuple(vararg));
+        localContext.set(functionDef.vararg().get().identifier().name(), new PyjTuple(vararg));
         numParams = args.size();
       } else if (numParams > args.size()) {
         throw new IllegalArgumentException(
             "%s() takes %d positional argument%s but %d %s given"
                 .formatted(
-                    function.identifier,
+                    functionDef.identifier,
                     args.size(),
                     args.size() == 1 ? "" : "s",
                     params.length,
@@ -1229,9 +1269,9 @@ public class Script {
       }
 
       PyjDict kwarg = null; // Populated if there's a **-prefixed arg.
-      if (function.kwarg().isPresent()) {
+      if (functionDef.kwarg().isPresent()) {
         kwarg = new PyjDict();
-        String kwargName = function.kwarg().get().identifier().name();
+        String kwargName = functionDef.kwarg().get().identifier().name();
         localContext.set(kwargName, kwarg);
       }
 
@@ -1242,7 +1282,7 @@ public class Script {
           if (assignedArgs.contains(name)) {
             throw new IllegalArgumentException(
                 "%s() got multiple values for argument '%s'"
-                    .formatted(function.identifier.name(), name));
+                    .formatted(functionDef.identifier.name(), name));
           }
           if (unassignedArgs.contains(name)) {
             assignedArgs.add(name);
@@ -1254,7 +1294,7 @@ public class Script {
             } else {
               throw new IllegalArgumentException(
                   "%s() got an unexpected keyword argument '%s'"
-                      .formatted(function.identifier.name(), name));
+                      .formatted(functionDef.identifier.name(), name));
             }
           }
         }
@@ -1275,16 +1315,18 @@ public class Script {
       if (!unassignedArgs.isEmpty()) {
         throw new IllegalArgumentException(
             "%s() missing %d positional arguments: %s"
-                .formatted(function.identifier.name(), unassignedArgs.size(), unassignedArgs));
+                .formatted(functionDef.identifier.name(), unassignedArgs.size(), unassignedArgs));
       }
       return localContext;
     }
 
     @Override
     public String toString() {
-      return "<function %s at 0x%x>".formatted(function.identifier().name(), hashCode());
+      return "<function %s at 0x%x>".formatted(functionDef.identifier().name(), hashCode());
     }
   }
+
+  public record Generator(Context context) {}
 
   // `type` is an array of length 1 because CtorFunction needs to be instantiated before the
   // surrounding class is fully defined. (Alternatively, PyjClass could be mutable so that it's
@@ -1551,7 +1593,8 @@ public class Script {
               /* vararg= */ Optional.empty(),
               /* kwarg= */ Optional.empty(),
               defaults,
-              new DataclassDefaultInit(type, fields, lineno));
+              new DataclassDefaultInit(type, fields, lineno),
+              /* hasYieldExpression= */ false);
       return new BoundFunction(functionDef, context, compiler.compile(functionDef));
     }
 
@@ -1680,7 +1723,7 @@ public class Script {
           throw new IllegalStateException(
               "BoundFunction with code executed via recursive tree evaluation but should be"
                   + " executed via iterative virtual machine: %s.%s(...)"
-                      .formatted(__class__.name, boundFunction.function().identifier().name()));
+                      .formatted(__class__.name, boundFunction.functionDef().identifier().name()));
         }
         Object[] methodParams = new Object[params.length + 1];
         methodParams[0] = this;
@@ -1882,7 +1925,8 @@ public class Script {
       Optional<FunctionArg> vararg,
       Optional<FunctionArg> kwarg,
       List<Expression> defaults,
-      Statement body)
+      Statement body,
+      boolean hasYieldExpression)
       implements Statement {
     /** Adds this function to the specified {@code context}. */
     @Override
@@ -2232,6 +2276,14 @@ public class Script {
       var value = rhs.eval(context);
       context.setVariable(identifier, value);
       return value;
+    }
+  }
+
+  public record YieldExpression(Expression value) implements Expression {
+    @Override
+    public Object eval(Context context) {
+      throw new UnsupportedOperationException(
+          "yield expression not supported in recursive tree-walk interpreter");
     }
   }
 
@@ -6738,6 +6790,7 @@ public class Script {
     private int loopDepth = 0;
     private boolean breakingLoop = false;
     private boolean continuingLoop = false;
+    private boolean isGenerator = false;
 
     protected GlobalContext globals;
     protected final PyjDict vars = new PyjDict();
@@ -6750,6 +6803,10 @@ public class Script {
 
     public Context callingContext() {
       return callingContext;
+    }
+
+    public boolean isGenerator() {
+      return isGenerator;
     }
 
     public void pushData(Object data) {
@@ -6799,18 +6856,25 @@ public class Script {
     }
 
     private Context(GlobalContext globals, Context callingContext, Context enclosingContext) {
-      this(globals, callingContext, enclosingContext, enclosingContext.classMethodName);
+      this(
+          globals,
+          callingContext,
+          enclosingContext,
+          enclosingContext.classMethodName,
+          /* isGenerator= */ false);
     }
 
     private Context(
         GlobalContext globals,
         Context callingContext,
         Context enclosingContext,
-        ClassMethodName classMethodName) {
+        ClassMethodName classMethodName,
+        boolean isGenerator) {
       this.globals = globals;
       this.callingContext = callingContext;
       this.enclosingContext = enclosingContext == globals ? null : enclosingContext;
       this.classMethodName = classMethodName;
+      this.isGenerator = isGenerator;
     }
 
     public Environment env() {
@@ -6839,12 +6903,16 @@ public class Script {
     }
 
     public Context createLocalContext(
-        Context callingContext, String enclosingClassName, String enclosingMethodName) {
+        Context callingContext,
+        String enclosingClassName,
+        String enclosingMethodName,
+        boolean isGenerator) {
       return new Context(
           globals,
           callingContext,
           /* enclosingContext= */ this,
-          new ClassMethodName(enclosingClassName, enclosingMethodName));
+          new ClassMethodName(enclosingClassName, enclosingMethodName),
+          isGenerator);
     }
 
     public Context createLocalContext(Context callingContext) {
@@ -6907,7 +6975,7 @@ public class Script {
     }
 
     public void setBoundFunction(BoundFunction boundFunction) {
-      set(boundFunction.function().identifier().name(), boundFunction);
+      set(boundFunction.functionDef().identifier().name(), boundFunction);
     }
 
     public void set(String name, Object value) {

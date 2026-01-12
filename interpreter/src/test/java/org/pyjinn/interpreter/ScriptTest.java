@@ -1426,11 +1426,46 @@ public class ScriptTest {
             break
         """);
 
-    var output = getVariable(Script.PyjList.class, "output");
-    assertEquals(3, output.__len__());
-    assertEquals(2, output.__getitem__(0));
-    assertEquals(4, output.__getitem__(1));
-    assertEquals(6, output.__getitem__(2));
+    assertEquals(new Script.PyjList(List.of(2, 4, 6)), getVariable("output"));
+  }
+
+  @Test
+  public void generateFibonacci() throws Exception {
+    execute(
+        """
+        def fibonacci():
+          i, prev = 1, 0
+          while True:
+            yield i
+            i, prev = i + prev, i
+
+        f = fibonacci()
+        output = []
+        for i in range(5):
+          output.append(next(f))
+        """);
+
+    assertEquals(new Script.PyjList(List.of(1, 1, 2, 3, 5)), getVariable("output"));
+  }
+
+  @Test
+  public void generatorWithReturn() throws Exception {
+    execute(
+        """
+        def yield_then_return():
+          yield 10
+          return 20
+
+        f = yield_then_return()
+        try:
+          yielded = next(f)
+          next(f)  # This will raise StopIteration.
+        except StopIteration as e:
+          returned = e.value
+        """);
+
+    assertEquals(10, getVariable("yielded"));
+    assertEquals(20, getVariable("returned"));
   }
 
   private Object getVariable(String variableName) {

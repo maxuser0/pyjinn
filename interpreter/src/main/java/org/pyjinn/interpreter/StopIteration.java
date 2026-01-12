@@ -4,7 +4,14 @@
 package org.pyjinn.interpreter;
 
 public class StopIteration extends RuntimeException {
+  public final Object value;
+
   public StopIteration() {
+    this(null);
+  }
+
+  public StopIteration(Object value) {
     super("StopIteration");
+    this.value = value;
   }
 }

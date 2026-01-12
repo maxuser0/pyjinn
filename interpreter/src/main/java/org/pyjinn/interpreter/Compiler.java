@@ -291,6 +291,11 @@ class Compiler {
       throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
     }
 
+    // TODO(maxuser): Support 'for' loops over generators by combining IteratorHasNext into
+    // IteratorNext and handle StopIteration exception. IteratorNext could return an
+    // Optional<Object> and swallow StopIteration as Optional.empty(), and
+    // PopJumpIfFalse/convertToBool could treat Optional.empty() as false.
+    //
     // for VAR, ... in ITER:
     //   BODY
     //
@@ -302,7 +307,7 @@ class Compiler {
     //   [4] eval $iterator.next()
     //   [5] assign VAR, ... (rhs = $iterator.next())
     //   [6] execute BODY
-    //   [7] Jump 1
+    //   [7] Jump 2
     //   [8] pop $iterator
     //
     // `continue` in BODY -> Jump 1
@@ -463,7 +468,12 @@ class Compiler {
         .filter(loop -> loop.type == LoopType.FOR)
         .forEach(loop -> code.addInstruction(lineno, new Instruction.PopData()));
 
-    compileExpression(returnStatement.returnValue(), code);
+    var returnValue = returnStatement.returnValue();
+    if (returnValue == null) {
+      code.addInstruction(lineno, new Instruction.PushData(null));
+    } else {
+      compileExpression(returnValue, code);
+    }
     if (jumpsToFinallyFromReturnsInTryBlockStack.isEmpty()) {
       code.addInstruction(lineno, new Instruction.FunctionReturn());
     } else {
@@ -709,10 +719,14 @@ class Compiler {
               /* vararg= */ Optional.empty(),
               /* kwarg= */ Optional.empty(),
               /* defaults= */ List.of(),
-              new Pass()); // Body statement is unused because listCompCode is executed directly.
+              new Pass(), // Body statement is unused because listCompCode is executed directly.
+              /* hasYieldExpression= */ false);
 
       code.addInstruction(
           lineno, new Instruction.NullaryCompileOnlyFunctionCall(function, listCompCode));
+    } else if (expr instanceof YieldExpression yieldExpression) {
+      compileExpression(yieldExpression.value(), code);
+      code.addInstruction(lineno, new Instruction.Yield());
     } else {
       throw new UnsupportedOperationException(
           "Expression type not supported: " + getSimpleTypeName(expr));

@@ -2396,6 +2396,52 @@ class PyjinnParserTest {
     assertEquals("str", constant2.get("typename").getAsString());
   }
 
+  @Test
+  void yieldNoValue() throws Exception {
+    var parserOutput = parseTrees("yield");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var yield = expr.get("value").getAsJsonObject();
+    assertEquals("Yield", yield.get("type").getAsString());
+    assertTrue(yield.get("value").isJsonNull());
+  }
+
+  @Test
+  void yieldSingleValue() throws Exception {
+    var parserOutput = parseTrees("yield x");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var yield = expr.get("value").getAsJsonObject();
+    assertEquals("Yield", yield.get("type").getAsString());
+    assertName("x", yield.get("value"));
+  }
+
+  @Test
+  void yieldMultipleValues() throws Exception {
+    var parserOutput = parseTrees("yield x, y");
+    var ast = parserOutput.jsonAst();
+
+    var expr = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var yield = expr.get("value").getAsJsonObject();
+    assertEquals("Yield", yield.get("type").getAsString());
+
+    var tuple = yield.get("value").getAsJsonObject();
+    assertEquals("Tuple", tuple.get("type").getAsString());
+
+    var elts = tuple.get("elts").getAsJsonArray();
+    assertEquals(2, elts.size());
+    assertName("x", elts.get(0));
+    assertName("y", elts.get(1));
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());
