@@ -127,6 +127,7 @@ sealed interface Instruction {
           && paramValues.size() == 1
           && paramValues.get(0) instanceof Generator generator) {
         context.enterFunction(filename, lineno);
+        generator.context().setCaller(context);
         if (generator.context().ip > 0) {
           generator.context().pushData(null); // Send None to yield expression.
         }
@@ -303,6 +304,7 @@ sealed interface Instruction {
     private static Context returnToCallingContext(Context context) {
       context.leaveFunction();
       var returnValue = context.checkCtorResult(context.popData());
+      context.ip = context.code.instructions().size(); // Put IP past end of function for safety.
       if (context.isGenerator()) {
         throw new StopIteration(returnValue);
       }
@@ -895,6 +897,7 @@ sealed interface Instruction {
         return context;
       } else if (iter instanceof Generator generator) {
         context.enterFunction("<for>", -1); // TODO(maxuser): pass real filename and lineno
+        generator.context().setCaller(context);
         if (generator.context().ip > 0) {
           generator.context().pushData(null); // Send None to yield expression.
         }

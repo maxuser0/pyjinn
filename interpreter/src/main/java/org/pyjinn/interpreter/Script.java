@@ -6780,9 +6780,10 @@ public class Script {
     }
   }
 
-  static class Context {
+  public static class Context {
     private static final Object NOT_ASSIGNED = new Object();
-    private final Context callingContext; // for returning to caller in compiled mode
+    private Context
+        callingContext; // for returning to caller in compiled mode (non-final for generators)
     private final Context enclosingContext; // for resolving variables
     private final ClassMethodName classMethodName;
     private Set<String> globalVarNames = null;
@@ -6805,6 +6806,10 @@ public class Script {
 
     public Context callingContext() {
       return callingContext;
+    }
+
+    public void setCaller(Context callingContext) {
+      this.callingContext = callingContext;
     }
 
     public boolean isGenerator() {
@@ -6844,10 +6849,15 @@ public class Script {
       return dataStack.size();
     }
 
-    public void debugLogInstructions() {
-      if (debug && code != null) {
-        logger.log(code.instructions().toStringWithInstructionPointer(ip));
+    public String getDebugCode() {
+      var output = new StringBuilder();
+      output.append("%s in %s:\n".formatted(classMethodName, this));
+      if (code == null) {
+        output.append("No code in this context.");
+      } else {
+        output.append(code.instructions().toStringWithInstructionPointer(ip));
       }
+      return output.toString();
     }
 
     // Default constructor is used only for GlobalContext subclass.

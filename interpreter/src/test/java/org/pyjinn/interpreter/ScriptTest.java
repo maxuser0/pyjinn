@@ -1488,6 +1488,47 @@ public class ScriptTest {
     assertEquals(20, getVariable("returned"));
   }
 
+  @Test
+  public void advanceGeneratorFromJava() throws Exception {
+    execute(
+        """
+        def yield_values():
+          yield 10
+          yield 20
+          return 30
+
+        generator = yield_values()
+
+        def get_next():
+          return next(generator)
+        """);
+
+    var get_next = getVariable(Script.Function.class, "get_next");
+
+    Object[] noParams = new Object[] {};
+    assertEquals(10, get_next.call(env, noParams));
+    assertEquals(20, get_next.call(env, noParams));
+    assertThrows(StopIteration.class, () -> get_next.call(env, noParams));
+  }
+
+  @Test
+  public void generatorInsideFunction() throws Exception {
+    execute(
+        """
+        def foo(n):
+          def yield_values():
+            for i in range(n):
+              yield i
+          return yield_values()
+
+        output = []
+        for i in foo(4):
+          output.append(i)
+        """);
+
+    assertEquals(new Script.PyjList(List.of(0, 1, 2, 3)), getVariable("output"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

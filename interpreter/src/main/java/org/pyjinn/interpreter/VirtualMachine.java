@@ -26,9 +26,6 @@ public class VirtualMachine {
     Instruction instruction = null;
     try {
       instruction = context.code.instructions().get(context.ip);
-      if (debug) {
-        logger.log("[%d] %s in %s", context.ip, instruction, context);
-      }
       context = instruction.execute(context);
     } catch (RuntimeException e) {
       if (debug) {
@@ -44,7 +41,6 @@ public class VirtualMachine {
         if (isStopIteration && handleStopIterationAtForLoop(context)) {
           return context;
         }
-        context.debugLogInstructions();
         var caller = context.callingContext();
         caller.exception = context.exception;
         context.exception = null;
@@ -71,7 +67,9 @@ public class VirtualMachine {
   }
 
   private static boolean handleStopIterationAtForLoop(Context context) {
-    if (context.code.instructions().get(context.ip) instanceof Instruction.IteratorNext) {
+    var instructions = context.code.instructions();
+    int ip = context.ip;
+    if (ip < instructions.size() && instructions.get(ip) instanceof Instruction.IteratorNext) {
       context.exception = null;
       context.pushData(Instruction.STOP_ITERATION);
       ++context.ip;
