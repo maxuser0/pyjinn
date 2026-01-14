@@ -27,24 +27,31 @@ public class VirtualMachine {
     try {
       instruction = context.code.instructions().get(context.ip);
       if (debug) {
-        logger.log("Executing instruction: [%d] %s", context.ip, instruction);
+        logger.log("[%d] %s in %s", context.ip, instruction, context);
       }
       context = instruction.execute(context);
     } catch (RuntimeException e) {
       if (debug) {
         logger.log("Line info: %s", context.code.getLineInfos());
       }
+      boolean isStopIteration = e instanceof StopIteration;
       int lineno = getCodeLineNumber(context);
       context.appendScriptStack(lineno, e);
       context.exception = e;
       Code.ExceptionalJump jump = null;
       while ((jump = context.code.getExceptionalJump(context.ip)) == null
           && context.callingContext() != null) {
+        if (isStopIteration && handleStopIterationAtForLoop(context)) {
+          return context;
+        }
         context.debugLogInstructions();
         var caller = context.callingContext();
         caller.exception = context.exception;
         context.exception = null;
         context = context.callingContext();
+      }
+      if (isStopIteration && handleStopIterationAtForLoop(context)) {
+        return context;
       }
       if (jump == null) {
         context.exception = null;
@@ -61,6 +68,16 @@ public class VirtualMachine {
       }
     }
     return context;
+  }
+
+  private static boolean handleStopIterationAtForLoop(Context context) {
+    if (context.code.instructions().get(context.ip) instanceof Instruction.IteratorNext) {
+      context.exception = null;
+      context.pushData(Instruction.STOP_ITERATION);
+      ++context.ip;
+      return true;
+    }
+    return false;
   }
 
   private static int getCodeLineNumber(Context context) {

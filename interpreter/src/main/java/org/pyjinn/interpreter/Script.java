@@ -1092,6 +1092,8 @@ public class Script {
       return false;
     } else if (value instanceof Boolean bool) {
       return bool;
+    } else if (value instanceof Optional<?> optional) {
+      return optional.isPresent();
     } else if (value instanceof String str) {
       return !str.isEmpty() && !str.equals("False");
     } else if (value.getClass().isArray()) {

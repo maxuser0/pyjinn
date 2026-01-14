@@ -1430,7 +1430,7 @@ public class ScriptTest {
   }
 
   @Test
-  public void generateFibonacci() throws Exception {
+  public void generateFibonacciWithNext() throws Exception {
     execute(
         """
         def fibonacci():
@@ -1443,6 +1443,26 @@ public class ScriptTest {
         output = []
         for i in range(5):
           output.append(next(f))
+        """);
+
+    assertEquals(new Script.PyjList(List.of(1, 1, 2, 3, 5)), getVariable("output"));
+  }
+
+  @Test
+  public void generateFibonacciWithFor() throws Exception {
+    execute(
+        """
+        def fibonacci():
+          i, prev = 1, 0
+          while True:
+            yield i
+            i, prev = i + prev, i
+
+        output = []
+        for i in fibonacci():
+          output.append(i)
+          if len(output) == 5:
+            break
         """);
 
     assertEquals(new Script.PyjList(List.of(1, 1, 2, 3, 5)), getVariable("output"));

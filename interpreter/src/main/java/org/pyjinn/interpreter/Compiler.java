@@ -291,39 +291,32 @@ class Compiler {
       throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
     }
 
-    // TODO(maxuser): Support 'for' loops over generators by combining IteratorHasNext into
-    // IteratorNext and handle StopIteration exception. IteratorNext could return an
-    // Optional<Object> and swallow StopIteration as Optional.empty(), and
-    // PopJumpIfFalse/convertToBool could treat Optional.empty() as false.
-    //
     // for VAR, ... in ITER:
     //   BODY
     //
     // compiles to instructions:
     //   [0] eval ITER (Iterable<?>)
     //   [1] eval ITER.iterator() (leave on data stack: $iterator)
-    //   [2] eval $iterator.hasNext()
-    //   [3] PopJumpIfFalse 7
-    //   [4] eval $iterator.next()
-    //   [5] assign VAR, ... (rhs = $iterator.next())
-    //   [6] execute BODY
-    //   [7] Jump 2
-    //   [8] pop $iterator
+    //   [2] push $next = $iterator.hasNext() ? $iterator.next() : STOP_ITERATION
+    //   [3] PopJumpIfStopIteration 7
+    //   [4] assign VAR, ... (rhs = $next)
+    //   [5] execute BODY
+    //   [6] Jump 2
+    //   [7] pop $iterator
     //
-    // `continue` in BODY -> Jump 1
+    // `continue` in BODY -> Jump 2
     // `break` in BODY -> Jump 7
 
     compileExpression(forBlock.iter(), code); // [0]
     code.addInstruction(lineno, new Instruction.IterableIterator()); // [1]
     loops.push(new LoopState(LoopType.FOR, code));
-    code.addInstruction(lineno, new Instruction.IteratorHasNext()); // [2]
-    addBreak(new Instruction.PopJumpIfFalse.Placeholder()); // [3]
-    code.addInstruction(lineno, new Instruction.IteratorNext()); // [4]
-    code.addInstruction(lineno, iterVarAssignment); // [5]
-    compileStatement(forBlock.body(), code); // [6]
-    code.addInstruction(lineno, new Instruction.Jump(continueTarget())); // [7]
+    code.addInstruction(lineno, new Instruction.IteratorNext()); // [2]
+    addBreak(new Instruction.IfStopIterationThenPopAndJump.Placeholder()); // [3]
+    code.addInstruction(lineno, iterVarAssignment); // [4]
+    compileStatement(forBlock.body(), code); // [5]
+    code.addInstruction(lineno, new Instruction.Jump(continueTarget())); // [6]
     loops.pop().close();
-    code.addInstruction(lineno, new Instruction.PopData()); // [8]
+    code.addInstruction(lineno, new Instruction.PopData()); // [7]
   }
 
   private void compileTryBlock(TryBlock tryBlock, Code code) {
@@ -694,9 +687,8 @@ class Compiler {
       compileExpression(listComp.iter(), listCompCode);
       listCompCode.addInstruction(lineno, new Instruction.IterableIterator());
       loops.push(new LoopState(LoopType.FOR, listCompCode));
-      listCompCode.addInstruction(lineno, new Instruction.IteratorHasNext());
-      addBreak(new Instruction.PopJumpIfFalse.Placeholder());
       listCompCode.addInstruction(lineno, new Instruction.IteratorNext());
+      addBreak(new Instruction.IfStopIterationThenPopAndJump.Placeholder());
       listCompCode.addInstruction(lineno, iterVarAssignment);
       for (var ifClause : listComp.ifs()) {
         compileExpression(ifClause, listCompCode);

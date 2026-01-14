@@ -865,24 +865,44 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       var iter = context.popData();
-      context.pushData(Script.getIterable(iter).iterator());
+      if (iter instanceof Generator generator) {
+        context.pushData(generator);
+      } else {
+        context.pushData(Script.getIterable(iter).iterator());
+      }
       ++context.ip;
       return context;
     }
   }
 
-  record IteratorHasNext() implements Instruction {
+  static final Object STOP_ITERATION = new Object();
+
+  /**
+   * Peeks the data stack, casts it to Iterator or Generator, and pushes the next element wrapped in
+   * an Optional.
+   */
+  record IteratorNext() implements Instruction {
     @Override
     public Context execute(Context context) {
       var iter = context.peekData();
       if (iter instanceof Iterator<?> iterator) {
-        context.pushData(iterator.hasNext());
+        if (iterator.hasNext()) {
+          context.pushData(iterator.next());
+        } else {
+          context.pushData(STOP_ITERATION);
+        }
         ++context.ip;
+        return context;
+      } else if (iter instanceof Generator generator) {
+        context.enterFunction("<for>", -1); // TODO(maxuser): pass real filename and lineno
+        if (generator.context().ip > 0) {
+          generator.context().pushData(null); // Send None to yield expression.
+        }
+        return generator.context();
       } else {
         throw new IllegalStateException(
             "Expected iterator on data stack but got: " + getSimpleTypeName(iter));
       }
-      return context;
     }
 
     @Override
@@ -891,23 +911,39 @@ sealed interface Instruction {
     }
   }
 
-  record IteratorNext() implements Instruction {
+  record IfStopIterationThenPopAndJump(int jumpTarget) implements Instruction {
+    // This instruction conditionally pops the data stack, but the reported stack offset is 0
+    // because the non-jump case is the one that matters for stack-offset computations when handling
+    // exceptions.
+    public static final int STACK_OFFSET = 0;
+
+    record Placeholder() implements JumpPlaceholder {
+      @Override
+      public Instruction createJumpTo(int jumpTarget) {
+        return new IfStopIterationThenPopAndJump(jumpTarget);
+      }
+
+      @Override
+      public int stackOffset() {
+        return STACK_OFFSET;
+      }
+    }
+
     @Override
     public Context execute(Context context) {
-      var iter = context.peekData();
-      if (iter instanceof Iterator<?> iterator) {
-        context.pushData(iterator.next());
-        ++context.ip;
+      var next = context.peekData();
+      if (next == STOP_ITERATION) {
+        context.popData();
+        context.ip = jumpTarget;
       } else {
-        throw new IllegalStateException(
-            "Expected iterator on data stack but got: " + getSimpleTypeName(iter));
+        ++context.ip;
       }
       return context;
     }
 
     @Override
     public int stackOffset() {
-      return 1;
+      return STACK_OFFSET;
     }
   }
 
