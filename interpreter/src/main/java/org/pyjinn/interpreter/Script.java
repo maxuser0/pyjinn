@@ -1328,7 +1328,20 @@ public class Script {
     }
   }
 
-  public record Generator(Context context) {}
+  public record Generator(Context context) {
+    public Context enterNext(Context callingContext) {
+      return enterNext(callingContext, callingContext.classMethodName.toString(), -1);
+    }
+
+    public Context enterNext(Context callingContext, String filename, int lineno) {
+      callingContext.enterFunction(filename, lineno);
+      this.context.setCaller(callingContext);
+      if (this.context.ip > 0) {
+        this.context.pushData(null); // Send None to yield expression.
+      }
+      return this.context;
+    }
+  }
 
   // `type` is an array of length 1 because CtorFunction needs to be instantiated before the
   // surrounding class is fully defined. (Alternatively, PyjClass could be mutable so that it's
@@ -5613,11 +5626,22 @@ public class Script {
     @Override
     public Object call(Environment env, Object... params) {
       expectNumParams(params, 1);
-      var iter = (Iterator<?>) params[0];
-      if (iter.hasNext()) {
-        return iter.next();
+      var param = params[0];
+      if (param instanceof Generator generator) {
+        var globalContext = (Context) env;
+        var context = generator.enterNext(globalContext);
+        var virtualMachine = VirtualMachine.getInstance();
+        do {
+          context = virtualMachine.executeNextInstruction(context);
+        } while (context != globalContext);
+        return globalContext.popData();
       } else {
-        throw new StopIteration();
+        var iter = (Iterator<?>) param;
+        if (iter.hasNext()) {
+          return iter.next();
+        } else {
+          throw new StopIteration();
+        }
       }
     }
   }

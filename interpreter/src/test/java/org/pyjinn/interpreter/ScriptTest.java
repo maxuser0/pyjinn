@@ -1498,17 +1498,15 @@ public class ScriptTest {
           return 30
 
         generator = yield_values()
-
-        def get_next():
-          return next(generator)
         """);
 
-    var get_next = getVariable(Script.Function.class, "get_next");
+    var generator = getVariable("generator");
+    var next = getVariable(Script.Function.class, "next");
 
-    Object[] noParams = new Object[] {};
-    assertEquals(10, get_next.call(env, noParams));
-    assertEquals(20, get_next.call(env, noParams));
-    assertThrows(StopIteration.class, () -> get_next.call(env, noParams));
+    Object[] params = new Object[] {generator};
+    assertEquals(10, next.call(env, params));
+    assertEquals(20, next.call(env, params));
+    assertThrows(StopIteration.class, () -> next.call(env, params));
   }
 
   @Test

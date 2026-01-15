@@ -126,12 +126,7 @@ sealed interface Instruction {
       if (caller == NextFunction.INSTANCE
           && paramValues.size() == 1
           && paramValues.get(0) instanceof Generator generator) {
-        context.enterFunction(filename, lineno);
-        generator.context().setCaller(context);
-        if (generator.context().ip > 0) {
-          generator.context().pushData(null); // Send None to yield expression.
-        }
-        return generator.context();
+        return generator.enterNext(context, filename, lineno);
       }
 
       // Translate x(...) to x.__call__(...).
@@ -896,12 +891,7 @@ sealed interface Instruction {
         ++context.ip;
         return context;
       } else if (iter instanceof Generator generator) {
-        context.enterFunction("<for>", -1); // TODO(maxuser): pass real filename and lineno
-        generator.context().setCaller(context);
-        if (generator.context().ip > 0) {
-          generator.context().pushData(null); // Send None to yield expression.
-        }
-        return generator.context();
+        return generator.enterNext(context);
       } else {
         throw new IllegalStateException(
             "Expected iterator on data stack but got: " + getSimpleTypeName(iter));
@@ -1089,7 +1079,11 @@ sealed interface Instruction {
         variableName.ifPresent(e -> context.set(e, unwrappedException));
         context.exception = null;
       } else {
-        throw context.exception;
+        if (unwrappedException instanceof RuntimeException runtimeException) {
+          throw runtimeException;
+        } else {
+          throw context.exception;
+        }
       }
       ++context.ip;
       return context;
