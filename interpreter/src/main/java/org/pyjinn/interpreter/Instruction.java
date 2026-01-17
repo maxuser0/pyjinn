@@ -180,6 +180,14 @@ sealed interface Instruction {
         return executeCompiledFunction(filename, lineno, context, function, paramValues.toArray());
       }
 
+      if (effectiveCaller instanceof Script.PyjClass pyjClass) {
+        effectiveCaller = pyjClass.ctor;
+      }
+
+      if (effectiveCaller instanceof IncrementalFunction function) {
+        return function.enter(context, paramValues.toArray());
+      }
+
       if (effectiveCaller instanceof Function function) {
         try {
           context.enterFunction(filename, lineno);
@@ -1167,7 +1175,7 @@ sealed interface Instruction {
     }
   }
 
-  record LoadSet(int numElements) implements Instruction {
+  record LoadSetFromElements(int numElements) implements Instruction {
     @Override
     public Context execute(Context context) {
       var list = loadSequence(context, numElements);
@@ -1179,6 +1187,17 @@ sealed interface Instruction {
     @Override
     public int stackOffset() {
       return -numElements + 1;
+    }
+  }
+
+  record LoadSetFromList() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var data = context.popData();
+      List<?> list = data instanceof PyjList pyjList ? pyjList.getJavaList() : (List<?>) data;
+      context.pushData(new PyjSet(Set.copyOf(list)));
+      ++context.ip;
+      return context;
     }
   }
 

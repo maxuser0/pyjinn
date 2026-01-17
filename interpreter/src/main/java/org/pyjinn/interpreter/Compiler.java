@@ -746,6 +746,6 @@ class Compiler {
     for (var element : set.elements()) {
       compileExpression(element, code);
     }
-    code.addInstruction(lineno, new Instruction.LoadSet(set.elements().size()));
+    code.addInstruction(lineno, new Instruction.LoadSetFromElements(set.elements().size()));
   }
 }

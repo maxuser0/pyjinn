@@ -503,6 +503,33 @@ public class ScriptTest {
   }
 
   @Test
+  public void constructListFromGenerator() throws Exception {
+    execute(
+        """
+        def generate():
+          yield 1
+          yield 2
+          yield 3
+        output = list(generate())
+        """);
+    assertEquals(new Script.PyjList(List.of(1, 2, 3)), getVariable("output"));
+  }
+
+  @Test
+  public void constructSetFromGenerator() throws Exception {
+    execute(
+        """
+        def generate():
+          yield 1
+          yield 2
+          yield 2  # duplicate ignored by set constructor
+          yield 3
+        output = set(generate())
+        """);
+    assertEquals(new Script.PyjSet(Set.of(1, 2, 3)), getVariable("output"));
+  }
+
+  @Test
   public void javaStringConstructor() throws Exception {
     execute(
         """

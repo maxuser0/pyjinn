@@ -4096,22 +4096,48 @@ public class Script {
       implements ItemGetter, ItemSetter, ItemContainer, ItemDeleter, Comparable<PyjList> {
     private final List<Object> list;
 
+    private static final Identifier LIST_CTOR_GENERATOR_VAR = new Identifier("__generator__");
+    private static final Code LIST_CTOR_CODE;
+
+    static {
+      final var tempVar = new Identifier("__temp__");
+      LIST_CTOR_CODE = new Code();
+      Compiler.compile(
+          /* interactiveMode= */ true, // assign popped value from stack to $expr
+          new ListComprehension(tempVar, tempVar, LIST_CTOR_GENERATOR_VAR, /* ifs= */ List.of()),
+          LIST_CTOR_CODE);
+      LIST_CTOR_CODE.addInstruction(-1, new Instruction.LoadFromVariable("$expr"));
+      LIST_CTOR_CODE.addInstruction(-1, new Instruction.FunctionReturn());
+    }
+
     static final PyjClass TYPE =
         new PyjClass(
             "list",
-            /* ctor= */ (Environment env, Object... params) -> {
-              Function.expectMaxParams(params, 1, "list");
-              if (params.length == 0) {
-                return new PyjList();
-              } else {
-                @SuppressWarnings("unchecked")
-                Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
-                // Stream.toList() returns immutable list, so using Stream.collect(toList()) for
-                // mutable List.
-                return new PyjList(
-                    StreamSupport.stream(iterable.spliterator(), false).collect(toList()));
-              }
-            });
+            /* ctor= */ (IncrementalFunction)
+                (Context context, Object[] params) -> {
+                  Function.expectMaxParams(params, 1, "list");
+                  if (params.length == 0) {
+                    context.pushData(new PyjList());
+                    ++context.ip;
+                    return context;
+                  } else if (params[0] instanceof Generator generator) {
+                    var ctorContext = new Context(context.globals, context, context.globals);
+                    ctorContext.setVariable(LIST_CTOR_GENERATOR_VAR, generator);
+                    ctorContext.code = LIST_CTOR_CODE;
+                    ctorContext.enterFunction("<list>", -1);
+                    return ctorContext;
+                  } else {
+                    @SuppressWarnings("unchecked")
+                    Iterable<Object> iterable = (Iterable<Object>) getIterable(params[0]);
+                    // Stream.toList() returns immutable list, so using Stream.collect(toList()) for
+                    // mutable List.
+                    context.pushData(
+                        new PyjList(
+                            StreamSupport.stream(iterable.spliterator(), false).collect(toList())));
+                    ++context.ip;
+                    return context;
+                  }
+                });
 
     public PyjList() {
       this(new ArrayList<>());
@@ -4327,19 +4353,46 @@ public class Script {
   public static class PyjSet extends PyjObject implements ItemContainer, Lengthable {
     private Set<Object> set;
 
+    private static final Identifier SET_CTOR_GENERATOR_VAR = new Identifier("__generator__");
+    private static final Code SET_CTOR_CODE;
+
+    static {
+      final var tempVar = new Identifier("__temp__");
+      SET_CTOR_CODE = new Code();
+      Compiler.compile(
+          /* interactiveMode= */ true, // assign popped value from stack to $expr
+          new ListComprehension(tempVar, tempVar, SET_CTOR_GENERATOR_VAR, /* ifs= */ List.of()),
+          SET_CTOR_CODE);
+      SET_CTOR_CODE.addInstruction(-1, new Instruction.LoadFromVariable("$expr"));
+      SET_CTOR_CODE.addInstruction(-1, new Instruction.LoadSetFromList());
+      SET_CTOR_CODE.addInstruction(-1, new Instruction.FunctionReturn());
+    }
+
     static final PyjClass TYPE =
         new PyjClass(
             "set",
-            /* ctor= */ (env, params) -> {
-              Function.expectMaxParams(params, 1, "set");
-              if (params.length == 0) {
-                return new PyjSet();
-              } else {
-                var iterable = (Iterable<?>) getIterable(params[0]);
-                return new PyjSet(
-                    StreamSupport.stream(iterable.spliterator(), false).collect(toSet()));
-              }
-            },
+            /* ctor= */ (IncrementalFunction)
+                (Context context, Object[] params) -> {
+                  Function.expectMaxParams(params, 1, "set");
+                  if (params.length == 0) {
+                    context.pushData(new PyjSet());
+                    ++context.ip;
+                    return context;
+                  } else if (params[0] instanceof Generator generator) {
+                    var ctorContext = new Context(context.globals, context, context.globals);
+                    ctorContext.setVariable(PyjSet.SET_CTOR_GENERATOR_VAR, generator);
+                    ctorContext.code = PyjSet.SET_CTOR_CODE;
+                    ctorContext.enterFunction("<set>", -1);
+                    return ctorContext;
+                  } else {
+                    var iterable = (Iterable<?>) getIterable(params[0]);
+                    context.pushData(
+                        new PyjSet(
+                            StreamSupport.stream(iterable.spliterator(), false).collect(toSet())));
+                    ++context.ip;
+                    return context;
+                  }
+                },
             /* instanceMethods= */ Map.of(
                 "__lt__",
                 (env, params) -> {
@@ -5049,6 +5102,20 @@ public class Script {
     default void expectNumParams(Object[] params, int n) {
       expectNumParams(params, n, this);
     }
+  }
+
+  public interface IncrementalFunction extends Function {
+    default Object call(Environment env, Object... params) {
+      var globalContext = (Context) env;
+      var context = enter(globalContext, params);
+      var virtualMachine = VirtualMachine.getInstance();
+      while (context != globalContext) {
+        context = virtualMachine.executeNextInstruction(context);
+      }
+      return globalContext.popData();
+    }
+
+    Context enter(Context context, Object[] params);
   }
 
   public static class GlobalsFunction implements Function {
