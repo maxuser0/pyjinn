@@ -232,8 +232,8 @@ public class Script {
   // For use by apps that need to share custom data across modules.
   public final PyjDict vars = new PyjDict();
 
-  // If enabled, assign values of expression statements to {@code $expr} for REPL output.
-  private boolean interactiveMode = false;
+  // If non-null, called with values of expression statements in global context.
+  private Consumer<Object> globalExpressionHandler = null;
 
   public Script() {
     this(
@@ -264,9 +264,9 @@ public class Script {
     this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, scriptFilename, MAIN_MODULE_NAME));
   }
 
-  /** If enabled, assign values of expression statements to {@code $expr} for REPL output. */
-  public void setInteractiveMode(boolean interactiveMode) {
-    this.interactiveMode = interactiveMode;
+  /** If non-null, called with the values of expression statements in global context. */
+  public void setGlobalExpressionHandler(Consumer<Object> globalExpressionHandler) {
+    this.globalExpressionHandler = globalExpressionHandler;
   }
 
   /**
@@ -2233,9 +2233,8 @@ public class Script {
         return;
       }
       var result = eval(context);
-      if (context.globals.script.interactiveMode) {
-        // Set $expr variable for interactive interpreter to print result of expression statements.
-        context.set("$expr", result);
+      if (context.globals.script.globalExpressionHandler != null) {
+        context.globals.script.globalExpressionHandler.accept(result);
       }
     }
 
@@ -4102,11 +4101,9 @@ public class Script {
     static {
       final var tempVar = new Identifier("__temp__");
       LIST_CTOR_CODE = new Code();
-      Compiler.compile(
-          /* interactiveMode= */ true, // assign popped value from stack to $expr
+      Compiler.compileAsExpression(
           new ListComprehension(tempVar, tempVar, LIST_CTOR_GENERATOR_VAR, /* ifs= */ List.of()),
           LIST_CTOR_CODE);
-      LIST_CTOR_CODE.addInstruction(-1, new Instruction.LoadFromVariable("$expr"));
       LIST_CTOR_CODE.addInstruction(-1, new Instruction.FunctionReturn());
     }
 
@@ -4359,11 +4356,9 @@ public class Script {
     static {
       final var tempVar = new Identifier("__temp__");
       SET_CTOR_CODE = new Code();
-      Compiler.compile(
-          /* interactiveMode= */ true, // assign popped value from stack to $expr
+      Compiler.compileAsExpression(
           new ListComprehension(tempVar, tempVar, SET_CTOR_GENERATOR_VAR, /* ifs= */ List.of()),
           SET_CTOR_CODE);
-      SET_CTOR_CODE.addInstruction(-1, new Instruction.LoadFromVariable("$expr"));
       SET_CTOR_CODE.addInstruction(-1, new Instruction.LoadSetFromList());
       SET_CTOR_CODE.addInstruction(-1, new Instruction.FunctionReturn());
     }
@@ -6724,7 +6719,7 @@ public class Script {
     ConstructorInvoker findConstructor(Class<?> clss, Object... params);
   }
 
-  private static class GlobalContext extends Context implements Environment {
+  static class GlobalContext extends Context implements Environment {
     private final Script script;
     private final String moduleFilename;
     private final SymbolCache symbolCache;
@@ -6817,7 +6812,7 @@ public class Script {
         code = new Code();
       }
       for (var statement : globalStatements) {
-        Compiler.compile(script.interactiveMode, statement, code);
+        Compiler.compile(script.globalExpressionHandler, statement, code);
       }
       globalStatements.clear();
     }

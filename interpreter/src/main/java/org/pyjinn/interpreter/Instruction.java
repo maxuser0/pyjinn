@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import org.pyjinn.interpreter.Script.*;
 
 sealed interface Instruction {
@@ -1135,6 +1136,23 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       context.popData();
+      ++context.ip;
+      return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
+  }
+
+  record GlobalExpressionHandler(Consumer<Object> handler) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var data = context.popData();
+      if (context instanceof GlobalContext) {
+        handler.accept(data);
+      }
       ++context.ip;
       return context;
     }

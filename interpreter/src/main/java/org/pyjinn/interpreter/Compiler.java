@@ -10,17 +10,28 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.pyjinn.interpreter.Instruction.JumpPlaceholder;
 import org.pyjinn.interpreter.Script.*;
 
 class Compiler {
-  public static void compile(boolean interactiveMode, Statement statement, Code code) {
-    var compiler = new Compiler(interactiveMode, /* withinFunction= */ false);
+  /**
+   * If globalExpressionHandler is non-null, it's called with values of global expression
+   * statements.
+   */
+  public static void compile(
+      Consumer<Object> globalExpressionHandler, Statement statement, Code code) {
+    var compiler = new Compiler(globalExpressionHandler, /* withinFunction= */ false);
     compiler.compileStatement(statement, code);
   }
 
+  public static void compileAsExpression(Expression expr, Code code) {
+    var compiler = new Compiler(/* globalExpressionHandler= */ null, /* withinFunction= */ false);
+    compiler.compileExpression(expr, code);
+  }
+
   private void compileFunctionBody(int lineno, Statement statement, Code code) {
-    var compiler = new Compiler(interactiveMode, /* withinFunction= */ true);
+    var compiler = new Compiler(globalExpressionHandler, /* withinFunction= */ true);
     compiler.lineno = lineno;
     compiler.compileStatement(statement, code);
   }
@@ -30,8 +41,8 @@ class Compiler {
     FOR
   }
 
-  // If enabled, assign values of expression statements to {@code $expr} for REPL output.
-  private final boolean interactiveMode;
+  // If non-null, called with values of expression statements in global context.
+  private final Consumer<Object> globalExpressionHandler;
 
   private final boolean withinFunction;
   private final Deque<LoopState> loops = new ArrayDeque<>();
@@ -39,8 +50,8 @@ class Compiler {
       new ArrayDeque<>();
   private int lineno = -1;
 
-  private Compiler(boolean interactiveMode, boolean withinFunction) {
-    this.interactiveMode = interactiveMode;
+  private Compiler(Consumer<Object> globalExpressionHandler, boolean withinFunction) {
+    this.globalExpressionHandler = globalExpressionHandler;
     this.withinFunction = withinFunction;
   }
 
@@ -114,8 +125,9 @@ class Compiler {
       }
     } else if (statement instanceof Expression expr) {
       compileExpression(expr, code);
-      if (interactiveMode) {
-        code.addInstruction(lineno, new Instruction.StoreToVariable("$expr"));
+      if (globalExpressionHandler != null) {
+        code.addInstruction(
+            lineno, new Instruction.GlobalExpressionHandler(globalExpressionHandler));
       } else {
         code.addInstruction(lineno, new Instruction.PopData());
       }

@@ -90,7 +90,15 @@ public class App {
     System.out.printf("[Java %s]\n", version.javaVersion());
 
     var script = new Script();
-    script.setInteractiveMode(true);
+
+    // Set handler for printing non-null results of global expression statements to stdout.
+    script.setGlobalExpressionHandler(
+        result -> {
+          if (result != null) {
+            System.out.println(Script.PyjObjects.toString(result));
+          }
+        });
+
     try (var scanner = new Scanner(System.in)) {
       String stdinString = "";
       boolean isCodeIncomplete = false;
@@ -134,11 +142,6 @@ public class App {
             script.compile();
           }
           script.exec();
-          var expr = script.mainModule().globals().vars().get("$expr");
-          if (expr != null) {
-            script.mainModule().globals().set("$expr", null);
-            System.out.println(Script.PyjObjects.toString(expr));
-          }
           stdinString = "";
         } catch (Exception e) {
           stdinString = "";
