@@ -701,12 +701,22 @@ class Compiler {
       loops.push(new LoopState(LoopType.FOR, listCompCode));
       listCompCode.addInstruction(lineno, new Instruction.IteratorNext());
       addBreak(new Instruction.IfStopIterationThenPopAndJump.Placeholder());
-      listCompCode.addInstruction(lineno, iterVarAssignment);
-      for (var ifClause : listComp.ifs()) {
-        compileExpression(ifClause, listCompCode);
-        listCompCode.addInstruction(lineno, new Instruction.PopJumpIfFalse(continueTarget()));
+
+      // Optimization: Skip assignment if the transform is the same as the target variable and there
+      // are no if clauses. This allows the result of IteratorNext to pass directly to
+      // AppendListAtOffset without intervening instructions for pushing/popping the same value
+      // redundantly.
+      if (!(listComp.ifs().isEmpty()
+          && vars instanceof Identifier
+          && vars.equals(listComp.transform()))) {
+        listCompCode.addInstruction(lineno, iterVarAssignment);
+        for (var ifClause : listComp.ifs()) {
+          compileExpression(ifClause, listCompCode);
+          listCompCode.addInstruction(lineno, new Instruction.PopJumpIfFalse(continueTarget()));
+        }
+        compileExpression(listComp.transform(), listCompCode);
       }
-      compileExpression(listComp.transform(), listCompCode);
+
       listCompCode.addInstruction(lineno, new Instruction.AppendListAtOffset(-3));
       listCompCode.addInstruction(lineno, new Instruction.Jump(continueTarget()));
       loops.pop().close();
