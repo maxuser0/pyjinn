@@ -11,8 +11,16 @@ public class PyjException extends RuntimeException {
   public final Object thrown;
 
   public PyjException(Object thrown) {
-    super(PyjObjects.toString(thrown));
-    this.thrown = thrown;
+    super(PyjObjects.toString(unwrapInvocationTargetException(thrown)));
+    this.thrown = unwrapInvocationTargetException(thrown);
+  }
+
+  private static Object unwrapInvocationTargetException(Object thrown) {
+    if (thrown instanceof InvocationTargetException ite) {
+      return ite.getTargetException();
+    } else {
+      return thrown;
+    }
   }
 
   public static Object unwrap(Exception e) {
