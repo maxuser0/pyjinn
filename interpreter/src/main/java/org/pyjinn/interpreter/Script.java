@@ -140,6 +140,7 @@ public class Script {
     }
 
     public void compile() {
+      globals.script.moduleHandler.onCompileModule(this);
       globals.compileGlobalStatements();
     }
 
@@ -192,6 +193,8 @@ public class Script {
       Path path = Paths.get(filename);
       return path;
     }
+
+    default void onCompileModule(Module module) {}
 
     default void onExecModule(Module module) {}
   }
@@ -1164,6 +1167,10 @@ public class Script {
         localContext.exec(functionDef.body);
         return localContext.returnValue();
       } else {
+        logger.log(
+            "Starting executing function %s() in virtual machine loop",
+            functionDef.identifier().name());
+
         // Virtual machine instruction execution.
         var callingContext = (Context) env;
         var context =
@@ -1174,11 +1181,17 @@ public class Script {
                 this,
                 params);
 
+        int numInstructions = 0;
         var vm = VirtualMachine.getInstance();
         while (context != callingContext && vm.hasMoreInstructions(context)) {
           context = vm.executeNextInstruction(context);
+          ++numInstructions;
         }
         if (context == callingContext) {
+          logger.log(
+              "Finished executing function %s() in virtual machine loop for %d instructions",
+              functionDef.identifier().name(), numInstructions);
+
           // Return value was pushed onto the calling context's data stack by FunctionReturn
           // instruction executed within the local context created within executeCompiledFunction().
           return callingContext.popData();
@@ -1387,6 +1400,12 @@ public class Script {
     module.parse(scriptAst, moduleFilename);
     modulesByName.put(name, module);
     modulesByFilename.put(moduleFilename, module);
+
+    // Compile this module if the main module has compiled code.
+    if (mainModule().globals.code != null) {
+      module.compile();
+    }
+
     module.exec();
     return module;
   }
@@ -1734,12 +1753,6 @@ public class Script {
 
       var method = __class__.instanceMethods.get(methodName);
       if (method != null) {
-        if (method instanceof BoundFunction boundFunction && boundFunction.code() != null) {
-          throw new IllegalStateException(
-              "BoundFunction with code executed via recursive tree evaluation but should be"
-                  + " executed via iterative virtual machine: %s.%s(...)"
-                      .formatted(__class__.name, boundFunction.functionDef().identifier().name()));
-        }
         Object[] methodParams = new Object[params.length + 1];
         methodParams[0] = this;
         System.arraycopy(params, 0, methodParams, 1, params.length);
@@ -2607,7 +2620,11 @@ public class Script {
   public record NonlocalVarDecl(int lineno, List<Identifier> nonlocalVars) implements Statement {
     @Override
     public void exec(Context context) {
-      for (var identifier : nonlocalVars) {
+      declare(context, nonlocalVars);
+    }
+
+    public static void declare(Context context, List<Identifier> varNames) {
+      for (var identifier : varNames) {
         context.declareNonlocalVar(identifier.name());
       }
     }

@@ -689,6 +689,15 @@ sealed interface Instruction {
     }
   }
 
+  record NonlocalVarDecl(List<Identifier> varNames) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      Script.NonlocalVarDecl.declare(context, varNames);
+      ++context.ip;
+      return context;
+    }
+  }
+
   record Nop() implements Instruction {
     @Override
     public Context execute(Context context) {
@@ -1252,6 +1261,24 @@ sealed interface Instruction {
     @Override
     public int stackOffset() {
       return -1;
+    }
+  }
+
+  record Import(Script.Import importStatement) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      importStatement.exec(context);
+      ++context.ip;
+      return context;
+    }
+  }
+
+  record ImportFrom(Script.ImportFrom importFromStatement) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      importFromStatement.exec(context);
+      ++context.ip;
+      return context;
     }
   }
 }

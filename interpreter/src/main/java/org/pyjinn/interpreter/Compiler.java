@@ -131,6 +131,10 @@ class Compiler {
       } else {
         code.addInstruction(lineno, new Instruction.PopData());
       }
+    } else if (statement instanceof Import importStatement) {
+      code.addInstruction(lineno, new Instruction.Import(importStatement));
+    } else if (statement instanceof ImportFrom importFromStatement) {
+      code.addInstruction(lineno, new Instruction.ImportFrom(importFromStatement));
     } else if (statement instanceof Assignment assign) {
       compileAssignment(assign, code);
     } else if (statement instanceof AugmentedAssignment augAssign) {
@@ -161,6 +165,8 @@ class Compiler {
       compileDeletion(deletion, code);
     } else if (statement instanceof GlobalVarDecl globalVarDecl) {
       code.addInstruction(lineno, new Instruction.GlobalVarDecl(globalVarDecl.globalVars()));
+    } else if (statement instanceof NonlocalVarDecl nonlocalVarDecl) {
+      code.addInstruction(lineno, new Instruction.NonlocalVarDecl(nonlocalVarDecl.nonlocalVars()));
     } else if (statement instanceof Pass) {
       code.addInstruction(lineno, new Instruction.Nop());
     } else {
