@@ -182,10 +182,13 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitYield_expr(PythonParser.Yield_exprContext ctx) {
-    var node = createNode(ctx, "Yield");
-    if (ctx.expression() != null) {
+    if (ctx.expression() != null && ctx.FROM() != null) {
+      var node = createNode(ctx, "YieldFrom");
       node.add("value", visitExpression(ctx.expression()));
-    } else if (ctx.star_expressions() != null) {
+      return node;
+    }
+    var node = createNode(ctx, "Yield");
+    if (ctx.star_expressions() != null) {
       node.add("value", singletonOrTuple(visitStar_expressions(ctx.star_expressions())));
     } else {
       node.add("value", JsonNull.INSTANCE);
@@ -611,7 +614,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     }
     var yield_expr = ctx.yield_expr();
     if (yield_expr != null) {
-      assignmentNode.add("yield_expr", visit(yield_expr));
+      assignmentNode.add("value", visit(yield_expr));
     }
     var star_expressions = ctx.star_expressions();
     if (star_expressions != null) {
@@ -1301,11 +1304,14 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
     } else if (ctx.listcomp() != null) {
       return visitListcomp(ctx.listcomp());
     } else if (ctx.group() != null) {
-      return visitNamed_expression(ctx.group().named_expression());
-    } else {
-      throw new UnsupportedOperationException("Unsupported atom: " + ctx.getText());
+      if (ctx.group().named_expression() != null) {
+        return visitNamed_expression(ctx.group().named_expression());
+      }
+      if (ctx.group().yield_expr() != null) {
+        return visitYield_expr(ctx.group().yield_expr());
+      }
     }
-    // Add handling for other atom types (e.g., booleans, None, etc.)
+    throw new UnsupportedOperationException("Unsupported atom: " + ctx.getText());
   }
 
   @Override

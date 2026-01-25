@@ -115,6 +115,7 @@ sealed interface Instruction {
       }
 
       // Translate len(x) to x.__len__().
+      // TODO(maxuser): Implement LenFunction as IncrementalFunction to avoid this special case.
       if (caller == LenFunction.INSTANCE && paramValues.size() == 1) {
         var function = getMethod(paramValues.get(0), "__len__");
         if (function != null) {
@@ -124,10 +125,11 @@ sealed interface Instruction {
       }
 
       // Special handling for next(generator).
+      // TODO(maxuser): Implement NextFunction as IncrementalFunction to avoid this special case.
       if (caller == NextFunction.INSTANCE
           && paramValues.size() == 1
           && paramValues.get(0) instanceof Generator generator) {
-        return generator.enterNext(context, filename, lineno);
+        return generator.startNext(context, filename, lineno);
       }
 
       // Translate x(...) to x.__call__(...).
@@ -158,21 +160,34 @@ sealed interface Instruction {
       }
 
       // Specialize handling of BoundMethod so instructions can be interrupted.
-      if (effectiveCaller instanceof Script.BoundMethod binding
-          && binding.object() instanceof PyjObject pyjObject) {
-        var method = pyjObject.__class__.instanceMethods.get(binding.methodName());
-        if (method != null && method instanceof BoundFunction function) {
-          var methodParams = new ArrayList<Object>(paramValues.size() + 1);
-          methodParams.add(pyjObject);
-          methodParams.addAll(paramValues);
-          return executeCompiledFunction(
-              filename, lineno, context, function, methodParams.toArray());
-        }
+      if (effectiveCaller instanceof Script.BoundMethod binding) {
+        if (binding.object() instanceof PyjObject pyjObject) {
+          var method = pyjObject.__class__.instanceMethods.get(binding.methodName());
+          if (method != null && method instanceof BoundFunction function) {
+            var methodParams = new ArrayList<Object>(paramValues.size() + 1);
+            methodParams.add(pyjObject);
+            methodParams.addAll(paramValues);
+            return executeCompiledFunction(
+                filename, lineno, context, function, methodParams.toArray());
+          }
 
-        // If PyjObject's field is assigned to a function, make that function the effective caller.
-        var field = pyjObject.__dict__.get(binding.methodName());
-        if (field != null && field instanceof Function function) {
-          effectiveCaller = function;
+          // If PyjObject's field is assigned to a function, make that function the effective
+          // caller.
+          var field = pyjObject.__dict__.get(binding.methodName());
+          if (field != null && field instanceof Function function) {
+            effectiveCaller = function;
+          }
+        } else if (binding.object() instanceof Generator generator
+            && binding.methodName().equals("send")) {
+          // TODO(maxuser): Support Generator.send() as an IncrementalFunction so that the following
+          // works:
+          //   s = g.send
+          //   s(99)
+          if (paramValues.size() != 1) {
+            throw new IllegalArgumentException(
+                "Generator.send() expects one argument but got " + paramValues.size());
+          }
+          return generator.startSend(paramValues.get(0), context, filename, lineno);
         }
       }
 
@@ -310,7 +325,7 @@ sealed interface Instruction {
       var returnValue = context.checkCtorResult(context.popData());
       context.ip = context.code.instructions().size(); // Put IP past end of function for safety.
       if (context.isGenerator()) {
-        throw new StopIteration(returnValue);
+        throw returnValue == null ? StopIteration.DEFAULT : new StopIteration(returnValue);
       }
       var callingContext = context.callingContext();
       callingContext.pushData(returnValue);
@@ -890,8 +905,6 @@ sealed interface Instruction {
     }
   }
 
-  static final Object STOP_ITERATION = new Object();
-
   /**
    * Peeks the data stack, casts it to Iterator or Generator, and pushes the next element wrapped in
    * an Optional.
@@ -904,15 +917,15 @@ sealed interface Instruction {
         if (iterator.hasNext()) {
           context.pushData(iterator.next());
         } else {
-          context.pushData(STOP_ITERATION);
+          context.pushData(StopIteration.DEFAULT);
         }
         ++context.ip;
         return context;
       } else if (iter instanceof Generator generator) {
-        return generator.enterNext(context);
+        return generator.startNext(context);
       } else {
         throw new IllegalStateException(
-            "Expected iterator on data stack but got: " + getSimpleTypeName(iter));
+            "Expected iterator or generator on data stack but got: " + getSimpleTypeName(iter));
       }
     }
 
@@ -943,7 +956,7 @@ sealed interface Instruction {
     @Override
     public Context execute(Context context) {
       var next = context.peekData();
-      if (next == STOP_ITERATION) {
+      if (next instanceof StopIteration) {
         context.popData();
         context.ip = jumpTarget;
       } else {
@@ -955,6 +968,62 @@ sealed interface Instruction {
     @Override
     public int stackOffset() {
       return STACK_OFFSET;
+    }
+  }
+
+  record GeneratorSend() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var valueToSendDown = context.popData();
+      var iter = context.peekData();
+      if (iter instanceof Iterator<?> iterator) {
+        // valueToSendDown is ignored for iterators.
+        if (iterator.hasNext()) {
+          context.pushData(iterator.next());
+        } else {
+          context.pushData(StopIteration.DEFAULT);
+        }
+        ++context.ip;
+        return context;
+      } else if (iter instanceof Generator generator) {
+        // When send() is completed in the sub-generator, the sub-generator pushes a value onto the
+        // super-generator's data stack.
+        return generator.startSend(valueToSendDown, context);
+      } else {
+        throw new IllegalStateException(
+            "Expected generator on data stack but got: " + getSimpleTypeName(iter));
+      }
+    }
+  }
+
+  record IfPeekStopIterationThenJump(int jumpTarget) implements Instruction {
+    record Placeholder() implements JumpPlaceholder {
+      @Override
+      public Instruction createJumpTo(int jumpTarget) {
+        return new IfPeekStopIterationThenJump(jumpTarget);
+      }
+    }
+
+    @Override
+    public Context execute(Context context) {
+      var data = context.peekData();
+      if (data instanceof StopIteration) {
+        context.ip = jumpTarget;
+      } else {
+        ++context.ip;
+      }
+      return context;
+    }
+  }
+
+  record FinishYieldFrom() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var stopIteration = (StopIteration) context.popData();
+      context.popData();
+      context.pushData(stopIteration.value);
+      ++context.ip;
+      return context;
     }
   }
 

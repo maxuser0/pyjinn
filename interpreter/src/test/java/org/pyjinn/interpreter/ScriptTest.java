@@ -1554,6 +1554,59 @@ public class ScriptTest {
     assertEquals(new Script.PyjList(List.of(0, 1, 2, 3)), getVariable("output"));
   }
 
+  @Test
+  public void assignmentFromYield() throws Exception {
+    execute(
+        """
+        output = None
+
+        def gen():
+            global output
+            output = yield 77
+
+        g = gen()
+        next(g)
+        try:
+          g.send(99)
+        except StopIteration:
+          pass
+        """);
+
+    assertEquals(99, getVariable("output"));
+  }
+
+  @Test
+  public void yieldFrom() throws Exception {
+    execute(
+        """
+        def generate_inner():
+          yield 2
+          yield 4
+          yield 6
+          return 7
+
+        def generate_outer():
+          yield from [1, 3, 5]
+          return (yield from generate_inner())
+
+        values = []
+        result = None
+
+        def consume(generator):
+          global result
+          try:
+            for i in range(10):  # Finite, but enough to exhaust the generator.
+              values.append(next(generator))
+          except StopIteration as e:
+            result = e.value
+
+        consume(generate_outer())
+        """);
+
+    assertEquals(new Script.PyjList(List.of(1, 3, 5, 2, 4, 6)), getVariable("values"));
+    assertEquals(7, getVariable("result"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

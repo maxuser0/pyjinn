@@ -6,6 +6,8 @@ package org.pyjinn.interpreter;
 public class StopIteration extends RuntimeException {
   public final Object value;
 
+  public static final StopIteration DEFAULT = new StopIteration();
+
   public StopIteration() {
     this(null);
   }

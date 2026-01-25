@@ -31,14 +31,14 @@ public class VirtualMachine {
       if (debug) {
         logger.log("Line info: %s", context.code.getLineInfos());
       }
-      boolean isStopIteration = e instanceof StopIteration;
+      StopIteration stopIteration = e instanceof StopIteration s ? s : null;
       int lineno = getCodeLineNumber(context);
       context.appendScriptStack(lineno, e);
       context.exception = e;
       Code.ExceptionalJump jump = null;
       while ((jump = context.code.getExceptionalJump(context.ip)) == null
           && context.callingContext() != null) {
-        if (isStopIteration && handleStopIterationAtForLoop(context)) {
+        if (handleStopIteration(context, stopIteration)) {
           return context;
         }
         var caller = context.callingContext();
@@ -46,7 +46,7 @@ public class VirtualMachine {
         context.exception = null;
         context = context.callingContext();
       }
-      if (isStopIteration && handleStopIterationAtForLoop(context)) {
+      if (handleStopIteration(context, stopIteration)) {
         return context;
       }
       if (jump == null) {
@@ -66,14 +66,21 @@ public class VirtualMachine {
     return context;
   }
 
-  private static boolean handleStopIterationAtForLoop(Context context) {
+  private static boolean handleStopIteration(Context context, StopIteration stopIteration) {
+    if (stopIteration == null) {
+      return false;
+    }
     var instructions = context.code.instructions();
     int ip = context.ip;
-    if (ip < instructions.size() && instructions.get(ip) instanceof Instruction.IteratorNext) {
-      context.exception = null;
-      context.pushData(Instruction.STOP_ITERATION);
-      ++context.ip;
-      return true;
+    if (ip < instructions.size()) {
+      var instruction = instructions.get(ip);
+      if (instruction instanceof Instruction.IteratorNext
+          || instruction instanceof Instruction.GeneratorSend) {
+        context.exception = null;
+        context.pushData(stopIteration);
+        ++context.ip;
+        return true;
+      }
     }
     return false;
   }

@@ -1020,6 +1020,14 @@ public class Script {
             }
             return new YieldExpression(parseExpression(getAttr(element, "value")));
           }
+
+        case "YieldFrom":
+          {
+            if (!functionParseStateStack.isEmpty()) {
+              functionParseStateStack.peek().hasYieldExpression = true;
+            }
+            return new YieldFromExpression(parseExpression(getAttr(element, "value")));
+          }
       }
       throw new IllegalArgumentException("Unknown expression type: " + element.toString());
     }
@@ -1342,15 +1350,23 @@ public class Script {
   }
 
   public record Generator(Context context) {
-    public Context enterNext(Context callingContext) {
-      return enterNext(callingContext, callingContext.classMethodName.toString(), -1);
+    public Context startNext(Context callingContext) {
+      return startNext(callingContext, callingContext.classMethodName.toString(), -1);
     }
 
-    public Context enterNext(Context callingContext, String filename, int lineno) {
+    public Context startNext(Context callingContext, String filename, int lineno) {
+      return startSend(/* value= */ null, callingContext, filename, lineno);
+    }
+
+    public Context startSend(Object value, Context callingContext) {
+      return startSend(value, callingContext, callingContext.classMethodName.toString(), -1);
+    }
+
+    public Context startSend(Object value, Context callingContext, String filename, int lineno) {
       callingContext.enterFunction(filename, lineno);
       this.context.setCaller(callingContext);
       if (this.context.ip > 0) {
-        this.context.pushData(null); // Send None to yield expression.
+        this.context.pushData(value);
       }
       return this.context;
     }
@@ -2306,11 +2322,19 @@ public class Script {
     }
   }
 
-  public record YieldExpression(Expression value) implements Expression {
+  public record YieldExpression(Expression operand) implements Expression {
     @Override
     public Object eval(Context context) {
       throw new UnsupportedOperationException(
-          "yield expression not supported in recursive tree-walk interpreter");
+          "'yield' expression not supported in recursive tree-walk interpreter");
+    }
+  }
+
+  public record YieldFromExpression(Expression operand) implements Expression {
+    @Override
+    public Object eval(Context context) {
+      throw new UnsupportedOperationException(
+          "'yield from' expression not supported in recursive tree-walk interpreter");
     }
   }
 
@@ -5708,7 +5732,7 @@ public class Script {
       var param = params[0];
       if (param instanceof Generator generator) {
         var globalContext = (Context) env;
-        var context = generator.enterNext(globalContext);
+        var context = generator.startNext(globalContext);
         var virtualMachine = VirtualMachine.getInstance();
         do {
           context = virtualMachine.executeNextInstruction(context);

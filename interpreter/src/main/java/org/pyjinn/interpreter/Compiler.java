@@ -313,10 +313,10 @@ class Compiler {
     //   BODY
     //
     // compiles to instructions:
-    //   [0] eval ITER (Iterable<?>)
-    //   [1] eval ITER.iterator() (leave on data stack: $iterator)
-    //   [2] push $next = $iterator.hasNext() ? $iterator.next() : STOP_ITERATION
-    //   [3] PopJumpIfStopIteration 7
+    //   [0] eval ITER (Iterable<?> | Generator)
+    //   [1] ITER is Generator ? ITER : ITER.iterator() (leave on data stack: $iterator)
+    //   [2] push $next = $iterator.hasNext() ? $iterator.next() : StopIteration
+    //   [3] IfStopIterationThenPopAndJump 7
     //   [4] assign VAR, ... (rhs = $next)
     //   [5] execute BODY
     //   [6] Jump 2
@@ -745,8 +745,38 @@ class Compiler {
       code.addInstruction(
           lineno, new Instruction.NullaryCompileOnlyFunctionCall(function, listCompCode));
     } else if (expr instanceof YieldExpression yieldExpression) {
-      compileExpression(yieldExpression.value(), code);
+      compileExpression(yieldExpression.operand(), code);
       code.addInstruction(lineno, new Instruction.Yield());
+    } else if (expr instanceof YieldFromExpression yieldFromExpression) {
+      // source: yield from ITER
+      // [0] push(`yield from` operand)
+      // [1] IterableIterator: ITER = pop(); push(ITER is Generator GEN ? GEN : ITER.iterator())
+      // [2] push(VALUE_TO_SEND_DOWN = null)  // to seed generator
+      // [3] GeneratorSend:
+      //       VALUE_TO_SEND_DOWN = pop(),
+      //       (if ITER is Generator GEN then GEN.send(VALUE_TO_SEND_DOWN)
+      //        else ITER.hasNext() ? ITER.next() : StopIteration
+      //       ) -> push VALUE_TO_SEND_UP
+      // [4] IfPeekStopIterationThenJump -> [7]
+      // [5] Yield VALUE_TO_SEND_UP
+      // [6] Jump 3
+      // [7] FinishYieldFrom: pop STOP_ITERATION, pop ITER, push STOP_ITERATION.value
+
+      compileExpression(yieldFromExpression.operand(), code); // [0]
+      code.addInstruction(lineno, new Instruction.IterableIterator()); // [1]
+      code.addInstruction(lineno, new Instruction.PushData(null)); // [2]
+      int generatorSendSource = code.instructions().size();
+      code.addInstruction(lineno, new Instruction.GeneratorSend()); // [3]
+
+      var jumpToFinishPlaceholder = new Instruction.IfPeekStopIterationThenJump.Placeholder();
+      int jumpToFinishSource = code.addInstruction(lineno, jumpToFinishPlaceholder); // [4]
+
+      code.addInstruction(lineno, new Instruction.Yield()); // [5]
+      code.addInstruction(lineno, new Instruction.Jump(generatorSendSource)); // [6]
+      int finishTarget = code.addInstruction(lineno, new Instruction.FinishYieldFrom()); // [7]
+
+      code.instructions()
+          .set(jumpToFinishSource, jumpToFinishPlaceholder.createJumpTo(finishTarget));
     } else {
       throw new UnsupportedOperationException(
           "Expression type not supported: " + getSimpleTypeName(expr));
