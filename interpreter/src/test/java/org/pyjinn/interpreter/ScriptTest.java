@@ -1607,6 +1607,25 @@ public class ScriptTest {
     assertEquals(7, getVariable("result"));
   }
 
+  @Test
+  public void sendNonNoneToUnstartedGenerator() throws Exception {
+    var exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                execute(
+                    """
+                    def generate():
+                      yield 1
+
+                    g = generate()
+                    g.send(0)
+                    """));
+    assertEquals(
+        "Can't send non-None value to a just-started generator; sent Integer",
+        exception.getMessage());
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }

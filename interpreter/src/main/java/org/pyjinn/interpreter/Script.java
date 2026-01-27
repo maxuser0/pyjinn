@@ -1365,7 +1365,15 @@ public class Script {
     public Context startSend(Object value, Context callingContext, String filename, int lineno) {
       callingContext.enterFunction(filename, lineno);
       this.context.setCaller(callingContext);
-      if (this.context.ip > 0) {
+      // IP -1 indicates that the generator is in its initial state and needs to be reset to 0.
+      if (this.context.ip == -1) {
+        if (value != null) {
+          throw new IllegalArgumentException(
+              "Can't send non-None value to a just-started generator; sent "
+                  + getSimpleTypeName(value));
+        }
+        this.context.ip = 0;
+      } else {
         this.context.pushData(value);
       }
       return this.context;

@@ -300,6 +300,8 @@ sealed interface Instruction {
         // Treat functions with yield expressions as generators.
         var localContext =
             function.initLocalContext(/* callingContext= */ context, params, function.isCtor());
+        // Set IP to -1 to indicate that it's in its initial state that cannot be jumped back to.
+        localContext.ip = -1;
         localContext.code = function.code();
         context.pushData(new Generator(localContext));
         ++context.ip;
