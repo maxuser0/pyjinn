@@ -740,10 +740,43 @@ class Compiler {
               /* kwarg= */ Optional.empty(),
               /* defaults= */ List.of(),
               new Pass(), // Body statement is unused because listCompCode is executed directly.
-              /* hasYieldExpression= */ false);
+              /* hasYieldExpression= */ false,
+              /* isAsync= */ false);
 
       code.addInstruction(
           lineno, new Instruction.NullaryCompileOnlyFunctionCall(function, listCompCode));
+    } else if (expr instanceof AwaitExpression awaitExpr) {
+      // Evaluate the awaitable (the Coroutine)
+      compileExpression(awaitExpr.operand(), code);
+
+      // Verify/Prepare Awaitable (Replaces IterableIterator)
+      code.addInstruction(lineno, new Instruction.GetAwaitable());
+
+      // Push seed value (null)
+      code.addInstruction(lineno, new Instruction.PushData(null));
+
+      // --- START DELEGATION LOOP ---
+      int generatorSendSource = code.instructions().size();
+
+      // Send value down to Coroutine (catches StopIteration internally)
+      code.addInstruction(lineno, new Instruction.GeneratorSend());
+
+      // If Coroutine finished (StopIteration), jump to cleanup
+      var jumpToFinishPlaceholder = new Instruction.IfPeekStopIterationThenJump.Placeholder();
+      int jumpToFinishSource = code.addInstruction(lineno, jumpToFinishPlaceholder);
+
+      // Yield the suspension signal up to the caller
+      code.addInstruction(lineno, new Instruction.Yield());
+
+      // Loop back to send the caller's response back down
+      code.addInstruction(lineno, new Instruction.Jump(generatorSendSource));
+      // --- END DELEGATION LOOP ---
+
+      // Extract return value
+      int finishTarget = code.addInstruction(lineno, new Instruction.FinishYieldFrom());
+
+      code.instructions()
+          .set(jumpToFinishSource, jumpToFinishPlaceholder.createJumpTo(finishTarget));
     } else if (expr instanceof YieldExpression yieldExpression) {
       compileExpression(yieldExpression.operand(), code);
       code.addInstruction(lineno, new Instruction.Yield());

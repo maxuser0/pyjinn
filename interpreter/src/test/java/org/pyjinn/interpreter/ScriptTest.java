@@ -1622,8 +1622,68 @@ public class ScriptTest {
                     g.send(0)
                     """));
     assertEquals(
-        "Can't send non-None value to a just-started generator; sent Integer",
-        exception.getMessage());
+        "Can't send non-None value to start a generator; sent Integer", exception.getMessage());
+  }
+
+  @Test
+  public void asyncAwait() throws Exception {
+    execute(
+        """
+        Coroutine = JavaClass("org.pyjinn.interpreter.Script$Coroutine")
+
+        # Fake sleep. Yields the number of seconds that it pretends to sleep.
+        def sleep(seconds: int):
+          yield seconds
+
+        def run_as_generator(coroutine: Coroutine):
+          if not isinstance(coroutine, Coroutine):
+            raise Exception(f"Expected coroutine but got {type(coroutine)}")
+
+          started = False
+          while True:
+            try:
+              if not started:
+                started = True
+                value = coroutine.send(None)
+                yield value
+                continue
+
+              value = coroutine.send(value)
+              yield value
+            except StopIteration as stop:
+              return stop.value
+
+        async def baz():
+          await sleep(3)
+          return ["BAZ"]
+
+        async def bar():
+          await sleep(2)
+          output = await baz()
+          output.append("BAR")
+          return output
+
+        async def foo():
+          await sleep(1)
+          output = await bar()
+          output.append("FOO")
+          await sleep(4)
+          return output
+
+        generator = run_as_generator(foo())
+        yields = []
+        try:
+          yields.append(next(generator))  # sleep(1)
+          yields.append(next(generator))  # sleep(2)
+          yields.append(next(generator))  # sleep(3)
+          yields.append(next(generator))  # sleep(4)
+          yields.append(next(generator))  # raises StopIteration
+        except StopIteration as stop:
+          result = stop.value
+        """);
+
+    assertEquals(new Script.PyjList(List.of(1, 2, 3, 4)), getVariable("yields"));
+    assertEquals(new Script.PyjList(List.of("BAZ", "BAR", "FOO")), getVariable("result"));
   }
 
   private Object getVariable(String variableName) {

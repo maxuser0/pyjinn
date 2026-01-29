@@ -177,17 +177,16 @@ sealed interface Instruction {
           if (field != null && field instanceof Function function) {
             effectiveCaller = function;
           }
-        } else if (binding.object() instanceof Generator generator
+        } else if (binding.object() instanceof Sendable sendable
             && binding.methodName().equals("send")) {
-          // TODO(maxuser): Support Generator.send() as an IncrementalFunction so that the following
-          // works:
+          // TODO(maxuser): Support Sendable.send() as an IncrementalFunction for the following:
           //   s = g.send
           //   s(99)
           if (paramValues.size() != 1) {
             throw new IllegalArgumentException(
-                "Generator.send() expects one argument but got " + paramValues.size());
+                "send() method expects one argument but got " + paramValues.size());
           }
-          return generator.startSend(paramValues.get(0), context, filename, lineno);
+          return sendable.startSend(paramValues.get(0), context, filename, lineno);
         }
       }
 
@@ -296,6 +295,14 @@ sealed interface Instruction {
       if (function.isHalted()) {
         ++context.ip;
         return context;
+      } else if (function.functionDef().isAsync()) {
+        var localContext = function.initLocalContext(context, params, function.isCtor());
+        // Set IP to -1 to indicate that it's in its initial state that cannot be jumped back to.
+        localContext.ip = -1;
+        localContext.code = function.code();
+        context.pushData(new Coroutine(localContext));
+        ++context.ip;
+        return context;
       } else if (function.functionDef().hasYieldExpression()) {
         // Treat functions with yield expressions as generators.
         var localContext =
@@ -338,6 +345,19 @@ sealed interface Instruction {
     @Override
     public int stackOffset() {
       return 1;
+    }
+  }
+
+  record GetAwaitable() implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var object = context.peekData();
+      if (!(object instanceof Sendable)) {
+        // TODO(maxuser): Check for object.__await__() method.
+        throw new IllegalArgumentException("object is not awaitable: " + getSimpleTypeName(object));
+      }
+      ++context.ip;
+      return context;
     }
   }
 
@@ -987,10 +1007,10 @@ sealed interface Instruction {
         }
         ++context.ip;
         return context;
-      } else if (iter instanceof Generator generator) {
-        // When send() is completed in the sub-generator, the sub-generator pushes a value onto the
-        // super-generator's data stack.
-        return generator.startSend(valueToSendDown, context);
+      } else if (iter instanceof Sendable sendable) {
+        // When send() is completed in the sub-sendable (Coroutine or Generator), the sub-sendable
+        // pushes a value onto the super-sendable's data stack.
+        return sendable.startSend(valueToSendDown, context);
       } else {
         throw new IllegalStateException(
             "Expected generator on data stack but got: " + getSimpleTypeName(iter));

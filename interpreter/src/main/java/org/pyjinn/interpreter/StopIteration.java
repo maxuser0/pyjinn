@@ -16,4 +16,9 @@ public class StopIteration extends RuntimeException {
     super("StopIteration");
     this.value = value;
   }
+
+  @Override
+  public String toString() {
+    return "StopIteration(" + Script.PyjObjects.toString(value) + ")";
+  }
 }

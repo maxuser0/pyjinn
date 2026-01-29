@@ -2472,6 +2472,30 @@ class PyjinnParserTest {
     assertName("x", yieldFrom.get("value"));
   }
 
+  @Test
+  void asyncFunction() throws Exception {
+    var parserOutput = parseTrees("async def foo(): await bar");
+    var ast = parserOutput.jsonAst();
+
+    var asyncFunctionDef = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("AsyncFunctionDef", asyncFunctionDef.get("type").getAsString());
+    assertEquals("foo", asyncFunctionDef.get("name").getAsString());
+
+    var args = asyncFunctionDef.get("args").getAsJsonObject();
+    assertEquals("arguments", args.get("type").getAsString());
+    assertEquals(0, args.get("args").getAsJsonArray().size());
+
+    var body = asyncFunctionDef.get("body").getAsJsonArray();
+    assertEquals(1, body.size());
+
+    var expr = body.get(0).getAsJsonObject();
+    assertEquals("Expr", expr.get("type").getAsString());
+
+    var awaitNode = expr.get("value").getAsJsonObject();
+    assertEquals("Await", awaitNode.get("type").getAsString());
+    assertName("bar", awaitNode.get("value"));
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());

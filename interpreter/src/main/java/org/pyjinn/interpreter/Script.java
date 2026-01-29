@@ -474,7 +474,10 @@ public class Script {
                 var type = getType(elem);
                 switch (type) {
                   case "FunctionDef":
-                    methodDefs.add(parseFunctionDef(identifier.name(), elem));
+                    methodDefs.add(parseFunctionDef(identifier.name(), elem, /* isAsync= */ false));
+                    break;
+                  case "AsyncFunctionDef":
+                    methodDefs.add(parseFunctionDef(identifier.name(), elem, /* isAsync= */ true));
                     break;
                   case "Assign":
                     fields.add(parseClassFieldDef(elem, true));
@@ -527,19 +530,24 @@ public class Script {
           .toList();
     }
 
-    private FunctionDef parseFunctionDef(String enclosingClassName, JsonElement element) {
+    private FunctionDef parseFunctionDef(
+        String enclosingClassName, JsonElement element, boolean isAsync) {
       var functionName = getAttr(element, "name").getAsString();
       functionParseStateStack.push(new FunctionParseState());
       try {
         var body = parseStatementBlock(getBody(element));
-        return parsePartialFunctionDef(enclosingClassName, functionName, element, body);
+        return parsePartialFunctionDef(enclosingClassName, functionName, element, body, isAsync);
       } finally {
         functionParseStateStack.pop();
       }
     }
 
     private FunctionDef parsePartialFunctionDef(
-        String enclosingClassName, String functionName, JsonElement element, Statement body) {
+        String enclosingClassName,
+        String functionName,
+        JsonElement element,
+        Statement body,
+        boolean isAsync) {
       var decorators = getDecorators(element);
       var argsObject = getAttr(element, "args").getAsJsonObject();
       List<FunctionArg> args = parseFunctionArgs(getAttr(argsObject, "args").getAsJsonArray());
@@ -582,7 +590,8 @@ public class Script {
           kwarg,
           defaults,
           body,
-          hasYieldExpression);
+          hasYieldExpression,
+          isAsync);
     }
 
     public Statement parseStatements(JsonElement element) {
@@ -599,7 +608,10 @@ public class Script {
             return parseClassDef(element);
 
           case "FunctionDef":
-            return parseFunctionDef("<>", element);
+            return parseFunctionDef("<>", element, /* isAsync= */ false);
+
+          case "AsyncFunctionDef":
+            return parseFunctionDef("<>", element, /* isAsync= */ true);
 
           case "AnnAssign":
             {
@@ -976,7 +988,8 @@ public class Script {
                     /* enclosingClassName= */ "<>",
                     "<lambda>",
                     element,
-                    new ReturnStatement(lineno, body)));
+                    new ReturnStatement(lineno, body),
+                    /* isAsync= */ false));
           }
 
         case "JoinedStr":
@@ -1011,6 +1024,11 @@ public class Script {
           {
             return new WalrusExpression(
                 getId(getAttr(element, "target")), parseExpression(getAttr(element, "value")));
+          }
+
+        case "Await":
+          {
+            return new AwaitExpression(parseExpression(getAttr(element, "value")));
           }
 
         case "Yield":
@@ -1229,7 +1247,7 @@ public class Script {
               callingContext,
               functionDef.enclosingClassName,
               functionDef.identifier.name(),
-              functionDef.hasYieldExpression());
+              /* isGenerator= */ functionDef.hasYieldExpression() || functionDef.isAsync());
 
       if (isCtor) {
         if (params.length == 0) {
@@ -1349,7 +1367,15 @@ public class Script {
     }
   }
 
-  public record Generator(Context context) {
+  interface Sendable {
+    default Context startSend(Object value, Context callingContext) {
+      return startSend(value, callingContext, callingContext.classMethodName.toString(), -1);
+    }
+
+    Context startSend(Object value, Context callingContext, String filename, int lineno);
+  }
+
+  public record Generator(Context context) implements Sendable {
     public Context startNext(Context callingContext) {
       return startNext(callingContext, callingContext.classMethodName.toString(), -1);
     }
@@ -1358,10 +1384,7 @@ public class Script {
       return startSend(/* value= */ null, callingContext, filename, lineno);
     }
 
-    public Context startSend(Object value, Context callingContext) {
-      return startSend(value, callingContext, callingContext.classMethodName.toString(), -1);
-    }
-
+    @Override
     public Context startSend(Object value, Context callingContext, String filename, int lineno) {
       callingContext.enterFunction(filename, lineno);
       this.context.setCaller(callingContext);
@@ -1369,8 +1392,26 @@ public class Script {
       if (this.context.ip == -1) {
         if (value != null) {
           throw new IllegalArgumentException(
-              "Can't send non-None value to a just-started generator; sent "
-                  + getSimpleTypeName(value));
+              "Can't send non-None value to start a generator; sent " + getSimpleTypeName(value));
+        }
+        this.context.ip = 0;
+      } else {
+        this.context.pushData(value);
+      }
+      return this.context;
+    }
+  }
+
+  public record Coroutine(Context context) implements Sendable {
+    @Override
+    public Context startSend(Object value, Context callingContext, String filename, int lineno) {
+      callingContext.enterFunction(filename, lineno);
+      this.context.setCaller(callingContext);
+      // IP -1 indicates that the coroutine is in its initial state and needs to be reset to 0.
+      if (this.context.ip == -1) {
+        if (value != null) {
+          throw new IllegalArgumentException(
+              "Can't send non-None value to start a coroutine; sent " + getSimpleTypeName(value));
         }
         this.context.ip = 0;
       } else {
@@ -1652,7 +1693,8 @@ public class Script {
               /* kwarg= */ Optional.empty(),
               defaults,
               new DataclassDefaultInit(type, fields, lineno),
-              /* hasYieldExpression= */ false);
+              /* hasYieldExpression= */ false,
+              /* isAsync= */ false);
       return new BoundFunction(functionDef, context, compiler.compile(functionDef));
     }
 
@@ -1978,7 +2020,8 @@ public class Script {
       Optional<FunctionArg> kwarg,
       List<Expression> defaults,
       Statement body,
-      boolean hasYieldExpression)
+      boolean hasYieldExpression,
+      boolean isAsync)
       implements Statement {
     /** Adds this function to the specified {@code context}. */
     @Override
@@ -2327,6 +2370,14 @@ public class Script {
       var value = rhs.eval(context);
       context.setVariable(identifier, value);
       return value;
+    }
+  }
+
+  public record AwaitExpression(Expression operand) implements Expression {
+    @Override
+    public Object eval(Context context) {
+      throw new UnsupportedOperationException(
+          "'await' expression not supported in recursive tree-walk interpreter");
     }
   }
 

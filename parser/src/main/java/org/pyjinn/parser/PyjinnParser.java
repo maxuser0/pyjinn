@@ -321,7 +321,7 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitFunction_def_raw(PythonParser.Function_def_rawContext ctx) {
-    var node = createNode(ctx, "FunctionDef");
+    var node = createNode(ctx, ctx.ASYNC() == null ? "FunctionDef" : "AsyncFunctionDef");
     node.addProperty("name", ctx.NAME().getText());
 
     // Implementation is nearly identical to visitLambda_parameters() but with properties that lack
@@ -899,7 +899,13 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
 
   @Override
   public JsonElement visitAwait_primary(PythonParser.Await_primaryContext ctx) {
-    return visit(ctx.primary());
+    if (ctx.AWAIT() == null) {
+      return visit(ctx.primary());
+    } else {
+      var await = createNode(ctx, "Await");
+      await.add("value", visit(ctx.primary()));
+      return await;
+    }
   }
 
   @Override
