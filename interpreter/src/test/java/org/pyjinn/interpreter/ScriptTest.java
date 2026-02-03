@@ -321,6 +321,18 @@ public class ScriptTest {
   }
 
   @Test
+  public void dictClear() throws Exception {
+    env =
+        execute(
+            """
+            d = dict(x=0, y=1)
+            d.clear()
+            """);
+
+    assertEquals(new Script.PyjDict(), getVariable(Script.PyjDict.class, "d"));
+  }
+
+  @Test
   public void floorDivision() throws Exception {
     env =
         execute(

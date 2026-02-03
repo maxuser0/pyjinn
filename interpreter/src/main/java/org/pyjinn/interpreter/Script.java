@@ -5047,6 +5047,10 @@ public class Script {
       map.remove(key);
     }
 
+    public void clear() {
+      map.clear();
+    }
+
     @Override
     public String toString() {
       var out = new StringBuilder("{");
