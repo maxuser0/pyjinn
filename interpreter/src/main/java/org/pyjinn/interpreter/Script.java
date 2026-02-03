@@ -1367,60 +1367,6 @@ public class Script {
     }
   }
 
-  interface Sendable {
-    default Context startSend(Object value, Context callingContext) {
-      return startSend(value, callingContext, callingContext.classMethodName.toString(), -1);
-    }
-
-    Context startSend(Object value, Context callingContext, String filename, int lineno);
-  }
-
-  public record Generator(Context context) implements Sendable {
-    public Context startNext(Context callingContext) {
-      return startNext(callingContext, callingContext.classMethodName.toString(), -1);
-    }
-
-    public Context startNext(Context callingContext, String filename, int lineno) {
-      return startSend(/* value= */ null, callingContext, filename, lineno);
-    }
-
-    @Override
-    public Context startSend(Object value, Context callingContext, String filename, int lineno) {
-      callingContext.enterFunction(filename, lineno);
-      this.context.setCaller(callingContext);
-      // IP -1 indicates that the generator is in its initial state and needs to be reset to 0.
-      if (this.context.ip == -1) {
-        if (value != null) {
-          throw new IllegalArgumentException(
-              "Can't send non-None value to start a generator; sent " + getSimpleTypeName(value));
-        }
-        this.context.ip = 0;
-      } else {
-        this.context.pushData(value);
-      }
-      return this.context;
-    }
-  }
-
-  public record Coroutine(Context context) implements Sendable {
-    @Override
-    public Context startSend(Object value, Context callingContext, String filename, int lineno) {
-      callingContext.enterFunction(filename, lineno);
-      this.context.setCaller(callingContext);
-      // IP -1 indicates that the coroutine is in its initial state and needs to be reset to 0.
-      if (this.context.ip == -1) {
-        if (value != null) {
-          throw new IllegalArgumentException(
-              "Can't send non-None value to start a coroutine; sent " + getSimpleTypeName(value));
-        }
-        this.context.ip = 0;
-      } else {
-        this.context.pushData(value);
-      }
-      return this.context;
-    }
-  }
-
   // `type` is an array of length 1 because CtorFunction needs to be instantiated before the
   // surrounding class is fully defined. (Alternatively, PyjClass could be mutable so that it's
   // instantiated before CtorFunction.)
@@ -6971,7 +6917,7 @@ public class Script {
     private Context
         callingContext; // for returning to caller in compiled mode (non-final for generators)
     private final Context enclosingContext; // for resolving variables
-    private final ClassMethodName classMethodName;
+    final ClassMethodName classMethodName;
     private Set<String> globalVarNames = null;
     private Set<String> nonlocalVarNames = null;
     private Object returnValue = NOT_ASSIGNED; // NOT_ASSIGNED when no return value yet.

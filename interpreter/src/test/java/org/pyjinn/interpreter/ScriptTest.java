@@ -1629,7 +1629,7 @@ public class ScriptTest {
   public void asyncAwait() throws Exception {
     execute(
         """
-        Coroutine = JavaClass("org.pyjinn.interpreter.Script$Coroutine")
+        Coroutine = JavaClass("org.pyjinn.interpreter.Coroutine")
 
         # Fake sleep. Yields the number of seconds that it pretends to sleep.
         def sleep(seconds: int):
