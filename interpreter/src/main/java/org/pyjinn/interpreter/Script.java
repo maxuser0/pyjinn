@@ -3889,6 +3889,10 @@ public class Script {
     private static Class<?> promotePrimitiveType(Class<?> type) {
       if (type == boolean.class) {
         return Boolean.class;
+      } else if (type == byte.class) {
+        return Byte.class;
+      } else if (type == short.class) {
+        return Short.class;
       } else if (type == int.class) {
         return Integer.class;
       } else if (type == long.class) {
