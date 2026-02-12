@@ -187,6 +187,29 @@ public class ScriptTest {
   }
 
   @Test
+  public void keywordOnlyArgs() throws Exception {
+    env =
+        execute(
+            """
+            args_array = None
+            x_arg = None
+            y_arg = None
+
+            def foo(*args, x, y=99):
+              global args_array, x_arg, y_arg
+              args_array = JavaArray(args)
+              x_arg = x
+              y_arg = y
+
+            foo(1, 2, x=3)
+            """);
+
+    assertArrayEquals(new Object[] {1, 2}, (Object[]) env.get("args_array"));
+    assertEquals(3, env.get("x_arg"));
+    assertEquals(99, env.get("y_arg"));
+  }
+
+  @Test
   public void packKeywordArgs() throws Exception {
     env =
         execute(

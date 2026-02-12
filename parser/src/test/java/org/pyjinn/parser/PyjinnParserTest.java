@@ -2496,6 +2496,64 @@ class PyjinnParserTest {
     assertName("bar", awaitNode.get("value"));
   }
 
+  @Test
+  void keywordOnlyArgs() throws Exception {
+    var parserOutput = parseTrees("def foo(aa, bb=8, *vargs, xx=11,yy,zz=22): pass");
+    var ast = parserOutput.jsonAst();
+
+    var functionDef = getSingletonStatement(ast).getAsJsonObject();
+    assertEquals("FunctionDef", functionDef.get("type").getAsString());
+    assertEquals("foo", functionDef.get("name").getAsString());
+
+    var args = functionDef.get("args").getAsJsonObject();
+    assertEquals("arguments", args.get("type").getAsString());
+
+    // Positional arguments
+    var posArgs = args.get("args").getAsJsonArray();
+    assertEquals(2, posArgs.size());
+    assertEquals("aa", posArgs.get(0).getAsJsonObject().get("arg").getAsString());
+    assertEquals("bb", posArgs.get(1).getAsJsonObject().get("arg").getAsString());
+
+    // Varargs
+    var vararg = args.get("vararg").getAsJsonObject();
+    assertEquals("arg", vararg.get("type").getAsString());
+    assertEquals("vargs", vararg.get("arg").getAsString());
+
+    // Keyword-only arguments
+    var kwOnlyArgs = args.get("kwonlyargs").getAsJsonArray();
+    assertEquals(3, kwOnlyArgs.size());
+    assertEquals("xx", kwOnlyArgs.get(0).getAsJsonObject().get("arg").getAsString());
+    assertEquals("yy", kwOnlyArgs.get(1).getAsJsonObject().get("arg").getAsString());
+    assertEquals("zz", kwOnlyArgs.get(2).getAsJsonObject().get("arg").getAsString());
+
+    // Keyword-only defaults
+    var kwDefaults = args.get("kw_defaults").getAsJsonArray();
+    assertEquals(3, kwDefaults.size());
+
+    var kwDef0 = kwDefaults.get(0).getAsJsonObject();
+    assertEquals("Constant", kwDef0.get("type").getAsString());
+    assertEquals(11, kwDef0.get("value").getAsInt());
+    assertEquals("int", kwDef0.get("typename").getAsString());
+
+    assertTrue(kwDefaults.get(1).isJsonNull());
+
+    var kwDef2 = kwDefaults.get(2).getAsJsonObject();
+    assertEquals("Constant", kwDef2.get("type").getAsString());
+    assertEquals(22, kwDef2.get("value").getAsInt());
+    assertEquals("int", kwDef2.get("typename").getAsString());
+
+    // Kwarg
+    assertTrue(args.get("kwarg").isJsonNull());
+
+    // Defaults for positional arguments
+    var defaults = args.get("defaults").getAsJsonArray();
+    assertEquals(1, defaults.size());
+    var def0 = defaults.get(0).getAsJsonObject();
+    assertEquals("Constant", def0.get("type").getAsString());
+    assertEquals(8, def0.get("value").getAsInt());
+    assertEquals("int", def0.get("typename").getAsString());
+  }
+
   private JsonElement getSingletonStatement(JsonElement astRoot) {
     var module = astRoot.getAsJsonObject();
     assertEquals("Module", module.get("type").getAsString());

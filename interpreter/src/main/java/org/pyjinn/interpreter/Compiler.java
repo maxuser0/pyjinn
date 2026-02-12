@@ -739,6 +739,8 @@ class Compiler {
               /* vararg= */ Optional.empty(),
               /* kwarg= */ Optional.empty(),
               /* defaults= */ List.of(),
+              /* keywordOnlyArgs= */ List.of(),
+              /* keywordDefaults= */ List.of(),
               new Pass(), // Body statement is unused because listCompCode is executed directly.
               /* hasYieldExpression= */ false,
               /* isAsync= */ false);

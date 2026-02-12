@@ -363,6 +363,24 @@ class PythonJsonVisitor extends PythonParserBaseVisitor<JsonElement> {
           } else {
             arguments.add("kwarg", JsonNull.INSTANCE);
           }
+
+          var kwOnlyArgs = new JsonArray();
+          var kwDefaults = new JsonArray();
+          for (var kwonly : star.param_maybe_default()) {
+            if (kwonly.param() != null) {
+              JsonElement kwDefault = JsonNull.INSTANCE;
+              if (kwonly.default_assignment() != null) {
+                kwDefault = visitExpression(kwonly.default_assignment().expression());
+              }
+              kwDefaults.add(kwDefault);
+
+              var kwOnlyArg = createNode(kwonly.param(), "arg");
+              kwOnlyArg.addProperty("arg", kwonly.param().NAME().getText());
+              kwOnlyArgs.add(kwOnlyArg);
+            }
+          }
+          arguments.add("kwonlyargs", kwOnlyArgs);
+          arguments.add("kw_defaults", kwDefaults);
         }
 
         var defaultParamList = parameters.param_with_default();

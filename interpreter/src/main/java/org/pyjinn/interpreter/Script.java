@@ -577,6 +577,27 @@ public class Script {
                           .toList())
               .orElse(List.of());
 
+      List<FunctionArg> keywordOnlyArgs =
+          Optional.ofNullable(getAttr(argsObject, "kwonlyargs"))
+              .map(
+                  a ->
+                      StreamSupport.stream(a.getAsJsonArray().spliterator(), false)
+                          .map(
+                              arg ->
+                                  new FunctionArg(
+                                      new Identifier(getAttr(arg, "arg").getAsString())))
+                          .toList())
+              .orElse(List.of());
+
+      List<Expression> keywordDefaults =
+          Optional.ofNullable(getAttr(argsObject, "kw_defaults"))
+              .map(
+                  d ->
+                      StreamSupport.stream(d.getAsJsonArray().spliterator(), false)
+                          .map(x -> x.isJsonNull() ? null : parseExpression(x))
+                          .toList())
+              .orElse(List.of());
+
       boolean hasYieldExpression =
           !functionParseStateStack.isEmpty() && functionParseStateStack.peek().hasYieldExpression;
 
@@ -589,6 +610,8 @@ public class Script {
           vararg,
           kwarg,
           defaults,
+          keywordOnlyArgs,
+          keywordDefaults,
           body,
           hasYieldExpression,
           isAsync);
@@ -1146,6 +1169,7 @@ public class Script {
       FunctionDef functionDef,
       Context enclosingContext,
       List<Object> defaults,
+      List<Object> keywordDefaults,
       Code code,
       boolean isCtor, // If true, require null return value and swap new instance in its place.
       AtomicInteger zombieCounter)
@@ -1155,6 +1179,7 @@ public class Script {
           function,
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
+          function.evalKeywordArgDefaults(enclosingContext),
           /* code= */ null,
           /* isCtor= */ false,
           new AtomicInteger());
@@ -1165,6 +1190,7 @@ public class Script {
           function,
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
+          function.evalKeywordArgDefaults(enclosingContext),
           code,
           /* isCtor= */ false,
           new AtomicInteger());
@@ -1176,6 +1202,7 @@ public class Script {
           function,
           enclosingContext,
           function.evalArgDefaults(enclosingContext),
+          function.evalKeywordArgDefaults(enclosingContext),
           code,
           isCtor,
           new AtomicInteger());
@@ -1264,13 +1291,16 @@ public class Script {
 
       final List<FunctionArg> args = functionDef.args;
       int numParams = params.length;
-      var kwargs = (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
+      KeywordArgs kwargs =
+          (numParams > 0 && params[numParams - 1] instanceof KeywordArgs k) ? k : null;
       if (kwargs != null) {
         --numParams; // Ignore the final arg when it's kwargs.
       }
 
       Set<String> assignedArgs = new HashSet<String>();
       Set<String> unassignedArgs = args.stream().map(a -> a.identifier().name()).collect(toSet());
+      unassignedArgs.addAll(
+          functionDef.keywordOnlyArgs().stream().map(a -> a.identifier().name()).toList());
 
       // Assign additional args to vararg if there is one.
       if (functionDef.vararg().isPresent()) {
@@ -1333,15 +1363,27 @@ public class Script {
             if (kwarg != null) {
               kwarg.__setitem__(name, entry.getValue());
             } else {
-              throw new IllegalArgumentException(
-                  "%s() got an unexpected keyword argument '%s'"
-                      .formatted(functionDef.identifier.name(), name));
+              FunctionArg matchingArg = null;
+              for (var arg : functionDef.keywordOnlyArgs()) {
+                if (arg.identifier().name().equals(name)) {
+                  matchingArg = arg;
+                  localContext.set(name, entry.getValue());
+                  assignedArgs.add(name);
+                  unassignedArgs.remove(name);
+                  break;
+                }
+              }
+              if (matchingArg == null) {
+                throw new IllegalArgumentException(
+                    "%s() got an unexpected keyword argument '%s'"
+                        .formatted(functionDef.identifier.name(), name));
+              }
             }
           }
         }
       }
 
-      // Assign default values to unassigned args.
+      // Assign default values to unassigned positional args.
       int defaultsOffset = args.size() - defaults.size();
       for (int i = 0; i < defaults.size(); ++i) {
         String name = args.get(i + defaultsOffset).identifier().name();
@@ -1352,10 +1394,21 @@ public class Script {
         }
       }
 
+      // Assign default values to unassigned keyword-only args.
+      for (int i = 0; i < keywordDefaults.size(); ++i) {
+        String name = functionDef.keywordOnlyArgs().get(i).identifier().name();
+        Object value = keywordDefaults.get(i);
+        if (value != FunctionDef.NO_KEYWORD_DEFAULT && unassignedArgs.contains(name)) {
+          assignedArgs.add(name);
+          unassignedArgs.remove(name);
+          localContext.set(name, value);
+        }
+      }
+
       // Verify that all args are assigned.
       if (!unassignedArgs.isEmpty()) {
         throw new IllegalArgumentException(
-            "%s() missing %d positional arguments: %s"
+            "%s() missing %d required argument(s): %s"
                 .formatted(functionDef.identifier.name(), unassignedArgs.size(), unassignedArgs));
       }
       return localContext;
@@ -1638,6 +1691,8 @@ public class Script {
               /* vararg= */ Optional.empty(),
               /* kwarg= */ Optional.empty(),
               defaults,
+              /* keywordOnlyArgs= */ List.of(),
+              /* keywordDefaults= */ List.of(),
               new DataclassDefaultInit(type, fields, lineno),
               /* hasYieldExpression= */ false,
               /* isAsync= */ false);
@@ -1965,6 +2020,8 @@ public class Script {
       Optional<FunctionArg> vararg,
       Optional<FunctionArg> kwarg,
       List<Expression> defaults,
+      List<FunctionArg> keywordOnlyArgs,
+      List<Expression> keywordDefaults,
       Statement body,
       boolean hasYieldExpression,
       boolean isAsync)
@@ -1977,6 +2034,14 @@ public class Script {
 
     public List<Object> evalArgDefaults(Context context) {
       return defaults.stream().map(d -> d.eval(context)).toList();
+    }
+
+    private static final Object NO_KEYWORD_DEFAULT = new Object();
+
+    public List<Object> evalKeywordArgDefaults(Context context) {
+      return keywordDefaults.stream()
+          .map(d -> d == null ? NO_KEYWORD_DEFAULT : d.eval(context))
+          .toList();
     }
 
     @Override
