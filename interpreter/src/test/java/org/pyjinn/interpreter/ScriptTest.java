@@ -210,6 +210,53 @@ public class ScriptTest {
   }
 
   @Test
+  public void disallowExtraneousPositionalArgsWithoutStar() throws Exception {
+    var exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> {
+              execute(
+                  """
+                  def foo(x):
+                    pass
+
+                  foo(1, 2)
+                  """);
+            });
+    assertEquals(
+        "Too many positional args passed to foo(); expected 1 but got 2", exception.getMessage());
+  }
+
+  @Test
+  public void disallowExtraneousPositionalArgsWithUnnamedStar() throws Exception {
+    var exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> {
+              execute(
+                  """
+                  def foo(x, *, y=11, z=22):
+                    pass
+
+                  foo(1, 2)
+                  """);
+            });
+    assertEquals(
+        "Too many positional args passed to foo(); expected 1 but got 2", exception.getMessage());
+  }
+
+  @Test
+  public void disallowDuplicateArgNames() throws Exception {
+    var exception =
+        assertThrows(
+            Script.ParseException.class,
+            () -> {
+              execute("def foo(x, x): pass");
+            });
+    assertEquals("Duplicate argument 'x' in definition of function foo()", exception.getMessage());
+  }
+
+  @Test
   public void packKeywordArgs() throws Exception {
     env =
         execute(

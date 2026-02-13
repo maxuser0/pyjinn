@@ -394,6 +394,16 @@ public class Script {
     public boolean hasYieldExpression = false;
   }
 
+  public static class ParseException extends RuntimeException {
+    public ParseException(String message) {
+      super(message);
+    }
+
+    public ParseException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
   public record JsonAstParser(
       Module module,
       String filename,
@@ -802,12 +812,6 @@ public class Script {
         }
       }
       return -1;
-    }
-
-    class ParseException extends RuntimeException {
-      public ParseException(String message, Throwable cause) {
-        super(message, cause);
-      }
     }
 
     private ExceptionHandler parseExceptionHandler(JsonElement element) {
@@ -1297,6 +1301,14 @@ public class Script {
         --numParams; // Ignore the final arg when it's kwargs.
       }
 
+      if ((functionDef.vararg().isEmpty()
+              || functionDef.vararg().get().identifier().name().isEmpty())
+          && numParams > args.size()) {
+        throw new IllegalArgumentException(
+            "Too many positional args passed to %s(); expected %s but got %s"
+                .formatted(functionDef.identifier, functionDef.args().size(), numParams));
+      }
+
       Set<String> assignedArgs = new HashSet<String>();
       Set<String> unassignedArgs = args.stream().map(a -> a.identifier().name()).collect(toSet());
       unassignedArgs.addAll(
@@ -1318,15 +1330,6 @@ public class Script {
         }
         localContext.set(functionDef.vararg().get().identifier().name(), new PyjTuple(vararg));
         numParams = args.size();
-      } else if (numParams > args.size()) {
-        throw new IllegalArgumentException(
-            "%s() takes %d positional argument%s but %d %s given"
-                .formatted(
-                    functionDef.identifier,
-                    args.size(),
-                    args.size() == 1 ? "" : "s",
-                    params.length,
-                    params.length == 1 ? "was" : "were"));
       }
 
       // Assign positional args.
@@ -2026,6 +2029,31 @@ public class Script {
       boolean hasYieldExpression,
       boolean isAsync)
       implements Statement {
+    public FunctionDef {
+      // Validate that there are no duplicate arg names.
+      List<String> allArgs = new ArrayList<>();
+      for (FunctionArg arg : args) {
+        allArgs.add(arg.identifier().name());
+      }
+      if (vararg.isPresent() && !vararg.get().identifier().name().isEmpty()) {
+        allArgs.add(vararg.get().identifier().name());
+      }
+      if (kwarg.isPresent()) {
+        allArgs.add(kwarg.get().identifier().name());
+      }
+      for (FunctionArg arg : keywordOnlyArgs) {
+        allArgs.add(arg.identifier().name());
+      }
+      Set<String> seen = new HashSet<>();
+      for (String arg : allArgs) {
+        if (!seen.add(arg)) {
+          throw new ParseException(
+              "Duplicate argument '%s' in definition of function %s()"
+                  .formatted(arg, identifier.name()));
+        }
+      }
+    }
+
     /** Adds this function to the specified {@code context}. */
     @Override
     public void exec(Context context) {
