@@ -235,7 +235,8 @@ public class Script {
   // For use by apps that need to share custom data across modules.
   public final PyjDict vars = new PyjDict();
 
-  // If non-null, called with values of expression statements in global context.
+  // If non-null, called with values of expression statements in global context. Used for
+  // output within interactive REPL.
   private Consumer<Object> globalExpressionHandler = null;
 
   public Script() {
@@ -267,7 +268,7 @@ public class Script {
     this.modulesByName.put(MAIN_MODULE_NAME, new Module(this, scriptFilename, MAIN_MODULE_NAME));
   }
 
-  /** If non-null, called with the values of expression statements in global context. */
+  /** If non-null, called with values of expression statements in global context. Used in REPL. */
   public void setGlobalExpressionHandler(Consumer<Object> globalExpressionHandler) {
     this.globalExpressionHandler = globalExpressionHandler;
   }
@@ -392,6 +393,8 @@ public class Script {
 
   private static class FunctionParseState {
     public boolean hasYieldExpression = false;
+    public final HashSet<String> globals = new HashSet<>();
+    public final HashSet<String> nonlocals = new HashSet<>();
   }
 
   public static class ParseException extends RuntimeException {
@@ -611,6 +614,12 @@ public class Script {
       boolean hasYieldExpression =
           !functionParseStateStack.isEmpty() && functionParseStateStack.peek().hasYieldExpression;
 
+      Set<String> globals =
+          functionParseStateStack.isEmpty() ? Set.of() : functionParseStateStack.peek().globals;
+
+      Set<String> nonlocals =
+          functionParseStateStack.isEmpty() ? Set.of() : functionParseStateStack.peek().nonlocals;
+
       return new FunctionDef(
           getLineno(element),
           enclosingClassName,
@@ -623,6 +632,8 @@ public class Script {
           keywordOnlyArgs,
           keywordDefaults,
           body,
+          globals,
+          nonlocals,
           hasYieldExpression,
           isAsync);
     }
@@ -707,22 +718,28 @@ public class Script {
 
           case "Global":
             {
-              return new GlobalVarDecl(
-                  getLineno(element),
+              List<String> names =
                   StreamSupport.stream(
                           getAttr(element, "names").getAsJsonArray().spliterator(), false)
-                      .map(name -> new Identifier(name.getAsString()))
-                      .toList());
+                      .map(name -> name.getAsString())
+                      .toList();
+              if (!functionParseStateStack.isEmpty()) {
+                functionParseStateStack.peek().globals.addAll(names);
+              }
+              return new GlobalVarDecl(getLineno(element), names);
             }
 
           case "Nonlocal":
             {
-              return new NonlocalVarDecl(
-                  getLineno(element),
+              List<String> names =
                   StreamSupport.stream(
                           getAttr(element, "names").getAsJsonArray().spliterator(), false)
-                      .map(name -> new Identifier(name.getAsString()))
-                      .toList());
+                      .map(name -> name.getAsString())
+                      .toList();
+              if (!functionParseStateStack.isEmpty()) {
+                functionParseStateStack.peek().nonlocals.addAll(names);
+              }
+              return new NonlocalVarDecl(getLineno(element), names);
             }
 
           case "Expr":
@@ -1178,17 +1195,6 @@ public class Script {
       boolean isCtor, // If true, require null return value and swap new instance in its place.
       AtomicInteger zombieCounter)
       implements Function {
-    public BoundFunction(FunctionDef function, Context enclosingContext) {
-      this(
-          function,
-          enclosingContext,
-          function.evalArgDefaults(enclosingContext),
-          function.evalKeywordArgDefaults(enclosingContext),
-          /* code= */ null,
-          /* isCtor= */ false,
-          new AtomicInteger());
-    }
-
     public BoundFunction(FunctionDef function, Context enclosingContext, Code code) {
       this(
           function,
@@ -1278,6 +1284,7 @@ public class Script {
               callingContext,
               functionDef.enclosingClassName,
               functionDef.identifier.name(),
+              code,
               /* isGenerator= */ functionDef.hasYieldExpression() || functionDef.isAsync());
 
       if (isCtor) {
@@ -1468,11 +1475,7 @@ public class Script {
     modulesByName.put(name, module);
     modulesByFilename.put(moduleFilename, module);
 
-    // Compile this module if the main module has compiled code.
-    if (mainModule().globals.code != null) {
-      module.compile();
-    }
-
+    module.compile();
     module.exec();
     return module;
   }
@@ -1697,6 +1700,8 @@ public class Script {
               /* keywordOnlyArgs= */ List.of(),
               /* keywordDefaults= */ List.of(),
               new DataclassDefaultInit(type, fields, lineno),
+              /* globals= */ Set.of(),
+              /* nonlocals= */ Set.of(),
               /* hasYieldExpression= */ false,
               /* isAsync= */ false);
       return new BoundFunction(functionDef, context, compiler.compile(functionDef));
@@ -2026,6 +2031,8 @@ public class Script {
       List<FunctionArg> keywordOnlyArgs,
       List<Expression> keywordDefaults,
       Statement body,
+      Set<String> globals,
+      Set<String> nonlocals,
       boolean hasYieldExpression,
       boolean isAsync)
       implements Statement {
@@ -2052,12 +2059,6 @@ public class Script {
                   .formatted(arg, identifier.name()));
         }
       }
-    }
-
-    /** Adds this function to the specified {@code context}. */
-    @Override
-    public void exec(Context context) {
-      context.setBoundFunction(new BoundFunction(this, context));
     }
 
     public List<Object> evalArgDefaults(Context context) {
@@ -2720,43 +2721,9 @@ public class Script {
     }
   }
 
-  public record GlobalVarDecl(int lineno, List<Identifier> globalVars) implements Statement {
-    @Override
-    public void exec(Context context) {
-      declare(context, globalVars);
-    }
+  public record GlobalVarDecl(int lineno, List<String> globalVars) implements Statement {}
 
-    public static void declare(Context context, List<Identifier> varNames) {
-      for (var identifier : varNames) {
-        context.declareGlobalVar(identifier.name());
-      }
-    }
-
-    @Override
-    public String toString() {
-      return String.format(
-          "global %s", globalVars.stream().map(Object::toString).collect(joining(", ")));
-    }
-  }
-
-  public record NonlocalVarDecl(int lineno, List<Identifier> nonlocalVars) implements Statement {
-    @Override
-    public void exec(Context context) {
-      declare(context, nonlocalVars);
-    }
-
-    public static void declare(Context context, List<Identifier> varNames) {
-      for (var identifier : varNames) {
-        context.declareNonlocalVar(identifier.name());
-      }
-    }
-
-    @Override
-    public String toString() {
-      return String.format(
-          "nonlocal %s", nonlocalVars.stream().map(Object::toString).collect(joining(", ")));
-    }
-  }
+  public record NonlocalVarDecl(int lineno, List<String> nonlocalVars) implements Statement {}
 
   public record ReturnStatement(int lineno, Expression returnValue) implements Statement {
     @Override
@@ -4087,42 +4054,6 @@ public class Script {
       Expression transform, Expression target, Expression iter, List<Expression> ifs)
       implements Expression {
     @Override
-    public Object eval(Context context) {
-      // TODO(maxuser): Either change the in-script call to this eval() method to somehow pass the
-      // callingContext or eliminate this tree-walk implementation in favor of the compiled form in
-      // Instruction.java.
-      var localContext = context.createLocalContext(/* callingContext= */ null);
-      var list = new PyjList();
-      // TODO(maxuser): Share portions of impl with ForBlock::exec.
-      final Identifier loopVar;
-      final TupleLiteral loopVars;
-      if (target instanceof Identifier id) {
-        loopVar = id;
-        loopVars = null;
-      } else if (target instanceof TupleLiteral tuple) {
-        loopVar = null;
-        loopVars = tuple;
-      } else {
-        throw new IllegalArgumentException("Unexpected loop variable type: " + target.toString());
-      }
-      outerLoop:
-      for (var value : getIterable(iter.eval(localContext))) {
-        if (loopVar != null) {
-          localContext.set(loopVar.name(), value);
-        } else {
-          Assignment.assignTuple(localContext, loopVars, value);
-        }
-        for (var ifExpr : ifs) {
-          if (!convertToBool(ifExpr.eval(localContext))) {
-            continue outerLoop;
-          }
-        }
-        list.append(transform.eval(localContext));
-      }
-      return list;
-    }
-
-    @Override
     public String toString() {
       var out = new StringBuilder("[");
       out.append(transform.toString());
@@ -4261,9 +4192,9 @@ public class Script {
                     ++context.ip;
                     return context;
                   } else if (params[0] instanceof Generator generator) {
-                    var ctorContext = new Context(context.globals, context, context.globals);
+                    var ctorContext =
+                        new Context(context.globals, context, context.globals, LIST_CTOR_CODE);
                     ctorContext.setVariable(LIST_CTOR_GENERATOR_VAR, generator);
-                    ctorContext.code = LIST_CTOR_CODE;
                     ctorContext.enterFunction("<list>", -1);
                     return ctorContext;
                   } else {
@@ -4517,9 +4448,10 @@ public class Script {
                     ++context.ip;
                     return context;
                   } else if (params[0] instanceof Generator generator) {
-                    var ctorContext = new Context(context.globals, context, context.globals);
+                    var ctorContext =
+                        new Context(
+                            context.globals, context, context.globals, PyjSet.SET_CTOR_CODE);
                     ctorContext.setVariable(PyjSet.SET_CTOR_GENERATOR_VAR, generator);
-                    ctorContext.code = PyjSet.SET_CTOR_CODE;
                     ctorContext.enterFunction("<set>", -1);
                     return ctorContext;
                   } else {
@@ -4953,12 +4885,7 @@ public class Script {
     }
   }
 
-  public record Lambda(FunctionDef functionDef) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      return new BoundFunction(functionDef, context);
-    }
-  }
+  public record Lambda(FunctionDef functionDef) implements Expression {}
 
   public record FormattedValue(Expression value, Optional<String> format) implements Expression {
     @Override
@@ -6874,6 +6801,7 @@ public class Script {
     private boolean halted = false; // If true, the script is exiting and this module must halt.
 
     private GlobalContext(Script script, String moduleFilename, SymbolCache symbolCache) {
+      super(new Code());
       globals = this;
       this.script = script;
       this.moduleFilename = moduleFilename;
@@ -6955,9 +6883,6 @@ public class Script {
      * compileGlobalStatements}.
      */
     public void compileGlobalStatements() {
-      if (code == null) {
-        code = new Code();
-      }
       for (var statement : globalStatements) {
         Compiler.compile(script.globalExpressionHandler, statement, code);
       }
@@ -7019,8 +6944,6 @@ public class Script {
         callingContext; // for returning to caller in compiled mode (non-final for generators)
     private final Context enclosingContext; // for resolving variables
     final ClassMethodName classMethodName;
-    private Set<String> globalVarNames = null;
-    private Set<String> nonlocalVarNames = null;
     private Object returnValue = NOT_ASSIGNED; // NOT_ASSIGNED when no return value yet.
     private Object ctorResult; // Non-null if this is a ctor.
     private int loopDepth = 0;
@@ -7032,7 +6955,7 @@ public class Script {
     protected final PyjDict vars = new PyjDict();
 
     private List<Object> dataStack = new ArrayList<>();
-    public Code code = null;
+    public final Code code;
     public int ip = 0; // instruction pointer
 
     public RuntimeException exception; // Set when an exception is active in this context.
@@ -7094,18 +7017,21 @@ public class Script {
     }
 
     // Default constructor is used only for GlobalContext subclass.
-    private Context() {
+    private Context(Code code) {
       callingContext = null;
       enclosingContext = null;
       classMethodName = new ClassMethodName("<>", "<>");
+      this.code = code;
     }
 
-    private Context(GlobalContext globals, Context callingContext, Context enclosingContext) {
+    private Context(
+        GlobalContext globals, Context callingContext, Context enclosingContext, Code code) {
       this(
           globals,
           callingContext,
           enclosingContext,
           enclosingContext.classMethodName,
+          code,
           /* isGenerator= */ false);
     }
 
@@ -7114,11 +7040,13 @@ public class Script {
         Context callingContext,
         Context enclosingContext,
         ClassMethodName classMethodName,
+        Code code,
         boolean isGenerator) {
       this.globals = globals;
       this.callingContext = callingContext;
       this.enclosingContext = enclosingContext == globals ? null : enclosingContext;
       this.classMethodName = classMethodName;
+      this.code = code;
       this.isGenerator = isGenerator;
     }
 
@@ -7151,31 +7079,19 @@ public class Script {
         Context callingContext,
         String enclosingClassName,
         String enclosingMethodName,
+        Code code,
         boolean isGenerator) {
       return new Context(
           globals,
           callingContext,
           /* enclosingContext= */ this,
           new ClassMethodName(enclosingClassName, enclosingMethodName),
+          code,
           isGenerator);
     }
 
     public Context createLocalContext(Context callingContext) {
-      return new Context(globals, callingContext, /* enclosingContext= */ this);
-    }
-
-    public void declareGlobalVar(String name) {
-      if (globalVarNames == null) {
-        globalVarNames = new HashSet<>();
-      }
-      globalVarNames.add(name);
-    }
-
-    public void declareNonlocalVar(String name) {
-      if (nonlocalVarNames == null) {
-        nonlocalVarNames = new HashSet<>();
-      }
-      nonlocalVarNames.add(name);
+      return new Context(globals, callingContext, /* enclosingContext= */ this, new Code());
     }
 
     private static boolean isPyjinnSource(String filename) {
@@ -7224,11 +7140,9 @@ public class Script {
     }
 
     public void set(String name, Object value) {
-      if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
+      if (this != globals && code.globals.contains(name)) {
         globals.vars.__setitem__(name, value);
-      } else if (enclosingContext != null
-          && nonlocalVarNames != null
-          && nonlocalVarNames.contains(name)) {
+      } else if (enclosingContext != null && code.nonlocals.contains(name)) {
         enclosingContext.vars.__setitem__(name, value);
       } else {
         vars.__setitem__(name, value);
@@ -7240,7 +7154,7 @@ public class Script {
     }
 
     public Object get(String name) {
-      if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
+      if (this != globals && code.globals.contains(name)) {
         return globals.get(name);
       }
       var value = vars.get(name, NOT_ASSIGNED);
@@ -7256,7 +7170,7 @@ public class Script {
     }
 
     public void del(String name) {
-      if (this != globals && globalVarNames != null && globalVarNames.contains(name)) {
+      if (this != globals && code.globals.contains(name)) {
         globals.del(name);
         return;
       }

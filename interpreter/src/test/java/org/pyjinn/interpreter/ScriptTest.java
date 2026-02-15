@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.pyjinn.parser.PyjinnParser;
 
 public class ScriptTest {
@@ -941,10 +939,9 @@ public class ScriptTest {
     assertEquals(1.8446744073709552E19, j);
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void walrusOperator(boolean compile) throws Exception {
-    execute(compile, "y = (x := 2) + 1");
+  @Test
+  public void walrusOperator() throws Exception {
+    execute("y = (x := 2) + 1");
     var x = getVariable(Integer.class, "x");
     var y = getVariable(Integer.class, "y");
     assertEquals(2, x);
@@ -1039,11 +1036,9 @@ public class ScriptTest {
     assertEquals(Script.PyjSet.TYPE, getVariable(Script.PyjClass.class, "set"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void overloadedOperators(boolean compile) throws Exception {
+  @Test
+  public void overloadedOperators() throws Exception {
     execute(
-        compile,
         """
         class Thing:
           def __init__(self, value):
@@ -1121,11 +1116,9 @@ public class ScriptTest {
     assertEquals(getVariable("call"), "x(y, z, 1, 2, 3)");
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void exceptions(boolean compile) throws Exception {
+  @Test
+  public void exceptions() throws Exception {
     execute(
-        compile,
         """
         NPE = JavaClass("java.lang.NullPointerException")
         ISE = JavaClass("java.lang.IllegalArgumentException")
@@ -1145,11 +1138,9 @@ public class ScriptTest {
     assertEquals(getVariable("done"), true);
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void exceptionInLoop(boolean compile) throws Exception {
+  @Test
+  public void exceptionInLoop() throws Exception {
     execute(
-        compile,
         """
         normal_output = []
         for i in (-1, 0, 1):
@@ -1170,11 +1161,9 @@ public class ScriptTest {
     assertEquals("Caught exception for i=0", getVariable("exception_output"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void exceptClauses(boolean compile) throws Exception {
+  @Test
+  public void exceptClauses() throws Exception {
     execute(
-        compile,
         """
         Math = JavaClass("java.lang.Math")
         NullPointerException = JavaClass("java.lang.NullPointerException")
@@ -1204,11 +1193,9 @@ public class ScriptTest {
     assertEquals("caught UnsupportedOperationException", getVariable("unsupported_op"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void methodCalls(boolean compile) throws Exception {
+  @Test
+  public void methodCalls() throws Exception {
     execute(
-        compile,
         """
         class Foo:
           def bar(self):
@@ -1224,11 +1211,9 @@ public class ScriptTest {
     assertEquals(getVariable("output"), "barbaz");
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void dataclass(boolean compile) throws Exception {
+  @Test
+  public void dataclass() throws Exception {
     execute(
-        compile,
         """
         @dataclass
         class Foo:
@@ -1247,11 +1232,9 @@ public class ScriptTest {
     assertEquals(getVariable("output"), "foobarbaz");
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void operators(boolean compile) throws Exception {
+  @Test
+  public void operators() throws Exception {
     execute(
-        compile,
         """
         class Foo:
           def __init__(self, n):
@@ -1274,11 +1257,9 @@ public class ScriptTest {
     assertEquals(getVariable("power_of_2"), 256);
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void lambda(boolean compile) throws Exception {
+  @Test
+  public void lambda() throws Exception {
     execute(
-        compile,
         """
         f = lambda i, k, *args, **kwargs: args[i] + kwargs[k]
         star_args = f(2, "two", "foo", "bar", "baz", two="boz")
@@ -1291,11 +1272,9 @@ public class ScriptTest {
     assertEquals("foobaz", getVariable("default_args"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void comparison(boolean compile) throws Exception {
+  @Test
+  public void comparison() throws Exception {
     execute(
-        compile,
         """
         @dataclass
         class Foo:
@@ -1312,11 +1291,9 @@ public class ScriptTest {
     assertEquals(getVariable("not_in"), false);
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void tupleAssignment(boolean compile) throws Exception {
+  @Test
+  public void tupleAssignment() throws Exception {
     execute(
-        compile,
         """
         x, y = 7, 9
         """);
@@ -1325,11 +1302,9 @@ public class ScriptTest {
     assertEquals(getVariable("y"), 9);
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void listComprehension(boolean compile) throws Exception {
+  @Test
+  public void listComprehension() throws Exception {
     execute(
-        compile,
         """
         x = 99
         output = [x  for x, y in [(0, 1), (7, 9), (88, 44)] if x > 0]
@@ -1342,11 +1317,9 @@ public class ScriptTest {
     assertEquals(99, getVariable("x"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void arrayIndex(boolean compile) throws Exception {
+  @Test
+  public void arrayIndex() throws Exception {
     execute(
-        compile,
         """
         @dataclass
         class Foo:
@@ -1362,11 +1335,9 @@ public class ScriptTest {
     assertEquals(8, getVariable("output"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void sliceExpression(boolean compile) throws Exception {
+  @Test
+  public void sliceExpression() throws Exception {
     execute(
-        compile,
         """
         x = [100, 101, 102, 103]
         slice_value = x[1:-1]
@@ -1385,11 +1356,9 @@ public class ScriptTest {
     assertEquals(103, x.__getitem__(2));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void formatString(boolean compile) throws Exception {
+  @Test
+  public void formatString() throws Exception {
     execute(
-        compile,
         """
         x = "foo"
         y = "yoyo"
@@ -1401,11 +1370,9 @@ public class ScriptTest {
     assertEquals("x=foo, y=yoyo, z=0x00003f, 2*w=6.28", getVariable("output"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void augmentedAssignment(boolean compile) throws Exception {
+  @Test
+  public void augmentedAssignment() throws Exception {
     execute(
-        compile,
         """
         @dataclass
         class Foo:
@@ -1428,11 +1395,9 @@ public class ScriptTest {
     assertEquals(42, getVariable("z"));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void delOperator(boolean compile) throws Exception {
+  @Test
+  public void delOperator() throws Exception {
     execute(
-        compile,
         """
         d = {"foo": 1, "bar": 2, "baz": 3}
         letters = ["alpha", "beta", "gamma"]
@@ -1462,11 +1427,9 @@ public class ScriptTest {
     assertEquals("last", java_words.get(1));
   }
 
-  @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  public void callMethodFromCtor(boolean compile) throws Exception {
+  @Test
+  public void callMethodFromCtor() throws Exception {
     execute(
-        compile,
         """
         bar_called = False
 
@@ -1785,16 +1748,10 @@ public class ScriptTest {
   }
 
   private Script.Environment execute(String source) throws Exception {
-    return execute(/* compile= */ true, source);
-  }
-
-  private Script.Environment execute(boolean compile, String source) throws Exception {
     var jsonAst = PyjinnParser.parse("script_test.pyj", source);
     script = new Script();
     script.parse(jsonAst);
-    if (compile) {
-      script.compile();
-    }
+    script.compile();
     script.exec();
     env = script.mainModule().globals();
     return env;

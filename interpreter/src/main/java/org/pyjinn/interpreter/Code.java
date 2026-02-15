@@ -4,13 +4,28 @@
 package org.pyjinn.interpreter;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class Code {
-  final InstructionList instructions = new InstructionList();
-  final List<ExceptionalJump> jumpTable = new ArrayList<>();
-  final List<LineInfo> lineInfos = new ArrayList<>();
+  public final InstructionList instructions = new InstructionList();
+  public final List<ExceptionalJump> jumpTable = new ArrayList<>();
+  public final List<LineInfo> lineInfos = new ArrayList<>();
+  public final Set<String> globals;
+  public final Set<String> nonlocals;
+  public final Map<String, Integer> locals = new HashMap<>();
+
+  public Code(Set<String> globals, Set<String> nonlocals) {
+    this.globals = globals;
+    this.nonlocals = nonlocals;
+  }
+
+  public Code() {
+    this(/* globals= */ Set.of(), /* nonlocals= */ Set.of());
+  }
 
   public enum ExceptionClause {
     EXCEPT,

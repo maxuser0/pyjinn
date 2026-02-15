@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import org.pyjinn.interpreter.Instruction.JumpPlaceholder;
 import org.pyjinn.interpreter.Script.*;
@@ -163,10 +164,10 @@ class Compiler {
       compileRaiseStatement(raiseStatement, code);
     } else if (statement instanceof Deletion deletion) {
       compileDeletion(deletion, code);
-    } else if (statement instanceof GlobalVarDecl globalVarDecl) {
-      code.addInstruction(lineno, new Instruction.GlobalVarDecl(globalVarDecl.globalVars()));
-    } else if (statement instanceof NonlocalVarDecl nonlocalVarDecl) {
-      code.addInstruction(lineno, new Instruction.NonlocalVarDecl(nonlocalVarDecl.nonlocalVars()));
+    } else if (statement instanceof GlobalVarDecl) {
+      ; // No instructions for global var declarations.
+    } else if (statement instanceof NonlocalVarDecl) {
+      ; // No instructions for nonlocal var declarations.
     } else if (statement instanceof Pass) {
       code.addInstruction(lineno, new Instruction.Nop());
     } else {
@@ -450,7 +451,7 @@ class Compiler {
   }
 
   private Code compileFunction(FunctionDef function) {
-    var code = new Code();
+    var code = new Code(function.globals(), function.nonlocals());
     compileFunctionBody(function.lineno(), function.body(), code);
 
     // Add trailing null return in case there are no earlier returns or earlier returns don't cover
@@ -742,6 +743,8 @@ class Compiler {
               /* keywordOnlyArgs= */ List.of(),
               /* keywordDefaults= */ List.of(),
               new Pass(), // Body statement is unused because listCompCode is executed directly.
+              /* globals= */ Set.of(),
+              /* nonlocals= */ Set.of(),
               /* hasYieldExpression= */ false,
               /* isAsync= */ false);
 

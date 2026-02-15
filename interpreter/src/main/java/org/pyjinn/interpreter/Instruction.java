@@ -299,7 +299,6 @@ sealed interface Instruction {
         var localContext = function.initLocalContext(context, params, function.isCtor());
         // Set IP to -1 to indicate that it's in its initial state that cannot be jumped back to.
         localContext.ip = -1;
-        localContext.code = function.code();
         context.pushData(new Coroutine(localContext));
         ++context.ip;
         return context;
@@ -309,7 +308,6 @@ sealed interface Instruction {
             function.initLocalContext(/* callingContext= */ context, params, function.isCtor());
         // Set IP to -1 to indicate that it's in its initial state that cannot be jumped back to.
         localContext.ip = -1;
-        localContext.code = function.code();
         context.pushData(new Generator(localContext));
         ++context.ip;
         return context;
@@ -317,7 +315,6 @@ sealed interface Instruction {
         context.enterFunction(filename, lineno);
         var localContext =
             function.initLocalContext(/* callingContext= */ context, params, function.isCtor());
-        localContext.code = function.code();
         return localContext;
       }
     }
@@ -714,24 +711,6 @@ sealed interface Instruction {
     @Override
     public int stackOffset() {
       return -2;
-    }
-  }
-
-  record GlobalVarDecl(List<Identifier> varNames) implements Instruction {
-    @Override
-    public Context execute(Context context) {
-      Script.GlobalVarDecl.declare(context, varNames);
-      ++context.ip;
-      return context;
-    }
-  }
-
-  record NonlocalVarDecl(List<Identifier> varNames) implements Instruction {
-    @Override
-    public Context execute(Context context) {
-      Script.NonlocalVarDecl.declare(context, varNames);
-      ++context.ip;
-      return context;
     }
   }
 
