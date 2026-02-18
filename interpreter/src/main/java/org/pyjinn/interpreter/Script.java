@@ -33,6 +33,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -128,6 +129,8 @@ public class Script {
 
     public void parse(JsonElement element, String scriptFilename) {
       var script = globals.script;
+      var scopeParseStateStack = new ArrayDeque<ScopeParseState>();
+      scopeParseStateStack.add(ScopeParseState.createGlobalScope(globals.globalVariableNames));
       var parser =
           new JsonAstParser(
               this,
@@ -135,8 +138,9 @@ public class Script {
               script.moduleHandler,
               script.classLoader,
               globals.symbolCache,
-              new ArrayDeque<FunctionParseState>());
+              scopeParseStateStack);
       parser.parseGlobals(element, globals);
+      globals.updateGlobalVariableMappings();
     }
 
     public void compile() {
@@ -391,10 +395,71 @@ public class Script {
     return (BoundFunction) mainModule().globals.get(name);
   }
 
-  private static class FunctionParseState {
+  private static class ScopeParseState {
+    public static ScopeParseState createGlobalScope(LinkedHashSet<String> globalVariableNames) {
+      return new ScopeParseState(globalVariableNames);
+    }
+
+    public static ScopeParseState createClassScope() {
+      return new ScopeParseState(Type.CLASS);
+    }
+
+    public static ScopeParseState createFunctionScope() {
+      return new ScopeParseState(Type.FUNCTION);
+    }
+
+    private ScopeParseState(LinkedHashSet<String> globalVariableNames) {
+      type = Type.GLOBAL;
+      variables = globalVariableNames;
+    }
+
+    private ScopeParseState(Type type) {
+      this.type = type;
+      variables = new LinkedHashSet<>();
+    }
+
+    enum Type {
+      GLOBAL,
+      FUNCTION,
+      CLASS
+    }
+
+    public final Type type;
+
+    public void defineVariable(String name) {
+      if (type != Type.CLASS) {
+        variables.add(name);
+      }
+    }
+
+    // All variables encountered in this scope. Use computeInScopeVariableIndices to get the
+    // indices of the variables that are specific to this scope.
+    public final LinkedHashSet<String> variables;
+
+    // The following fields are applicable only in function scope:
     public boolean hasYieldExpression = false;
     public final HashSet<String> globals = new HashSet<>();
     public final HashSet<String> nonlocals = new HashSet<>();
+
+    /**
+     * Returns a map of the variables that are specific to this scope to their indices.
+     *
+     * <p>Ignores global and nonlocal variables.
+     */
+    public Map<String, Integer> computeInScopeVariableIndices() {
+      var map = new HashMap<String, Integer>();
+      int nextIndex = 0;
+      for (var variable : variables) {
+        if (!globals.contains(variable) && !nonlocals.contains(variable)) {
+          map.put(variable, nextIndex++);
+        }
+      }
+      return map;
+    }
+
+    public List<String> computeInScopeVariableNames() {
+      return new ArrayList<>(variables);
+    }
   }
 
   public static class ParseException extends RuntimeException {
@@ -413,7 +478,7 @@ public class Script {
       ModuleHandler moduleHandler,
       ClassLoader classLoader,
       SymbolCache symbolCache,
-      Deque<FunctionParseState> functionParseStateStack) {
+      Deque<ScopeParseState> scopeParseStateStack) {
 
     public void parseGlobals(JsonElement element, GlobalContext globals) {
       String type = getType(element);
@@ -479,29 +544,37 @@ public class Script {
 
     private ClassDef parseClassDef(JsonElement element) {
       var identifier = new Identifier(getAttr(element, "name").getAsString());
-      var fields = new ArrayList<ClassFieldDef>();
-      var methodDefs = new ArrayList<FunctionDef>();
-      StreamSupport.stream(getBody(element).spliterator(), false)
-          .forEach(
-              elem -> {
-                var type = getType(elem);
-                switch (type) {
-                  case "FunctionDef":
-                    methodDefs.add(parseFunctionDef(identifier.name(), elem, /* isAsync= */ false));
-                    break;
-                  case "AsyncFunctionDef":
-                    methodDefs.add(parseFunctionDef(identifier.name(), elem, /* isAsync= */ true));
-                    break;
-                  case "Assign":
-                    fields.add(parseClassFieldDef(elem, true));
-                    break;
-                  case "AnnAssign":
-                    fields.add(parseClassFieldDef(elem, false));
-                    break;
-                }
-              });
-      return new ClassDef(
-          getLineno(element), identifier, getDecorators(element), fields, methodDefs);
+      scopeParseStateStack.push(ScopeParseState.createClassScope());
+      try {
+        var fields = new ArrayList<ClassFieldDef>();
+        var methodDefs = new ArrayList<FunctionDef>();
+        StreamSupport.stream(getBody(element).spliterator(), false)
+            .forEach(
+                elem -> {
+                  var type = getType(elem);
+                  switch (type) {
+                    case "FunctionDef":
+                      methodDefs.add(
+                          parseFunctionDef(identifier.name(), elem, /* isAsync= */ false));
+                      break;
+                    case "AsyncFunctionDef":
+                      methodDefs.add(
+                          parseFunctionDef(identifier.name(), elem, /* isAsync= */ true));
+                      break;
+                    case "Assign":
+                      fields.add(parseClassFieldDef(elem, true));
+                      break;
+                    case "AnnAssign":
+                      fields.add(parseClassFieldDef(elem, false));
+                      break;
+                  }
+                });
+        return new ClassDef(
+            getLineno(element), identifier, getDecorators(element), fields, methodDefs);
+      } finally {
+        scopeParseStateStack.pop();
+        defineVariables(identifier);
+      }
     }
 
     private ClassFieldDef parseClassFieldDef(JsonElement element, boolean multipleTargets) {
@@ -546,13 +619,17 @@ public class Script {
     private FunctionDef parseFunctionDef(
         String enclosingClassName, JsonElement element, boolean isAsync) {
       var functionName = getAttr(element, "name").getAsString();
-      functionParseStateStack.push(new FunctionParseState());
+      scopeParseStateStack.push(ScopeParseState.createFunctionScope());
+      final FunctionDef functionDef;
       try {
         var body = parseStatementBlock(getBody(element));
-        return parsePartialFunctionDef(enclosingClassName, functionName, element, body, isAsync);
+        functionDef =
+            parsePartialFunctionDef(enclosingClassName, functionName, element, body, isAsync);
       } finally {
-        functionParseStateStack.pop();
+        scopeParseStateStack.pop();
       }
+      defineVariables(functionDef.identifier());
+      return functionDef;
     }
 
     private FunctionDef parsePartialFunctionDef(
@@ -611,14 +688,16 @@ public class Script {
                           .toList())
               .orElse(List.of());
 
-      boolean hasYieldExpression =
-          !functionParseStateStack.isEmpty() && functionParseStateStack.peek().hasYieldExpression;
-
-      Set<String> globals =
-          functionParseStateStack.isEmpty() ? Set.of() : functionParseStateStack.peek().globals;
-
-      Set<String> nonlocals =
-          functionParseStateStack.isEmpty() ? Set.of() : functionParseStateStack.peek().nonlocals;
+      // TODO(maxuser): The function body was already parsed by the caller, so the body's local
+      // variables have already been added to the scope parse state. The function args are added
+      // now, giving them higher indices than the local variables in the body. That's unintuitive
+      // and should be reversed by deferring the parsing of the function body until after the args
+      // have been added to the scope parse state.
+      var scopeParseState = scopeParseStateStack.peek();
+      args.forEach(a -> scopeParseState.defineVariable(a.identifier().name()));
+      vararg.ifPresent(a -> scopeParseState.defineVariable(a.identifier().name()));
+      kwarg.ifPresent(a -> scopeParseState.defineVariable(a.identifier().name()));
+      keywordOnlyArgs.forEach(a -> scopeParseState.defineVariable(a.identifier().name()));
 
       return new FunctionDef(
           getLineno(element),
@@ -632,9 +711,11 @@ public class Script {
           keywordOnlyArgs,
           keywordDefaults,
           body,
-          globals,
-          nonlocals,
-          hasYieldExpression,
+          scopeParseState.globals,
+          scopeParseState.nonlocals,
+          scopeParseState.computeInScopeVariableIndices()::get,
+          scopeParseState.computeInScopeVariableNames(),
+          scopeParseState.hasYieldExpression,
           isAsync);
     }
 
@@ -661,14 +742,18 @@ public class Script {
             {
               Expression lhs = parseExpression(element.getAsJsonObject().get("target"));
               Expression rhs = parseExpression(getAttr(element, "value"));
-              return new Assignment(getLineno(element), lhs, rhs);
+              var assign = new Assignment(getLineno(element), lhs, rhs);
+              defineVariables(assign.lhs());
+              return assign;
             }
 
           case "Assign":
             {
               Expression lhs = parseExpression(getTargets(element).get(0));
               Expression rhs = parseExpression(getAttr(element, "value"));
-              return new Assignment(getLineno(element), lhs, rhs);
+              var assign = new Assignment(getLineno(element), lhs, rhs);
+              defineVariables(assign.lhs());
+              return assign;
             }
 
           case "AugAssign":
@@ -723,8 +808,8 @@ public class Script {
                           getAttr(element, "names").getAsJsonArray().spliterator(), false)
                       .map(name -> name.getAsString())
                       .toList();
-              if (!functionParseStateStack.isEmpty()) {
-                functionParseStateStack.peek().globals.addAll(names);
+              if (!scopeParseStateStack.isEmpty()) {
+                scopeParseStateStack.peek().globals.addAll(names);
               }
               return new GlobalVarDecl(getLineno(element), names);
             }
@@ -736,8 +821,8 @@ public class Script {
                           getAttr(element, "names").getAsJsonArray().spliterator(), false)
                       .map(name -> name.getAsString())
                       .toList();
-              if (!functionParseStateStack.isEmpty()) {
-                functionParseStateStack.peek().nonlocals.addAll(names);
+              if (!scopeParseStateStack.isEmpty()) {
+                scopeParseStateStack.peek().nonlocals.addAll(names);
               }
               return new NonlocalVarDecl(getLineno(element), names);
             }
@@ -758,11 +843,16 @@ public class Script {
             }
 
           case "For":
-            return new ForBlock(
-                getLineno(element),
-                parseExpression(getAttr(element, "target")),
-                parseExpression(getAttr(element, "iter")),
-                parseStatementBlock(getBody(element)));
+            {
+              var forBlock =
+                  new ForBlock(
+                      getLineno(element),
+                      parseExpression(getAttr(element, "target")),
+                      parseExpression(getAttr(element, "iter")),
+                      parseStatementBlock(getBody(element)));
+              defineVariables(forBlock.vars());
+              return forBlock;
+            }
 
           case "While":
             return new WhileBlock(
@@ -799,6 +889,10 @@ public class Script {
 
           case "Return":
             {
+              if (scopeParseStateStack.peek().type != ScopeParseState.Type.FUNCTION) {
+                throw new ParseException(
+                    "%s:%s: 'return' outside function".formatted(filename, getLineno(element)));
+              }
               var returnValue = getAttr(element, "value");
               if (returnValue.isJsonNull()) {
                 // No return value. This differs from `return None` in terms of the AST, but the two
@@ -820,6 +914,24 @@ public class Script {
       throw new IllegalArgumentException("Unknown statement type: " + element.toString());
     }
 
+    private void defineVariables(Expression variable) {
+      var scopeParseState = scopeParseStateStack.peek();
+      // Define variables only within global and function scopes, but not class scope.
+      if (scopeParseState.type != ScopeParseState.Type.CLASS) {
+        if (variable instanceof Identifier identifier) {
+          scopeParseState.defineVariable(identifier.name());
+        } else if (variable instanceof TupleLiteral tuple) {
+          for (var elem : tuple.elements()) {
+            // TODO(maxuser): Support destructuring assignment more than one level of identifiers
+            // deep.
+            if (elem instanceof Identifier identifier) {
+              scopeParseState.defineVariable(identifier.name());
+            }
+          }
+        }
+      }
+    }
+
     private int getLineno(JsonElement element) {
       if (element.isJsonObject()) {
         var obj = element.getAsJsonObject();
@@ -834,14 +946,19 @@ public class Script {
     private ExceptionHandler parseExceptionHandler(JsonElement element) {
       var type = getAttr(element, "type");
       var name = getAttr(element, "name");
-      return new ExceptionHandler(
-          type.isJsonNull()
-              ? Optional.empty()
-              : Optional.of(parseExpression(getAttr(element, "type"))),
-          name.isJsonNull()
-              ? Optional.empty()
-              : Optional.of(new Identifier(getAttr(element, "name").getAsString())),
-          parseStatementBlock(getBody(element)));
+      var exceptionHandler =
+          new ExceptionHandler(
+              type.isJsonNull()
+                  ? Optional.empty()
+                  : Optional.of(parseExpression(getAttr(element, "type"))),
+              name.isJsonNull()
+                  ? Optional.empty()
+                  : Optional.of(new Identifier(getAttr(element, "name").getAsString())),
+              parseStatementBlock(getBody(element)));
+      if (exceptionHandler.exceptionVariable.isPresent()) {
+        scopeParseStateStack.peek().defineVariable(exceptionHandler.exceptionVariable.get().name());
+      }
+      return exceptionHandler;
     }
 
     private List<FunctionArg> parseFunctionArgs(JsonArray args) {
@@ -1022,18 +1139,18 @@ public class Script {
             int lineno = getLineno(element);
             final Expression body;
             try {
-              functionParseStateStack.push(new FunctionParseState());
+              scopeParseStateStack.push(ScopeParseState.createFunctionScope());
               body = parseExpression(getAttr(element, "body"));
+              return new Lambda(
+                  parsePartialFunctionDef(
+                      /* enclosingClassName= */ "<>",
+                      /* functionName= */ "",
+                      element,
+                      new ReturnStatement(lineno, body),
+                      /* isAsync= */ false));
             } finally {
-              functionParseStateStack.pop();
+              scopeParseStateStack.pop();
             }
-            return new Lambda(
-                parsePartialFunctionDef(
-                    /* enclosingClassName= */ "<>",
-                    "<lambda>",
-                    element,
-                    new ReturnStatement(lineno, body),
-                    /* isAsync= */ false));
           }
 
         case "JoinedStr":
@@ -1066,8 +1183,9 @@ public class Script {
 
         case "NamedExpr":
           {
-            return new WalrusExpression(
-                getId(getAttr(element, "target")), parseExpression(getAttr(element, "value")));
+            var identifier = getId(getAttr(element, "target"));
+            defineVariables(identifier);
+            return new WalrusExpression(identifier, parseExpression(getAttr(element, "value")));
           }
 
         case "Await":
@@ -1077,17 +1195,23 @@ public class Script {
 
         case "Yield":
           {
-            if (!functionParseStateStack.isEmpty()) {
-              functionParseStateStack.peek().hasYieldExpression = true;
+            var scopeParseState = scopeParseStateStack.peek();
+            if (scopeParseState.type != ScopeParseState.Type.FUNCTION) {
+              throw new ParseException(
+                  "%s:%s: 'yield' outside function".formatted(filename, getLineno(element)));
             }
+            scopeParseState.hasYieldExpression = true;
             return new YieldExpression(parseExpression(getAttr(element, "value")));
           }
 
         case "YieldFrom":
           {
-            if (!functionParseStateStack.isEmpty()) {
-              functionParseStateStack.peek().hasYieldExpression = true;
+            var scopeParseState = scopeParseStateStack.peek();
+            if (scopeParseState.type != ScopeParseState.Type.FUNCTION) {
+              throw new ParseException(
+                  "%s:%s: 'yield from' outside function".formatted(filename, getLineno(element)));
             }
+            scopeParseState.hasYieldExpression = true;
             return new YieldFromExpression(parseExpression(getAttr(element, "value")));
           }
       }
@@ -1579,6 +1703,7 @@ public class Script {
     public PyjObject create(Context context) {
       var object = new PyjObject(type[0]);
       for (var field : fields) {
+        // TODO(maxuser): Support lookup of ClassFieldDef by variable index.
         String name = field.identifier().name();
         object.__dict__.__setitem__(name, context.get(name));
       }
@@ -1687,13 +1812,20 @@ public class Script {
         }
       }
 
+      var args = fields.stream().map(f -> new FunctionArg(f.identifier)).toList();
+      var argNames = fields.stream().map(f -> f.identifier.name()).toList();
+      var argNameToIndex = new HashMap<String, Integer>();
+      for (int i = 0; i < argNames.size(); ++i) {
+        argNameToIndex.put(argNames.get(i), i);
+      }
+
       var functionDef =
           new FunctionDef(
               lineno,
               identifier.name(),
               new Identifier("__init__"),
               /* decorators= */ List.of(),
-              /* args= */ fields.stream().map(f -> new FunctionArg(f.identifier)).toList(),
+              args,
               /* vararg= */ Optional.empty(),
               /* kwarg= */ Optional.empty(),
               defaults,
@@ -1702,6 +1834,8 @@ public class Script {
               new DataclassDefaultInit(type, fields, lineno),
               /* globals= */ Set.of(),
               /* nonlocals= */ Set.of(),
+              /* localVariableNameToIndex= */ argNameToIndex::get,
+              /* localVariableNames= */ argNames,
               /* hasYieldExpression= */ false,
               /* isAsync= */ false);
       return new BoundFunction(functionDef, context, compiler.compile(functionDef));
@@ -2033,6 +2167,8 @@ public class Script {
       Statement body,
       Set<String> globals,
       Set<String> nonlocals,
+      java.util.function.Function<String, Integer> localVariableNameToIndex,
+      List<String> localVariableNames,
       boolean hasYieldExpression,
       boolean isAsync)
       implements Statement {
@@ -2071,19 +2207,6 @@ public class Script {
       return keywordDefaults.stream()
           .map(d -> d == null ? NO_KEYWORD_DEFAULT : d.eval(context))
           .toList();
-    }
-
-    @Override
-    public String toString() {
-      String decoratorString =
-          decorators.stream().map(d -> "@%s\n".formatted(d.name())).collect(joining());
-      String bodyString = "  " + body.toString().replaceAll("\n", "\n  ");
-      return "%sdef %s(%s):\n%s"
-          .formatted(
-              decoratorString,
-              identifier.name(),
-              args.stream().map(a -> a.identifier().name()).collect(joining(", ")),
-              bodyString);
     }
   }
 
@@ -2475,6 +2598,23 @@ public class Script {
           "'%s' object does not support item assignment".formatted(getSimpleTypeName(array)));
     }
 
+    public static void assignIdentifierTupleByIndices(
+        Context context, int[] lhsVarIndices, Object rhsValue) {
+      var rhsIter = getIterable(rhsValue).iterator();
+      int numToAssign = lhsVarIndices.length;
+      for (int i = 0; i < numToAssign; ++i) {
+        if (!rhsIter.hasNext()) {
+          throw new IllegalArgumentException(
+              "Not enough values to unpack (expected %d, got %d)".formatted(numToAssign, i));
+        }
+        context.setLocalVarByIndex(lhsVarIndices[i], rhsIter.next());
+      }
+      if (rhsIter.hasNext()) {
+        throw new IllegalArgumentException(
+            "Too many values to unpack (expected %d)".formatted(numToAssign));
+      }
+    }
+
     public static void assignIdentifierTuple(
         Context context, List<Identifier> lhsVars, Object rhsValue) {
       var rhsIter = getIterable(rhsValue).iterator();
@@ -2618,7 +2758,7 @@ public class Script {
       }
       Object rhsValue = rhs.eval(context);
       if (lhs instanceof Identifier lhsId) {
-        augmentVariable(context, lhsId.name(), op, rhsValue);
+        augmentVariableByName(context, lhsId.name(), op, rhsValue);
         return;
       } else if (lhs instanceof ArrayIndex lhsArrayIndex) {
         var array = lhsArrayIndex.array().eval(context);
@@ -2637,11 +2777,19 @@ public class Script {
               lhs, lhs.getClass().getSimpleName()));
     }
 
-    public static void augmentVariable(Context context, String varName, Op op, Object rhs) {
+    public static void augmentVariableByName(Context context, String varName, Op op, Object rhs) {
       var oldValue = context.get(varName);
       var newValue = op.apply(oldValue, rhs);
       if (newValue != null) {
         context.set(varName, newValue);
+      }
+    }
+
+    public static void augmentVariableByIndex(Context context, int varIndex, Op op, Object rhs) {
+      var oldValue = context.variables.get(varIndex);
+      var newValue = op.apply(oldValue, rhs);
+      if (newValue != null) {
+        context.variables.set(varIndex, newValue);
       }
     }
 
@@ -4179,6 +4327,9 @@ public class Script {
           new ListComprehension(tempVar, tempVar, LIST_CTOR_GENERATOR_VAR, /* ifs= */ List.of()),
           LIST_CTOR_CODE);
       LIST_CTOR_CODE.addInstruction(-1, new Instruction.FunctionReturn());
+      LIST_CTOR_CODE.variableNames = List.of(LIST_CTOR_GENERATOR_VAR.name());
+      LIST_CTOR_CODE.variableNameToIndex =
+          name -> name.equals(LIST_CTOR_GENERATOR_VAR.name()) ? 0 : null;
     }
 
     static final PyjClass TYPE =
@@ -4435,6 +4586,9 @@ public class Script {
           SET_CTOR_CODE);
       SET_CTOR_CODE.addInstruction(-1, new Instruction.LoadSetFromList());
       SET_CTOR_CODE.addInstruction(-1, new Instruction.FunctionReturn());
+      SET_CTOR_CODE.variableNames = List.of(SET_CTOR_GENERATOR_VAR.name());
+      SET_CTOR_CODE.variableNameToIndex =
+          name -> name.equals(SET_CTOR_GENERATOR_VAR.name()) ? 0 : null;
     }
 
     static final PyjClass TYPE =
@@ -6798,7 +6952,13 @@ public class Script {
     private final String moduleFilename;
     private final SymbolCache symbolCache;
     private final List<Statement> globalStatements = new ArrayList<>();
+    private final PyjDict vars = new PyjDict();
     private boolean halted = false; // If true, the script is exiting and this module must halt.
+
+    // Using LinkedHashSet which preserves insertion order so that indicies of global variables
+    // match their iteration order in the set. When deleting variables, don't remove them from the
+    // set; instead, just assign their value in the GlobalContext as undefined.
+    final LinkedHashSet<String> globalVariableNames = new LinkedHashSet<>();
 
     private GlobalContext(Script script, String moduleFilename, SymbolCache symbolCache) {
       super(new Code());
@@ -6817,55 +6977,87 @@ public class Script {
       return script.callStack.get();
     }
 
+    private record Builtin(String name, Object value) {}
+
+    private static final Builtin[] BUILTINS =
+        new Builtin[] {
+          new Builtin("Exception", JavaClass.of(Exception.class)),
+          new Builtin("JavaArray", JavaArrayFunction.INSTANCE),
+          new Builtin("JavaFloat", JavaClass.of(Float.class)),
+          new Builtin("JavaInt", JavaClass.of(Integer.class)),
+          new Builtin("JavaList", JavaListFunction.INSTANCE),
+          new Builtin("JavaMap", JavaMapFunction.INSTANCE),
+          new Builtin("JavaSet", JavaSetFunction.INSTANCE),
+          new Builtin("JavaString", JavaStringFunction.INSTANCE),
+          new Builtin("StopIteration", JavaClass.of(StopIteration.class)),
+          new Builtin("__atexit_register__", AtexitRegsisterFunction.INSTANCE),
+          new Builtin("__atexit_unregister__", AtexitUnregsisterFunction.INSTANCE),
+          new Builtin("__exit__", ExitFunction.INSTANCE),
+          new Builtin("__name__", null), // Set to the current module name by GlobalContext.
+          new Builtin("__script__", null), // Set to the current script by GlobalContext.
+          new Builtin("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE),
+          new Builtin("abs", AbsFunction.INSTANCE),
+          new Builtin("bool", JavaClass.of(Boolean.class)),
+          new Builtin("chr", ChrFunction.INSTANCE),
+          new Builtin("dict", PyjDict.TYPE),
+          new Builtin("enumerate", EnumerateFunction.INSTANCE),
+          new Builtin("float", JavaClass.of(Double.class)),
+          new Builtin("globals", GlobalsFunction.INSTANCE),
+          new Builtin("hex", HexFunction.INSTANCE),
+          new Builtin("isinstance", IsinstanceFunction.INSTANCE),
+          new Builtin("int", JavaClass.of(PyjInt.class)),
+          new Builtin("iter", IterFunction.INSTANCE),
+          new Builtin("len", LenFunction.INSTANCE),
+          new Builtin("list", PyjList.TYPE),
+          new Builtin("max", MaxFunction.INSTANCE),
+          new Builtin("min", MinFunction.INSTANCE),
+          new Builtin("next", NextFunction.INSTANCE),
+          new Builtin("ord", OrdFunction.INSTANCE),
+          new Builtin("print", PrintFunction.INSTANCE),
+          new Builtin("range", RangeFunction.INSTANCE),
+          new Builtin("round", RoundFunction.INSTANCE),
+          new Builtin("set", PyjSet.TYPE),
+          new Builtin("str", JavaClass.of(String.class)),
+          new Builtin("sum", SumFunction.INSTANCE),
+          new Builtin("tuple", PyjTuple.TYPE),
+          new Builtin("type", PyjClass.TYPE),
+        };
+
     public static GlobalContext create(
         Script script, String moduleFilename, SymbolCache symbolCache) {
       var context = new GlobalContext(script, moduleFilename, symbolCache);
+      context.variables = new ArrayList<>(BUILTINS.length);
 
-      // TODO(maxuser): Organize groups of symbols into modules for more efficient initialization of
-      // globals.
-      context.set("Exception", JavaClass.of(Exception.class));
-      context.set("JavaArray", JavaArrayFunction.INSTANCE);
-      context.set("JavaFloat", JavaClass.of(Float.class));
-      context.set("JavaInt", JavaClass.of(Integer.class));
-      context.set("JavaList", JavaListFunction.INSTANCE);
-      context.set("JavaMap", JavaMapFunction.INSTANCE);
-      context.set("JavaSet", JavaSetFunction.INSTANCE);
-      context.set("JavaString", JavaStringFunction.INSTANCE);
-      context.set("StopIteration", JavaClass.of(StopIteration.class));
-      context.set("__atexit_register__", AtexitRegsisterFunction.INSTANCE);
-      context.set("__atexit_unregister__", AtexitUnregsisterFunction.INSTANCE);
-      context.set("__exit__", ExitFunction.INSTANCE);
-      context.set("__traceback_format_stack__", TracebackFormatStackFunction.INSTANCE);
-      context.set("abs", AbsFunction.INSTANCE);
-      context.set("bool", JavaClass.of(Boolean.class));
-      context.set("chr", ChrFunction.INSTANCE);
-      context.set("dict", PyjDict.TYPE);
-      context.set("enumerate", EnumerateFunction.INSTANCE);
-      context.set("float", JavaClass.of(Double.class));
-      context.set("globals", GlobalsFunction.INSTANCE);
-      context.set("hex", HexFunction.INSTANCE);
-      context.set("isinstance", IsinstanceFunction.INSTANCE);
-      context.set("int", JavaClass.of(PyjInt.class));
-      context.set("iter", IterFunction.INSTANCE);
-      context.set("len", LenFunction.INSTANCE);
-      context.set("list", PyjList.TYPE);
-      context.set("max", MaxFunction.INSTANCE);
-      context.set("min", MinFunction.INSTANCE);
-      context.set("next", NextFunction.INSTANCE);
-      context.set("ord", OrdFunction.INSTANCE);
-      context.set("print", PrintFunction.INSTANCE);
-      context.set("range", RangeFunction.INSTANCE);
-      context.set("round", RoundFunction.INSTANCE);
-      context.set("set", PyjSet.TYPE);
-      context.set("str", JavaClass.of(String.class));
-      context.set("sum", SumFunction.INSTANCE);
-      context.set("tuple", PyjTuple.TYPE);
-      context.set("type", PyjClass.TYPE);
+      // Built-ins do not appear in GlobalContext.vars.
+      for (var builtin : BUILTINS) {
+        context.globalVariableNames.add(builtin.name);
+        context.variables.add(builtin.value);
+      }
+      context.updateGlobalVariableMappings();
+
       return context;
     }
 
     public void addGlobalStatement(Statement statement) {
       globalStatements.add(statement);
+    }
+
+    public void updateGlobalVariableMappings() {
+      var map = new HashMap<String, Integer>();
+      int nextIndex = 0;
+      for (var variable : globalVariableNames) {
+        map.put(variable, nextIndex++);
+      }
+      code.variableNameToIndex = map::get;
+      code.variableNames = new ArrayList<>(globalVariableNames);
+
+      // Grow variables list if needed to accomodate new global variables.
+      int n = variables.size();
+      if (n < globalVariableNames.size()) {
+        for (int i = n; i < globalVariableNames.size(); ++i) {
+          variables.add(NOT_ASSIGNED);
+        }
+      }
     }
 
     @Override
@@ -6939,7 +7131,7 @@ public class Script {
   }
 
   public static class Context {
-    private static final Object NOT_ASSIGNED = new Object();
+    protected static final Object NOT_ASSIGNED = new Object();
     private Context
         callingContext; // for returning to caller in compiled mode (non-final for generators)
     private final Context enclosingContext; // for resolving variables
@@ -6952,9 +7144,9 @@ public class Script {
     private boolean isGenerator = false;
 
     protected GlobalContext globals;
-    protected final PyjDict vars = new PyjDict();
 
     private List<Object> dataStack = new ArrayList<>();
+    List<Object> variables = new ArrayList<>();
     public final Code code;
     public int ip = 0; // instruction pointer
 
@@ -7047,6 +7239,8 @@ public class Script {
       this.enclosingContext = enclosingContext == globals ? null : enclosingContext;
       this.classMethodName = classMethodName;
       this.code = code;
+      this.variables =
+          new ArrayList<>(Collections.nCopies(code.variableNames.size(), NOT_ASSIGNED));
       this.isGenerator = isGenerator;
     }
 
@@ -7139,13 +7333,39 @@ public class Script {
       set(boundFunction.functionDef().identifier().name(), boundFunction);
     }
 
+    public void setLocalVarByIndex(int index, Object value) {
+      variables.set(index, value);
+      if (this == globals) {
+        globals.vars.__setitem__(code.variableNames.get(index), value);
+      }
+    }
+
+    public Object getLocalVarByIndex(int index) {
+      var value = variables.get(index);
+      if (value == NOT_ASSIGNED) {
+        throw new IllegalArgumentException(
+            "Variable not assigned: " + code.variableNames.get(index));
+      }
+      return value;
+    }
+
     public void set(String name, Object value) {
       if (this != globals && code.globals.contains(name)) {
-        globals.vars.__setitem__(name, value);
+        globals.set(name, value);
       } else if (enclosingContext != null && code.nonlocals.contains(name)) {
-        enclosingContext.vars.__setitem__(name, value);
+        // TODO(maxuser)! Verify that this works for multiple levels of nested functions without an
+        // intervening nonlocal declaration.
+        enclosingContext.set(name, value);
       } else {
-        vars.__setitem__(name, value);
+        Integer index = code.variableNameToIndex.apply(name);
+        if (index != null) {
+          variables.set(index, value);
+          if (this == globals) {
+            globals.vars.__setitem__(name, value);
+          }
+        } else {
+          throw new IllegalArgumentException("Variable not found: " + name);
+        }
       }
     }
 
@@ -7157,9 +7377,9 @@ public class Script {
       if (this != globals && code.globals.contains(name)) {
         return globals.get(name);
       }
-      var value = vars.get(name, NOT_ASSIGNED);
-      if (value != NOT_ASSIGNED) {
-        return value;
+      Integer index = code.variableNameToIndex.apply(name);
+      if (index != null) {
+        return variables.get(index);
       } else if (enclosingContext != null) {
         return enclosingContext.get(name);
       } else if (this != globals) {
@@ -7174,10 +7394,12 @@ public class Script {
         globals.del(name);
         return;
       }
-      if (!vars.__contains__(name)) {
+      // TODO(maxuser)! Support del of nonlocal variables.
+      Integer index = code.variableNameToIndex.apply(name);
+      if (index == null) {
         throw new IllegalArgumentException(String.format("Name '%s' is not defined", name));
       }
-      vars.__delitem__(name);
+      variables.set(index, NOT_ASSIGNED);
     }
 
     public void enterLoop() {

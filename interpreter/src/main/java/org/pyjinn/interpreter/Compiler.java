@@ -8,6 +8,7 @@ import static org.pyjinn.interpreter.Script.getSimpleTypeName;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -179,7 +180,13 @@ class Compiler {
     Expression lhs = assign.lhs();
     if (lhs instanceof Identifier identifier) {
       compileExpression(assign.rhs(), code);
-      code.addInstruction(lineno, new Instruction.StoreToVariable(identifier.name()));
+      var name = identifier.name();
+      Integer index = code.variableNameToIndex.apply(name);
+      if (index != null) {
+        code.addInstruction(lineno, new Instruction.StoreToLocalVariableByIndex(index));
+      } else {
+        code.addInstruction(lineno, new Instruction.StoreToVariableByName(name));
+      }
     } else if (lhs instanceof FieldAccess fieldAccess) {
       compileExpression(assign.rhs(), code);
       compileExpression(fieldAccess.object(), code);
@@ -193,10 +200,26 @@ class Compiler {
       code.addInstruction(lineno, new Instruction.PopData());
     } else if (lhs instanceof TupleLiteral lhsTuple) {
       compileExpression(assign.rhs(), code);
-      code.addInstruction(
-          lineno,
-          new Instruction.StoreToVariableTuple(
-              lhsTuple.elements().stream().map(Identifier.class::cast).toList()));
+      int[] lhsIndices = new int[lhsTuple.elements().size()];
+      for (int i = 0; i < lhsTuple.elements().size(); i++) {
+        var name = ((Identifier) lhsTuple.elements().get(i)).name();
+        Integer index = code.variableNameToIndex.apply(name);
+        if (index == null) {
+          // Fall back to assignment by variable names, since at least one of the lhs variables is
+          // global or nonlocal.
+          lhsIndices = null;
+          break;
+        }
+        lhsIndices[i] = index;
+      }
+      if (lhsIndices == null) {
+        code.addInstruction(
+            lineno,
+            new Instruction.StoreToVariableTupleByNames(
+                lhsTuple.elements().stream().map(Identifier.class::cast).toList()));
+      } else {
+        code.addInstruction(lineno, new Instruction.StoreToLocalVariableTupleByIndices(lhsIndices));
+      }
     } else {
       throw new IllegalArgumentException(
           "Cannot assign to %s (line %d)"
@@ -208,7 +231,13 @@ class Compiler {
     Expression lhs = assign.lhs();
     if (lhs instanceof Identifier identifier) {
       compileExpression(assign.rhs(), code);
-      code.addInstruction(lineno, new Instruction.AugmentVariable(identifier.name(), assign.op()));
+      var name = identifier.name();
+      Integer index = code.variableNameToIndex.apply(name);
+      if (index != null) {
+        code.addInstruction(lineno, new Instruction.AugmentVariableByIndex(index, assign.op()));
+      } else {
+        code.addInstruction(lineno, new Instruction.AugmentVariableByName(name, assign.op()));
+      }
     } else if (lhs instanceof FieldAccess fieldAccess) {
       compileExpression(assign.rhs(), code);
       compileExpression(fieldAccess.object(), code);
@@ -301,10 +330,11 @@ class Compiler {
     var vars = forBlock.vars();
     final Instruction iterVarAssignment;
     if (vars instanceof Identifier id) {
-      iterVarAssignment = new Instruction.StoreToVariable(id.name());
+      iterVarAssignment =
+          new Instruction.StoreToLocalVariableByIndex(code.variableNameToIndex.apply(id.name()));
     } else if (vars instanceof TupleLiteral lhsTuple) {
       iterVarAssignment =
-          new Instruction.StoreToVariableTuple(
+          new Instruction.StoreToVariableTupleByNames(
               lhsTuple.elements().stream().map(Identifier.class::cast).toList());
     } else {
       throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
@@ -438,7 +468,8 @@ class Compiler {
   private void compileFunctionDef(FunctionDef function, Code code) {
     code.addInstruction(
         lineno, new Instruction.CreateFunction(function, compileFunction(function)));
-    code.addInstruction(lineno, new Instruction.StoreToVariable(function.identifier().name()));
+    code.addInstruction(
+        lineno, new Instruction.StoreToVariableByName(function.identifier().name()));
   }
 
   private void compileClassDef(ClassDef classDef, Code code) {
@@ -451,13 +482,20 @@ class Compiler {
   }
 
   private Code compileFunction(FunctionDef function) {
-    var code = new Code(function.globals(), function.nonlocals());
+    var code =
+        new Code(
+            function.globals(),
+            function.nonlocals(),
+            function.localVariableNameToIndex(),
+            function.localVariableNames());
     compileFunctionBody(function.lineno(), function.body(), code);
 
-    // Add trailing null return in case there are no earlier returns or earlier returns don't cover
-    // all code paths.
-    code.addInstruction(lineno, new Instruction.PushData(null));
-    code.addInstruction(lineno, new Instruction.FunctionReturn());
+    if (!function.identifier().name().isEmpty()) {
+      // For named (non-lambda) functions, add trailing null return in case there are no earlier
+      // returns or earlier returns don't cover all code paths.
+      code.addInstruction(lineno, new Instruction.PushData(null));
+      code.addInstruction(lineno, new Instruction.FunctionReturn());
+    }
     return code;
   }
 
@@ -548,7 +586,13 @@ class Compiler {
 
   private void compileExpression(Expression expr, Code code) {
     if (expr instanceof Identifier identifier) {
-      code.addInstruction(lineno, new Instruction.LoadFromVariable(identifier.name()));
+      var name = identifier.name();
+      Integer index = code.variableNameToIndex.apply(name);
+      if (index != null) {
+        code.addInstruction(lineno, new Instruction.LoadFromLocalVariableByIndex(index));
+      } else {
+        code.addInstruction(lineno, new Instruction.LoadFromVariableByName(name));
+      }
     } else if (expr instanceof TupleLiteral tuple) {
       compileTupleLiteral(tuple, code);
     } else if (expr instanceof ListLiteral list) {
@@ -689,19 +733,30 @@ class Compiler {
           skipElseJumpSource, skipElseJumpPlaceholder.createJumpTo(afterElseJumpTarget));
     } else if (expr instanceof ListComprehension listComp) {
       // source: [TRANSFORM for TARGET in ITER if IFS[0]...]
+      var listCompCode = new Code();
       var vars = listComp.target();
       final Instruction iterVarAssignment;
       if (vars instanceof Identifier id) {
-        iterVarAssignment = new Instruction.StoreToVariable(id.name());
+        iterVarAssignment = new Instruction.StoreToVariableByName(id.name());
+        listCompCode.variableNames = List.of(id.name());
+        String varName = id.name();
+        listCompCode.variableNameToIndex = name -> varName.equals(name) ? 0 : null;
       } else if (vars instanceof TupleLiteral lhsTuple) {
         iterVarAssignment =
-            new Instruction.StoreToVariableTuple(
+            new Instruction.StoreToVariableTupleByNames(
                 lhsTuple.elements().stream().map(Identifier.class::cast).toList());
+        listCompCode.variableNames = new ArrayList<>();
+        var argNameToIndex = new HashMap<String, Integer>();
+        for (int i = 0; i < lhsTuple.elements().size(); ++i) {
+          String name = ((Identifier) lhsTuple.elements().get(i)).name();
+          listCompCode.variableNames.add(name);
+          argNameToIndex.put(name, i);
+        }
+        listCompCode.variableNameToIndex = argNameToIndex::get;
       } else {
         throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
       }
 
-      var listCompCode = new Code();
       listCompCode.addInstruction(lineno, new Instruction.LoadList(0));
       compileExpression(listComp.iter(), listCompCode);
       listCompCode.addInstruction(lineno, new Instruction.IterableIterator());
@@ -745,6 +800,8 @@ class Compiler {
               new Pass(), // Body statement is unused because listCompCode is executed directly.
               /* globals= */ Set.of(),
               /* nonlocals= */ Set.of(),
+              /* localVariableNameToIndex= */ name -> null, // No variable lookups needed.
+              /* localVariableNames= */ List.of(),
               /* hasYieldExpression= */ false,
               /* isAsync= */ false);
 

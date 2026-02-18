@@ -4,10 +4,8 @@
 package org.pyjinn.interpreter;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 public class Code {
@@ -16,15 +14,26 @@ public class Code {
   public final List<LineInfo> lineInfos = new ArrayList<>();
   public final Set<String> globals;
   public final Set<String> nonlocals;
-  public final Map<String, Integer> locals = new HashMap<>();
+  public java.util.function.Function<String, Integer> variableNameToIndex;
+  public List<String> variableNames;
 
-  public Code(Set<String> globals, Set<String> nonlocals) {
+  public Code(
+      Set<String> globals,
+      Set<String> nonlocals,
+      java.util.function.Function<String, Integer> variableNameToIndex,
+      List<String> variableNames) {
     this.globals = globals;
     this.nonlocals = nonlocals;
+    this.variableNameToIndex = variableNameToIndex;
+    this.variableNames = variableNames;
   }
 
   public Code() {
-    this(/* globals= */ Set.of(), /* nonlocals= */ Set.of());
+    this(
+        /* globals= */ Set.of(),
+        /* nonlocals= */ Set.of(),
+        /* variableNameToIndex= */ name -> null,
+        /* variableNames= */ List.of());
   }
 
   public enum ExceptionClause {
@@ -90,6 +99,11 @@ public class Code {
         output.append("%s[%d] %s\n".formatted(prefix, i, instruction));
       }
       return output.toString();
+    }
+
+    @Override
+    public String toString() {
+      return toStringWithInstructionPointer(-1);
     }
   }
 

@@ -1181,7 +1181,7 @@ public class ScriptTest {
           except UnsupportedOperationException as e:
             return "caught UnsupportedOperationException"
           except Exception as e:
-            return "caught Exception"
+            return f"caught {e.getClass().getSimpleName()}: {e.getMessage()}"
 
         arithmetic = call_func(lambda x, y: Math.floorDiv(x, y), 7, 0)
         null_pointer = call_func(lambda: None.foo)
@@ -1729,6 +1729,39 @@ public class ScriptTest {
 
     assertEquals(new Script.PyjList(List.of(1, 2, 3, 4)), getVariable("yields"));
     assertEquals(new Script.PyjList(List.of("BAZ", "BAR", "FOO")), getVariable("result"));
+  }
+
+  @Test
+  public void undefLocalShadowingGlobal() throws Exception {
+    var exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                execute(
+                    """
+                    x = 123
+                    def foo():
+                      x = 246  # Define local variable that shadows global.
+                      del x  # Undefine local variable.
+                      return x  # Access undefined local variable.
+
+                    foo()
+                    """));
+    assertEquals("Variable not assigned: x", exception.getMessage());
+  }
+
+  @Test
+  public void readLocalBeforeFirstLexicalAssignment() throws Exception {
+    execute(
+        """
+        def foo():
+          for i in (0, 1):
+            if i == 1: return x
+            else: x = 42
+
+        output = foo()
+        """);
+    assertEquals(42, getVariable("output"));
   }
 
   private Object getVariable(String variableName) {

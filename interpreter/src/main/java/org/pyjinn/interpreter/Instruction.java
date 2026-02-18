@@ -468,7 +468,21 @@ sealed interface Instruction {
     }
   }
 
-  record LoadFromVariable(String name) implements Instruction {
+  record LoadFromLocalVariableByIndex(int varIndex) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.pushData(context.getLocalVarByIndex(varIndex));
+      ++context.ip;
+      return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return 1;
+    }
+  }
+
+  record LoadFromVariableByName(String name) implements Instruction {
     @Override
     public Context execute(Context context) {
       context.pushData(context.get(name));
@@ -766,7 +780,22 @@ sealed interface Instruction {
     }
   }
 
-  record StoreToVariable(String varName) implements Instruction {
+  record StoreToLocalVariableByIndex(int varIndex) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var rhs = context.popData();
+      context.setLocalVarByIndex(varIndex, rhs);
+      ++context.ip;
+      return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
+  }
+
+  record StoreToVariableByName(String varName) implements Instruction {
     @Override
     public Context execute(Context context) {
       var rhs = context.popData();
@@ -829,7 +858,7 @@ sealed interface Instruction {
     }
   }
 
-  record StoreToVariableTuple(List<Identifier> varNames) implements Instruction {
+  record StoreToVariableTupleByNames(List<Identifier> varNames) implements Instruction {
     @Override
     public Context execute(Context context) {
       var value = context.popData();
@@ -844,11 +873,41 @@ sealed interface Instruction {
     }
   }
 
-  record AugmentVariable(String varName, AugmentedAssignment.Op op) implements Instruction {
+  record StoreToLocalVariableTupleByIndices(int[] varIndices) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var value = context.popData();
+      Assignment.assignIdentifierTupleByIndices(context, varIndices, value);
+      ++context.ip;
+      return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
+  }
+
+  record AugmentVariableByName(String varName, AugmentedAssignment.Op op) implements Instruction {
     @Override
     public Context execute(Context context) {
       var rhs = context.popData();
-      AugmentedAssignment.augmentVariable(context, varName, op, rhs);
+      AugmentedAssignment.augmentVariableByName(context, varName, op, rhs);
+      ++context.ip;
+      return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      return -1;
+    }
+  }
+
+  record AugmentVariableByIndex(int varIndex, AugmentedAssignment.Op op) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      var rhs = context.popData();
+      AugmentedAssignment.augmentVariableByIndex(context, varIndex, op, rhs);
       ++context.ip;
       return context;
     }
