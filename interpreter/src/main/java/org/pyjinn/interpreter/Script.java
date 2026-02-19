@@ -7354,6 +7354,11 @@ public class Script {
           if (this == globals) {
             globals.vars.__setitem__(name, value);
           }
+        } else if (this == globals) {
+          // Allow variables to be added dynamically to global scope without compilation.
+          globals.globalVariableNames.add(name);
+          globals.updateGlobalVariableMappings();
+          set(name, value); // Try again now that variable has been defined.
         } else {
           throw new IllegalArgumentException("Variable not found: " + name);
         }

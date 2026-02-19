@@ -1764,6 +1764,18 @@ public class ScriptTest {
     assertEquals(42, getVariable("output"));
   }
 
+  @Test
+  public void setGlobalVariableFromOutsideScript() throws Exception {
+    script = new Script();
+    script.set("foo", 42);
+    String source = "output = foo";
+    var jsonAst = PyjinnParser.parse("script_test.pyj", source);
+    script.compile(jsonAst);
+    script.exec();
+    assertEquals(42, script.get("output"));
+    assertEquals(42, script.get("foo"));
+  }
+
   private Object getVariable(String variableName) {
     return getVariable(Object.class, variableName);
   }
