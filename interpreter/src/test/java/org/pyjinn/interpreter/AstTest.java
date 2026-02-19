@@ -5395,7 +5395,7 @@ public class AstTest {
 
     var jsonAst = JsonParser.parseString(timesTwoJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("times_two");
+    var func = script.compile(jsonAst).exec().getFunction("times_two");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals(), x);
@@ -5410,7 +5410,7 @@ public class AstTest {
 
     var jsonAst = JsonParser.parseString(populateArrayJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("populate_array");
+    var func = script.compile(jsonAst).exec().getFunction("populate_array");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals(), array, index, value);
@@ -5421,7 +5421,7 @@ public class AstTest {
   public void typeConversions() {
     var jsonAst = JsonParser.parseString(typeConversionsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("type_conversions");
+    var func = script.compile(jsonAst).exec().getFunction("type_conversions");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5432,11 +5432,11 @@ public class AstTest {
   public void incrementGlobal() {
     var jsonAst = JsonParser.parseString(incrementGlobalJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("increment_global");
+    var func = script.compile(jsonAst).exec().getFunction("increment_global");
     System.out.println(func);
 
     // Execute global statement to define global var: `x = 0`
-    script.compile().exec();
+    script.exec();
 
     var output = func.call(script.mainModule().globals());
     assertEquals(Integer.valueOf(2), (Integer) output);
@@ -5446,7 +5446,7 @@ public class AstTest {
   public void factorial() {
     var jsonAst = JsonParser.parseString(factorialJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("factorial");
+    var func = script.compile(jsonAst).exec().getFunction("factorial");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals(), 5);
@@ -5457,7 +5457,7 @@ public class AstTest {
   public void sqrt9() {
     var jsonAst = JsonParser.parseString(sqrt9JsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("sqrt9");
+    var func = script.compile(jsonAst).exec().getFunction("sqrt9");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5468,7 +5468,7 @@ public class AstTest {
   public void nestedFuncVars() {
     var jsonAst = JsonParser.parseString(nestedFuncVarsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("nested_func_vars");
+    var func = script.compile(jsonAst).exec().getFunction("nested_func_vars");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5479,7 +5479,7 @@ public class AstTest {
   public void callSiblingNestedFunc() {
     var jsonAst = JsonParser.parseString(callSiblingNestedFuncJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("call_sibling_nested_func");
+    var func = script.compile(jsonAst).exec().getFunction("call_sibling_nested_func");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5490,7 +5490,7 @@ public class AstTest {
   public void listOps() {
     var jsonAst = JsonParser.parseString(listOpsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("list_ops");
+    var func = script.compile(jsonAst).exec().getFunction("list_ops");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5501,7 +5501,7 @@ public class AstTest {
   public void ctorAndMethodOverloads() {
     var jsonAst = JsonParser.parseString(ctorAndMethodOverloadsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("ctor_and_method_overloads");
+    var func = script.compile(jsonAst).exec().getFunction("ctor_and_method_overloads");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5512,7 +5512,7 @@ public class AstTest {
   public void rangeStop() {
     var jsonAst = JsonParser.parseString(rangeStopJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("range_stop");
+    var func = script.compile(jsonAst).exec().getFunction("range_stop");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5523,7 +5523,7 @@ public class AstTest {
   public void rangeStartStopStep() {
     var jsonAst = JsonParser.parseString(rangeStartStopStepJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("range_start_stop_step");
+    var func = script.compile(jsonAst).exec().getFunction("range_start_stop_step");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5534,7 +5534,7 @@ public class AstTest {
   public void breakForLoop() {
     var jsonAst = JsonParser.parseString(breakForLoopJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("break_for_loop");
+    var func = script.compile(jsonAst).exec().getFunction("break_for_loop");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5545,7 +5545,7 @@ public class AstTest {
   public void numericTypes() {
     var jsonAst = JsonParser.parseString(numericTypesJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("numeric_types");
+    var func = script.compile(jsonAst).exec().getFunction("numeric_types");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5556,7 +5556,7 @@ public class AstTest {
   public void whileLoop() {
     var jsonAst = JsonParser.parseString(whileLoopJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("while_loop");
+    var func = script.compile(jsonAst).exec().getFunction("while_loop");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5567,7 +5567,7 @@ public class AstTest {
   public void breakWhileLoop() {
     var jsonAst = JsonParser.parseString(breakWhileLoopJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("break_while_loop");
+    var func = script.compile(jsonAst).exec().getFunction("break_while_loop");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5578,7 +5578,7 @@ public class AstTest {
   public void inOperator() {
     var jsonAst = JsonParser.parseString(inOperatorJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("in_operator");
+    var func = script.compile(jsonAst).exec().getFunction("in_operator");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5589,7 +5589,7 @@ public class AstTest {
   public void boolOperators() {
     var jsonAst = JsonParser.parseString(boolOperatorsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("bool_operators");
+    var func = script.compile(jsonAst).exec().getFunction("bool_operators");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5600,7 +5600,7 @@ public class AstTest {
   public void iterateDict() {
     var jsonAst = JsonParser.parseString(iterateDictJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("iterate_dict");
+    var func = script.compile(jsonAst).exec().getFunction("iterate_dict");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5611,7 +5611,7 @@ public class AstTest {
   public void deleteItems() {
     var jsonAst = JsonParser.parseString(deleteItemsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("delete_items");
+    var func = script.compile(jsonAst).exec().getFunction("delete_items");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5622,7 +5622,7 @@ public class AstTest {
   public void assignTuple() {
     var jsonAst = JsonParser.parseString(assignTupleJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("assign_tuple");
+    var func = script.compile(jsonAst).exec().getFunction("assign_tuple");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5633,7 +5633,7 @@ public class AstTest {
   public void listComprehension() {
     var jsonAst = JsonParser.parseString(listComprehensionJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("list_comprehension");
+    var func = script.compile(jsonAst).exec().getFunction("list_comprehension");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5644,7 +5644,7 @@ public class AstTest {
   public void ifElseExpr() {
     var jsonAst = JsonParser.parseString(ifElseExprJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("if_else_expr");
+    var func = script.compile(jsonAst).exec().getFunction("if_else_expr");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5655,7 +5655,7 @@ public class AstTest {
   public void lambdaTest() {
     var jsonAst = JsonParser.parseString(lambdaTestJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("lambda_test");
+    var func = script.compile(jsonAst).exec().getFunction("lambda_test");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5666,7 +5666,7 @@ public class AstTest {
   public void binaryOps() {
     var jsonAst = JsonParser.parseString(binaryOpsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("binary_ops");
+    var func = script.compile(jsonAst).exec().getFunction("binary_ops");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5684,7 +5684,7 @@ public class AstTest {
   public void formattedString() {
     var jsonAst = JsonParser.parseString(formattedStringJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("formatted_string");
+    var func = script.compile(jsonAst).exec().getFunction("formatted_string");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5695,7 +5695,7 @@ public class AstTest {
   public void ctorParamInterfacyProxy() {
     var jsonAst = JsonParser.parseString(ctorParamInterfaceProxyJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("run_thread");
+    var func = script.compile(jsonAst).exec().getFunction("run_thread");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5706,7 +5706,7 @@ public class AstTest {
   public void exceptions() {
     var jsonAst = JsonParser.parseString(exceptionsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("exceptions");
+    var func = script.compile(jsonAst).exec().getFunction("exceptions");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5731,7 +5731,7 @@ public class AstTest {
             (clazz, fieldName) -> clazz == Math.class && fieldName.equals("p") ? "PI" : fieldName,
             (clazz, methodName) ->
                 Set.of(clazz == Math.class && methodName.equals("s") ? "sqrt" : methodName));
-    var func = script.parse(jsonAst).compile().exec().getFunction("calc");
+    var func = script.compile(jsonAst).exec().getFunction("calc");
     System.out.println(func);
 
     var output = func.call(script.mainModule().globals());
@@ -5742,7 +5742,7 @@ public class AstTest {
   public void threads() throws InterruptedException, ExecutionException {
     var jsonAst = JsonParser.parseString(threadsJsonAst);
     var script = new Script();
-    var func = script.parse(jsonAst).compile().exec().getFunction("sleep_func");
+    var func = script.compile(jsonAst).exec().getFunction("sleep_func");
     System.out.println(func);
 
     Callable<Integer> task1 = () -> (Integer) func.call(script.mainModule().globals(), 3);

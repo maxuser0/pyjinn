@@ -127,7 +127,7 @@ public class Script {
       return globals;
     }
 
-    public void parse(JsonElement element, String scriptFilename) {
+    public void compile(JsonElement element, String scriptFilename) {
       var script = globals.script;
       var scopeParseStateStack = new ArrayDeque<ScopeParseState>();
       scopeParseStateStack.add(ScopeParseState.createGlobalScope(globals.globalVariableNames));
@@ -141,9 +141,6 @@ public class Script {
               scopeParseStateStack);
       parser.parseGlobals(element, globals);
       globals.updateGlobalVariableMappings();
-    }
-
-    public void compile() {
       globals.script.moduleHandler.onCompileModule(this);
       globals.compileGlobalStatements();
     }
@@ -371,18 +368,13 @@ public class Script {
     zombieCallbackHandler = handler;
   }
 
-  public Script parse(JsonElement element) {
-    parse(element, "<stdin>");
+  public Script compile(JsonElement element) {
+    compile(element, "<stdin>");
     return this;
   }
 
-  public Script parse(JsonElement element, String scriptFilename) {
-    mainModule().parse(element, scriptFilename);
-    return this;
-  }
-
-  public Script compile() {
-    mainModule().compile();
+  public Script compile(JsonElement element, String scriptFilename) {
+    mainModule().compile(element, scriptFilename);
     return this;
   }
 
@@ -1595,11 +1587,10 @@ public class Script {
     String scriptCode = Files.readString(modulePath);
     JsonElement scriptAst = PyjinnParser.parse(moduleFilename, scriptCode);
     module = new Module(this, moduleFilename, filenameToModuleName(moduleFilename));
-    module.parse(scriptAst, moduleFilename);
+    module.compile(scriptAst, moduleFilename);
     modulesByName.put(name, module);
     modulesByFilename.put(moduleFilename, module);
 
-    module.compile();
     module.exec();
     return module;
   }

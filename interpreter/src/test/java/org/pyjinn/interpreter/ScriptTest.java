@@ -1783,8 +1783,7 @@ public class ScriptTest {
   private Script.Environment execute(String source) throws Exception {
     var jsonAst = PyjinnParser.parse("script_test.pyj", source);
     script = new Script();
-    script.parse(jsonAst);
-    script.compile();
+    script.compile(jsonAst);
     script.exec();
     env = script.mainModule().globals();
     return env;

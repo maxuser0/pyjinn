@@ -28,13 +28,8 @@ public class App {
       Script.setVerboseDebugging(true);
     }
 
-    boolean compile = !argsSet.contains("--no-compile");
-    if (!compile) {
-      argsSet.remove("--no-compile");
-    }
-
     if (argsSet.contains("-i")) {
-      repl(compile);
+      repl();
       return;
     }
 
@@ -74,17 +69,14 @@ public class App {
 
     var script = new Script();
     try {
-      script.parse(jsonAst);
-      if (compile) {
-        script.compile();
-      }
+      script.compile(jsonAst);
       script.exec();
     } finally {
       script.exit(); // Ensure that at-exit callbacks are run.
     }
   }
 
-  public static void repl(boolean compile) throws Exception {
+  public static void repl() throws Exception {
     var version = Script.versionInfo();
     System.out.printf("Pyjinn %s\n", version.pyjinnVersion());
     System.out.printf("[Java %s]\n", version.javaVersion());
@@ -137,10 +129,7 @@ public class App {
 
         try {
           JsonElement jsonAst = PyjinnParser.parse("<stdin>", stdinString);
-          script.parse(jsonAst);
-          if (compile) {
-            script.compile();
-          }
+          script.compile(jsonAst);
           script.exec();
           stdinString = "";
         } catch (Exception e) {
