@@ -11,7 +11,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import java.io.PrintStream;
 import java.lang.reflect.Array;
@@ -1266,11 +1265,6 @@ public class Script {
   }
 
   public interface Statement {
-    default void exec(Context context) {
-      throw new UnsupportedOperationException(
-          "Execution of statement type not implemented: " + getClass().getSimpleName());
-    }
-
     default int lineno() {
       return -1;
     }
@@ -1311,27 +1305,31 @@ public class Script {
       boolean isCtor, // If true, require null return value and swap new instance in its place.
       AtomicInteger zombieCounter)
       implements Function {
-    public BoundFunction(FunctionDef function, Context enclosingContext, Code code) {
+    public BoundFunction(
+        FunctionDef function,
+        Context enclosingContext,
+        List<Object> defaults,
+        List<Object> keywordDefaults,
+        Code code) {
       this(
           function,
           enclosingContext,
-          function.evalArgDefaults(enclosingContext),
-          function.evalKeywordArgDefaults(enclosingContext),
+          defaults,
+          keywordDefaults,
           code,
           /* isCtor= */ false,
           new AtomicInteger());
     }
 
     public BoundFunction(
-        FunctionDef function, Context enclosingContext, Code code, boolean isCtor) {
+        FunctionDef function,
+        Context enclosingContext,
+        List<Object> defaults,
+        List<Object> keywordDefaults,
+        Code code,
+        boolean isCtor) {
       this(
-          function,
-          enclosingContext,
-          function.evalArgDefaults(enclosingContext),
-          function.evalKeywordArgDefaults(enclosingContext),
-          code,
-          isCtor,
-          new AtomicInteger());
+          function, enclosingContext, defaults, keywordDefaults, code, isCtor, new AtomicInteger());
     }
 
     @Override
@@ -1340,43 +1338,32 @@ public class Script {
         return null;
       }
 
-      if (code == null) {
-        // AST tree-walk evaluation.
-        var localContext = initLocalContext(/* callingContext= */ null, params, isCtor);
-        localContext.exec(functionDef.body);
-        return localContext.returnValue();
-      } else {
+      logger.log(
+          "Starting executing function %s() in virtual machine loop",
+          functionDef.identifier().name());
+
+      // Virtual machine instruction execution.
+      var callingContext = (Context) env;
+      var context =
+          Instruction.FunctionCall.executeCompiledFunction(
+              functionDef.enclosingClassName(), functionDef.lineno(), callingContext, this, params);
+
+      int numInstructions = 0;
+      var vm = VirtualMachine.getInstance();
+      while (context != callingContext && vm.hasMoreInstructions(context)) {
+        context = vm.executeNextInstruction(context);
+        ++numInstructions;
+      }
+      if (context == callingContext) {
         logger.log(
-            "Starting executing function %s() in virtual machine loop",
-            functionDef.identifier().name());
+            "Finished executing function %s() in virtual machine loop for %d instructions",
+            functionDef.identifier().name(), numInstructions);
 
-        // Virtual machine instruction execution.
-        var callingContext = (Context) env;
-        var context =
-            Instruction.FunctionCall.executeCompiledFunction(
-                functionDef.enclosingClassName(),
-                functionDef.lineno(),
-                callingContext,
-                this,
-                params);
-
-        int numInstructions = 0;
-        var vm = VirtualMachine.getInstance();
-        while (context != callingContext && vm.hasMoreInstructions(context)) {
-          context = vm.executeNextInstruction(context);
-          ++numInstructions;
-        }
-        if (context == callingContext) {
-          logger.log(
-              "Finished executing function %s() in virtual machine loop for %d instructions",
-              functionDef.identifier().name(), numInstructions);
-
-          // Return value was pushed onto the calling context's data stack by FunctionReturn
-          // instruction executed within the local context created within executeCompiledFunction().
-          return callingContext.popData();
-        } else {
-          throw new IllegalStateException("Unexpected context returning from function " + this);
-        }
+        // Return value was pushed onto the calling context's data stack by FunctionReturn
+        // instruction executed within the local context created within executeCompiledFunction().
+        return callingContext.popData();
+      } else {
+        throw new IllegalStateException("Unexpected context returning from function " + this);
       }
     }
 
@@ -1616,7 +1603,6 @@ public class Script {
   }
 
   public record Import(int lineno, List<ImportName> modules) implements Statement {
-    @Override
     public void exec(Context context) {
       try {
         var script = context.globals.script();
@@ -1649,7 +1635,6 @@ public class Script {
   }
 
   public record ImportFrom(int lineno, String module, List<ImportName> names) implements Statement {
-    @Override
     public void exec(Context context) {
       try {
         var script = context.globals.script();
@@ -1677,8 +1662,6 @@ public class Script {
 
   interface FunctionCompiler {
     Code compile(FunctionDef functionDef);
-
-    static FunctionCompiler NULL_CODE_GENERATOR = f -> null;
   }
 
   public record ClassFieldDef(Identifier identifier, Optional<Expression> defaultValue) {}
@@ -1686,11 +1669,6 @@ public class Script {
   // Type passed as an array of one element to defer creation of the type.
   public record DataclassDefaultInit(PyjClass[] type, List<ClassFieldDef> fields, int lineno)
       implements Statement {
-    @Override
-    public void exec(Context context) {
-      context.returnWithValue(create(context));
-    }
-
     public PyjObject create(Context context) {
       var object = new PyjObject(type[0]);
       for (var field : fields) {
@@ -1714,44 +1692,54 @@ public class Script {
       List<ClassFieldDef> fields,
       List<FunctionDef> methodDefs)
       implements Statement {
-    /** Adds this class definition to the specified {@code context}. */
-    @Override
-    public void exec(Context context) {
-      context.set(
-          identifier.name(),
-          compile(context, /* compiler= */ FunctionCompiler.NULL_CODE_GENERATOR));
-    }
-
     PyjClass compile(Context context, FunctionCompiler compiler) {
       var type = new PyjClass[1]; // Using array to pass to lambda for deferred type creation.
       Function ctor = null;
-      Optional<Decorator> dataclass =
-          decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
+      Optional<Decorator> dataclass = getDataclassDecorator();
       var instanceMethods = new HashMap<String, Function>();
       var classLevelMethods = new HashMap<String, ClassLevelMethod>();
       for (var methodDef : methodDefs) {
         String methodName = methodDef.identifier().name();
+        var defaults = new ArrayList<Object>();
+        for (int i = 0; i < methodDef.defaults().size(); ++i) {
+          defaults.add(context.popData());
+        }
+        var keywordDefaults = new ArrayList<Object>();
+        for (int i = 0; i < methodDef.keywordDefaults().size(); ++i) {
+          keywordDefaults.add(context.popData());
+        }
         // TODO(maxuser): Support __str__/__rep__ methods for custom string output.
         if ("__init__".equals(methodName)) {
           ctor =
               new CtorFunction(
                   type,
                   new BoundFunction(
-                      methodDef, context, compiler.compile(methodDef), /* isCtor= */ true));
+                      methodDef,
+                      context,
+                      defaults,
+                      keywordDefaults,
+                      compiler.compile(methodDef),
+                      /* isCtor= */ true));
           instanceMethods.put(methodName, ctor);
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("classmethod"))) {
           classLevelMethods.put(
               methodName,
               new ClassLevelMethod(
-                  true, new BoundFunction(methodDef, context, compiler.compile(methodDef))));
+                  true,
+                  new BoundFunction(
+                      methodDef, context, defaults, keywordDefaults, compiler.compile(methodDef))));
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("staticmethod"))) {
           classLevelMethods.put(
               methodName,
               new ClassLevelMethod(
-                  false, new BoundFunction(methodDef, context, compiler.compile(methodDef))));
+                  false,
+                  new BoundFunction(
+                      methodDef, context, defaults, keywordDefaults, compiler.compile(methodDef))));
         } else {
           instanceMethods.put(
-              methodName, new BoundFunction(methodDef, context, compiler.compile(methodDef)));
+              methodName,
+              new BoundFunction(
+                  methodDef, context, defaults, keywordDefaults, compiler.compile(methodDef)));
         }
       }
 
@@ -1777,15 +1765,20 @@ public class Script {
               classLevelMethods,
               dataclass.map(d -> dataclassHashCode(fields)),
               dataclass.map(d -> dataclassToString(fields)));
-      if (!dataclass.isPresent()) {
+      if (dataclass.isEmpty()) {
+        // Class fields that depend on each other are not supported.
+        // Pop default field values in the reverse order from which they were pushed.
         for (var field : fields) {
-          field
-              .defaultValue()
-              .ifPresent(
-                  v -> type[0].__dict__.__setitem__(field.identifier().name(), v.eval(context)));
+          if (field.defaultValue().isPresent()) {
+            type[0].__dict__.__setitem__(field.identifier().name(), context.popData());
+          }
         }
       }
       return type[0];
+    }
+
+    public Optional<Decorator> getDataclassDecorator() {
+      return decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
     }
 
     // Type passed as an array of one element to defer creation of the type.
@@ -1793,9 +1786,11 @@ public class Script {
         Context context, FunctionCompiler compiler, PyjClass[] type) {
       // Validate that all fields with default values appear after all fields without defaults.
       List<Expression> defaults = new ArrayList<>();
+      List<Object> defaultValues = new ArrayList<>();
       for (var field : fields) {
         if (field.defaultValue().isPresent()) {
           defaults.add(field.defaultValue().get());
+          defaultValues.add(context.popData());
         } else if (!defaults.isEmpty()) {
           throw new IllegalArgumentException(
               "non-default argument '%s' follows default argument"
@@ -1829,7 +1824,12 @@ public class Script {
               /* localVariableNames= */ argNames,
               /* hasYieldExpression= */ false,
               /* isAsync= */ false);
-      return new BoundFunction(functionDef, context, compiler.compile(functionDef));
+      return new BoundFunction(
+          functionDef,
+          context,
+          defaultValues,
+          /* keywordDefaults= */ List.of(),
+          compiler.compile(functionDef));
     }
 
     // Example of "@dataclass(frozen=True)":
@@ -2188,17 +2188,7 @@ public class Script {
       }
     }
 
-    public List<Object> evalArgDefaults(Context context) {
-      return defaults.stream().map(d -> d.eval(context)).toList();
-    }
-
-    private static final Object NO_KEYWORD_DEFAULT = new Object();
-
-    public List<Object> evalKeywordArgDefaults(Context context) {
-      return keywordDefaults.stream()
-          .map(d -> d == null ? NO_KEYWORD_DEFAULT : d.eval(context))
-          .toList();
-    }
+    static final Object NO_KEYWORD_DEFAULT = new Object();
   }
 
   public record FunctionArg(Identifier identifier) {}
@@ -2206,18 +2196,6 @@ public class Script {
   public record IfBlock(
       int lineno, Expression condition, Statement thenBody, Optional<Statement> elseBody)
       implements Statement {
-    @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      if (convertToBool(condition.eval(context))) {
-        context.exec(thenBody);
-      } else {
-        elseBody.ifPresent(e -> context.exec(e));
-      }
-    }
-
     @Override
     public String toString() {
       var out = new StringBuilder("if ");
@@ -2236,101 +2214,21 @@ public class Script {
   public record ForBlock(int lineno, Expression vars, Expression iter, Statement body)
       implements Statement {
     @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      final Identifier loopVar;
-      final TupleLiteral loopVars;
-      if (vars instanceof Identifier id) {
-        loopVar = id;
-        loopVars = null;
-      } else if (vars instanceof TupleLiteral tuple) {
-        loopVar = null;
-        loopVars = tuple;
-      } else {
-        throw new IllegalArgumentException("Unexpected loop variable type: " + vars.toString());
-      }
-      try {
-        context.enterLoop();
-        for (var value : getIterable(iter.eval(context))) {
-          if (loopVar != null) {
-            context.set(loopVar.name(), value);
-          } else {
-            Assignment.assignTuple(context, loopVars, value);
-          }
-          context.exec(body);
-          if (context.shouldBreak()) {
-            break;
-          }
-          if (context.shouldContinue()) {
-            context.resetContinueBit();
-            continue;
-          }
-        }
-      } finally {
-        context.exitLoop();
-      }
-    }
-
-    @Override
     public String toString() {
       return "for %s in %s:\n%s"
           .formatted(vars, iter, body.toString().replaceAll("^", "  ").replaceAll("\n", "\n  "));
     }
   }
 
-  public record WhileBlock(int lineno, Expression condition, Statement body) implements Statement {
-    @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      try {
-        context.enterLoop();
-        while (convertToBool(condition.eval(context))) {
-          context.exec(body);
-          if (context.shouldBreak()) {
-            break;
-          }
-          if (context.shouldContinue()) {
-            context.resetContinueBit();
-            continue;
-          }
-        }
-      } finally {
-        context.exitLoop();
-      }
-    }
-  }
+  public record WhileBlock(int lineno, Expression condition, Statement body) implements Statement {}
 
-  public record Pass() implements Statement {
-    @Override
-    public void exec(Context context) {
-      // Do nothing.
-    }
-  }
+  public record Pass() implements Statement {}
 
-  public record Break() implements Statement {
-    @Override
-    public void exec(Context context) {
-      context.breakLoop();
-    }
-  }
+  public record Break() implements Statement {}
 
-  public record Continue() implements Statement {
-    @Override
-    public void exec(Context context) {
-      context.continueLoop();
-    }
-  }
+  public record Continue() implements Statement {}
 
   public record Identifier(String name) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      return context.get(name);
-    }
-
     @Override
     public String toString() {
       return name;
@@ -2348,52 +2246,6 @@ public class Script {
       List<ExceptionHandler> exceptionHandlers,
       Optional<Statement> finallyBlock)
       implements Statement {
-    @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      PyjException pyException = null;
-      try {
-        context.exec(tryBody);
-      } catch (Exception e) {
-        // PyjException exists only to prevent all eval/exec/invoke methods from declaring that they
-        // throw Exception.  Unwrap the underlying exception here.
-        Object exception = PyjException.unwrap(e);
-        boolean handled = false;
-        for (var handler : exceptionHandlers) {
-          var exceptionType = handler.exceptionTypeSpec().map(t -> t.eval(context));
-          if (exceptionType.isEmpty()
-              || matchesExceptionSpec(exceptionType.get(), exception, /* allowTuple= */ true)) {
-            handler
-                .exceptionVariable()
-                .ifPresent(
-                    name -> {
-                      context.setVariable(name, exception);
-                    });
-            context.exec(handler.body);
-            handled = true;
-            break;
-          }
-        }
-        if (!handled) {
-          pyException = new PyjException(e);
-          pyException.setStackTrace(e.getStackTrace()); // Keep original (script) stack trace.
-          throw pyException;
-        }
-      } finally {
-        try {
-          finallyBlock.ifPresent(fb -> context.exec(fb));
-        } catch (Exception e) {
-          if (pyException != null) {
-            // When suppressing an old exception, limit the stack frames of the new exception.
-            e.addSuppressed(pyException);
-            throw e;
-          }
-        }
-      }
-    }
-
     public static boolean matchesExceptionSpec(
         Object exceptionSpec, Object exception, boolean allowTuple) {
       if (exceptionSpec instanceof PyjClass declaredType
@@ -2447,53 +2299,14 @@ public class Script {
 
   public record RaiseStatement(int lineno, Expression exception) implements Statement {
     @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      throw new PyjException(exception.eval(context));
-    }
-
-    @Override
     public String toString() {
-      return String.format("throw %s", exception);
+      return String.format("raise %s", exception);
     }
   }
 
-  public interface Expression extends Statement {
-    @Override
-    default void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      var result = eval(context);
-      if (context.globals.script.globalExpressionHandler != null) {
-        context.globals.script.globalExpressionHandler.accept(result);
-      }
-    }
-
-    default JsonElement astNode() {
-      return JsonNull.INSTANCE;
-    }
-
-    default Object eval(Context context) {
-      throw new UnsupportedOperationException(
-          String.format(
-              "Eval for expression %s not implemented: %s", getClass().getSimpleName(), this));
-    }
-  }
+  public interface Expression extends Statement {}
 
   public record StatementBlock(int lineno, List<Statement> statements) implements Statement {
-    @Override
-    public void exec(Context context) {
-      for (var statement : statements) {
-        if (context.skipStatement()) {
-          break;
-        }
-        context.exec(statement);
-      }
-    }
-
     @Override
     public String toString() {
       return statements.stream().map(Object::toString).collect(joining("\n"));
@@ -2502,9 +2315,6 @@ public class Script {
 
   public record ClassAliasAssignment(int lineno, Identifier identifier, Class<?> clss)
       implements Statement {
-    @Override
-    public void exec(Context context) {}
-
     @Override
     public String toString() {
       // TODO(maxuser): Format as Python assignment.
@@ -2518,38 +2328,13 @@ public class Script {
     }
   }
 
-  public record WalrusExpression(Identifier identifier, Expression rhs) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      var value = rhs.eval(context);
-      context.setVariable(identifier, value);
-      return value;
-    }
-  }
+  public record WalrusExpression(Identifier identifier, Expression rhs) implements Expression {}
 
-  public record AwaitExpression(Expression operand) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      throw new UnsupportedOperationException(
-          "'await' expression not supported in recursive tree-walk interpreter");
-    }
-  }
+  public record AwaitExpression(Expression operand) implements Expression {}
 
-  public record YieldExpression(Expression operand) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      throw new UnsupportedOperationException(
-          "'yield' expression not supported in recursive tree-walk interpreter");
-    }
-  }
+  public record YieldExpression(Expression operand) implements Expression {}
 
-  public record YieldFromExpression(Expression operand) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      throw new UnsupportedOperationException(
-          "'yield from' expression not supported in recursive tree-walk interpreter");
-    }
-  }
+  public record YieldFromExpression(Expression operand) implements Expression {}
 
   public record Assignment(int lineno, Expression lhs, Expression rhs) implements Statement {
     public Assignment {
@@ -2621,41 +2406,6 @@ public class Script {
         throw new IllegalArgumentException(
             "Too many values to unpack (expected %d)".formatted(numToAssign));
       }
-    }
-
-    @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      Object rhsValue = rhs.eval(context);
-      if (lhs instanceof Identifier lhsId) {
-        context.setVariable(lhsId, rhsValue);
-        return;
-      } else if (lhs instanceof FieldAccess lhsFieldAccess) {
-        var lhsObject = lhsFieldAccess.object().eval(context);
-        String fieldName = lhsFieldAccess.field().name();
-        if (assignField(lhsObject, fieldName, rhsValue)) {
-          return;
-        }
-      } else if (lhs instanceof TupleLiteral lhsTuple) {
-        assignTuple(context, lhsTuple, rhsValue);
-        return;
-      } else if (lhs instanceof ArrayIndex lhsArrayIndex) {
-        var array = lhsArrayIndex.array().eval(context);
-        var index = lhsArrayIndex.index().eval(context);
-        if (array instanceof PyjObject pyjObject
-            && pyjObject.callMethod(context.globals, "__setitem__", new Object[] {index, rhsValue})
-                != PyjObject.UNDEFINED_RESULT) {
-          return;
-        } else {
-          assignArray(array, index, rhsValue);
-          return;
-        }
-      }
-      throw new IllegalArgumentException(
-          "Unsupported expression type for lhs of assignment: '%s' (%s)"
-              .formatted(lhs, lhs.getClass().getSimpleName()));
     }
 
     public static boolean assignField(Object lhsObject, String fieldName, Object rhsValue) {
@@ -2742,32 +2492,6 @@ public class Script {
       }
     }
 
-    @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      Object rhsValue = rhs.eval(context);
-      if (lhs instanceof Identifier lhsId) {
-        augmentVariableByName(context, lhsId.name(), op, rhsValue);
-        return;
-      } else if (lhs instanceof ArrayIndex lhsArrayIndex) {
-        var array = lhsArrayIndex.array().eval(context);
-        var index = lhsArrayIndex.index().eval(context);
-        augmentArrayIndex(array, index, op, rhsValue);
-        return;
-      } else if (lhs instanceof FieldAccess lhsFieldAccess) {
-        var lhsObject = lhsFieldAccess.object().eval(context);
-        String fieldName = lhsFieldAccess.field().name();
-        augmentField(lhsObject, fieldName, op, rhsValue);
-        return;
-      }
-      throw new IllegalArgumentException(
-          String.format(
-              "Unsupported expression type for lhs of assignment: '%s' (%s)",
-              lhs, lhs.getClass().getSimpleName()));
-    }
-
     public static void augmentVariableByName(Context context, String varName, Op op, Object rhs) {
       var oldValue = context.get(varName);
       var newValue = op.apply(oldValue, rhs);
@@ -2831,30 +2555,6 @@ public class Script {
 
   public record Deletion(int lineno, List<Expression> targets) implements Statement {
     @Override
-    public void exec(Context context) {
-      for (var target : targets) {
-        if (target instanceof Identifier id) {
-          context.del(id.name());
-        } else if (target instanceof ArrayIndex arrayIndex) {
-          var array = arrayIndex.array().eval(context);
-          var index = arrayIndex.index().eval(context);
-          if (array instanceof ItemDeleter deleter) {
-            deleter.__delitem__(index);
-          } else if (array instanceof List list) {
-            PyjList.deleteItem(list, index);
-          } else if (array instanceof Map map) {
-            map.remove(index);
-          } else {
-            throw new IllegalArgumentException(
-                "Object does not support subscript deletion: " + array.getClass().getName());
-          }
-        } else {
-          throw new IllegalArgumentException("Cannot delete value: " + target.toString());
-        }
-      }
-    }
-
-    @Override
     public String toString() {
       return String.format("del %s", targets.stream().map(Object::toString).collect(joining(", ")));
     }
@@ -2865,14 +2565,6 @@ public class Script {
   public record NonlocalVarDecl(int lineno, List<String> nonlocalVars) implements Statement {}
 
   public record ReturnStatement(int lineno, Expression returnValue) implements Statement {
-    @Override
-    public void exec(Context context) {
-      if (context.skipStatement()) {
-        return;
-      }
-      context.returnWithValue(returnValue == null ? null : returnValue.eval(context));
-    }
-
     @Override
     public String toString() {
       if (returnValue == null) {
@@ -2909,11 +2601,6 @@ public class Script {
       }
       throw new IllegalArgumentException(
           String.format("Unsupported primitive type: %s (%s)", value, typename));
-    }
-
-    @Override
-    public Object eval(Context context) {
-      return value;
     }
 
     @Override
@@ -3005,13 +2692,6 @@ public class Script {
         default:
           throw new UnsupportedOperationException("Unsupported comparison op: " + opName);
       }
-    }
-
-    @Override
-    public Object eval(Context context) {
-      var lhsValue = lhs.eval(context);
-      var rhsValue = rhs.eval(context);
-      return doOp(context, op, lhsValue, rhsValue);
     }
 
     static Object doOp(Context context, Op op, Object lhsValue, Object rhsValue) {
@@ -3163,36 +2843,6 @@ public class Script {
     }
 
     @Override
-    public Object eval(Context context) {
-      switch (op) {
-        case AND:
-          {
-            Object result = null;
-            for (var expr : values) {
-              result = expr.eval(context);
-              if (!convertToBool(result)) {
-                break;
-              }
-            }
-            return result;
-          }
-
-        case OR:
-          {
-            Object result = null;
-            for (var expr : values) {
-              result = expr.eval(context);
-              if (convertToBool(result)) {
-                break;
-              }
-            }
-            return result;
-          }
-      }
-      throw new UnsupportedOperationException("Boolean op not supported: " + toString());
-    }
-
-    @Override
     public String toString() {
       return values.stream().map(Object::toString).collect(joining(" " + op.symbol() + " "));
     }
@@ -3224,12 +2874,6 @@ public class Script {
         default:
           throw new UnsupportedOperationException("Unsupported unary op: " + opName);
       }
-    }
-
-    @Override
-    public Object eval(Context context) {
-      var value = operand.eval(context);
-      return doOp(context, op, value);
     }
 
     static Object doOp(Context context, Op op, Object operand) {
@@ -3300,13 +2944,6 @@ public class Script {
         default:
           throw new UnsupportedOperationException("Unsupported binary op: " + opName);
       }
-    }
-
-    @Override
-    public Object eval(Context context) {
-      var lhsValue = lhs.eval(context);
-      var rhsValue = rhs.eval(context);
-      return doOp(context, op, lhsValue, rhsValue);
     }
 
     static Object doOp(Context context, Op op, Object lhsValue, Object rhsValue) {
@@ -3481,24 +3118,7 @@ public class Script {
 
   public record SliceExpression(
       Optional<Expression> start, Optional<Expression> stop, Optional<Expression> step)
-      implements Expression {
-    @Override
-    public Object eval(Context context) {
-      try {
-        return new Slice(
-            start.map(s -> (Integer) s.eval(context)).orElse(null),
-            stop.map(s -> (Integer) s.eval(context)).orElse(null),
-            step.map(s -> (Integer) s.eval(context)).orElse(null));
-      } catch (ClassCastException e) {
-        var string =
-            Stream.of(start, stop, step)
-                .map(x -> x.map(Object::toString).orElse(""))
-                .collect(joining(":", "[", "]"));
-        throw new IllegalArgumentException(
-            "Slice indices must be integers but got: %s".formatted(string));
-      }
-    }
-  }
+      implements Expression {}
 
   public static class Slice {
     public final Integer start;
@@ -3543,21 +3163,6 @@ public class Script {
   }
 
   public record ArrayIndex(Expression array, Expression index) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      var arrayValue = array.eval(context);
-      var indexValue = index.eval(context);
-
-      if (arrayValue instanceof PyjObject pyjObject) {
-        var result = pyjObject.callMethod(context.globals, "__getitem__", indexValue);
-        if (result != PyjObject.UNDEFINED_RESULT) {
-          return result;
-        }
-      }
-
-      return getItem(arrayValue, indexValue);
-    }
-
     public static Object getItem(Object arrayValue, Object indexValue) {
       if (arrayValue == null || indexValue == null) {
         throw new NullPointerException(
@@ -3619,11 +3224,6 @@ public class Script {
 
   public record IfExpression(Expression test, Expression body, Expression orElse)
       implements Expression {
-    @Override
-    public Object eval(Context context) {
-      return convertToBool(test.eval(context)) ? body.eval(context) : orElse.eval(context);
-    }
-
     @Override
     public String toString() {
       return String.format("%s if %s else %s", body, test, orElse);
@@ -4208,21 +3808,6 @@ public class Script {
 
   public record TupleLiteral(List<Expression> elements) implements Expression {
     @Override
-    public Object eval(Context context) {
-      return new PyjTuple(
-          elements.stream()
-              .mapMulti(
-                  (expr, downstream) -> {
-                    if (expr instanceof StarredExpression starredExpr) {
-                      getIterable(starredExpr.value().eval(context)).forEach(downstream);
-                    } else {
-                      downstream.accept(expr.eval(context));
-                    }
-                  })
-              .toArray());
-    }
-
-    @Override
     public String toString() {
       return elements.size() == 1
           ? String.format("(%s,)", elements.get(0))
@@ -4232,44 +3817,12 @@ public class Script {
 
   public record ListLiteral(List<Expression> elements) implements Expression {
     @Override
-    public Object eval(Context context) {
-      // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
-      return new PyjList(
-          elements.stream()
-              .mapMulti(
-                  (expr, downstream) -> {
-                    if (expr instanceof StarredExpression starredExpr) {
-                      getIterable(starredExpr.value().eval(context)).forEach(downstream);
-                    } else {
-                      downstream.accept(expr.eval(context));
-                    }
-                  })
-              .collect(toList()));
-    }
-
-    @Override
     public String toString() {
       return elements.stream().map(Object::toString).collect(joining(", ", "[", "]"));
     }
   }
 
   public record SetLiteral(List<Expression> elements) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      // Stream.toList() returns immutable list, so using Stream.collect(toList()) for mutable List.
-      return new PyjSet(
-          elements.stream()
-              .mapMulti(
-                  (expr, downstream) -> {
-                    if (expr instanceof StarredExpression starredExpr) {
-                      getIterable(starredExpr.value().eval(context)).forEach(downstream);
-                    } else {
-                      downstream.accept(expr.eval(context));
-                    }
-                  })
-              .collect(toSet()));
-    }
-
     @Override
     public String toString() {
       if (elements.isEmpty()) {
@@ -5006,15 +4559,6 @@ public class Script {
     }
 
     @Override
-    public Object eval(Context context) {
-      var map = new HashMap<Object, Object>();
-      for (int i = 0; i < keys.size(); ++i) {
-        map.put(keys.get(i).eval(context), values.get(i).eval(context));
-      }
-      return new PyjDict(map);
-    }
-
-    @Override
     public String toString() {
       var out = new StringBuilder("{");
       for (int i = 0; i < keys.size(); ++i) {
@@ -5033,11 +4577,6 @@ public class Script {
   public record Lambda(FunctionDef functionDef) implements Expression {}
 
   public record FormattedValue(Expression value, Optional<String> format) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      return format(value.eval(context), format);
-    }
-
     public static String format(Object value, Optional<String> format) {
       if (format.isEmpty()) {
         return PyjObjects.toString(value);
@@ -5050,11 +4589,6 @@ public class Script {
   }
 
   public record FormattedString(List<Expression> values) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      return values.stream().map(v -> PyjObjects.toString(v.eval(context))).collect(joining());
-    }
-
     @Override
     public String toString() {
       return String.format(
@@ -5240,11 +4774,6 @@ public class Script {
 
   public record JavaClassKeyword() implements Expression {
     @Override
-    public Object eval(Context context) {
-      throw new UnsupportedOperationException("JavaClass can be called but not evaluated");
-    }
-
-    @Override
     public String toString() {
       return "JavaClass";
     }
@@ -5252,8 +4781,7 @@ public class Script {
 
   public record JavaClassCall(String name, SymbolCache symbolCache, ClassLoader classLoader)
       implements Expression {
-    @Override
-    public Object eval(Context context) {
+    public Object loadClass(Context context) {
       final Class<?> type;
       try {
         type = classLoader.loadClass(symbolCache.getRuntimeClassName(name));
@@ -5265,11 +4793,6 @@ public class Script {
   }
 
   public record ContextIdentifier() implements Expression {
-    @Override
-    public Object eval(Context context) {
-      return context;
-    }
-
     @Override
     public String toString() {
       return "__context__";
@@ -6112,81 +5635,6 @@ public class Script {
       List<KeywordArg> kwargs)
       implements Expression {
     @Override
-    public Object eval(Context context) {
-      var caller = method.eval(context);
-      List<Object> paramValues = new ArrayList<>();
-      for (Expression param : params) {
-        if (param instanceof StarredExpression starred) {
-          Object value = starred.value().eval(context);
-          if (value == null) {
-            throw new IllegalArgumentException("argument after * must be an iterable, not null");
-          }
-          value = promoteArrayToTuple(value);
-          if (value instanceof Iterable<?> iterable) {
-            for (Object element : iterable) {
-              paramValues.add(element);
-            }
-          } else {
-            throw new IllegalArgumentException(
-                "argument after * must be an iterable, not " + value.getClass().getName());
-          }
-        } else {
-          paramValues.add(param.eval(context));
-        }
-      }
-      if (!kwargs.isEmpty()) {
-        var kwargsMap = new KeywordArgs();
-        for (var kwarg : kwargs) {
-          if (kwarg.name() == null) {
-            var packedKwarg = kwarg.value().eval(context);
-            if (packedKwarg instanceof PyjDict dict) {
-              for (var entry : dict.getJavaMap().entrySet()) {
-                if (entry.getKey() instanceof String name) {
-                  kwargsMap.put(name, entry.getValue());
-                } else {
-                  throw new IllegalArgumentException(
-                      "Keywords must be strings, not %s"
-                          .formatted(entry.getKey() == null ? "null" : entry.getKey().getClass()));
-                }
-              }
-            } else {
-              throw new IllegalArgumentException(
-                  "Argument after ** must be a mapping, not %s"
-                      .formatted(packedKwarg == null ? "null" : packedKwarg.getClass()));
-            }
-          } else {
-            kwargsMap.put(kwarg.name(), kwarg.value().eval(context));
-          }
-        }
-        if (!kwargsMap.isEmpty()) {
-          paramValues.add(kwargsMap);
-        }
-      }
-
-      if (caller instanceof Class<?> type) {
-        Function function;
-        if ((function = InterfaceProxy.getFunctionPassedToInterface(type, paramValues.toArray()))
-            != null) {
-          return InterfaceProxy.promoteFunctionToJavaInterface(context.env(), type, function);
-        }
-      }
-
-      if (caller instanceof Function function) {
-        try {
-          context.enterFunction(filename, lineno);
-          return function.call(context.env(), paramValues.toArray());
-        } finally {
-          context.leaveFunction();
-        }
-      }
-
-      throw new IllegalArgumentException(
-          String.format(
-              "'%s' is not callable: %s",
-              caller == null ? "NoneType" : caller.getClass().getName(), method));
-    }
-
-    @Override
     public String toString() {
       return String.format(
           "%s(%s)", method, params.stream().map(Object::toString).collect(joining(", ")));
@@ -6270,11 +5718,6 @@ public class Script {
 
   public record BoundMethodExpression(
       Expression object, Identifier methodId, SymbolCache symbolCache) implements Expression {
-    @Override
-    public Object eval(Context context) {
-      return new BoundMethod(object.eval(context), methodId.name(), symbolCache, object);
-    }
-
     @Override
     public String toString() {
       return String.format("%s.%s", object, methodId);
@@ -6769,12 +6212,6 @@ public class Script {
 
   public record FieldAccess(Expression object, Identifier field, SymbolCache symbolCache)
       implements Expression {
-    @Override
-    public Object eval(Context context) {
-      var objectValue = object.eval(context);
-      return getField(objectValue);
-    }
-
     public Object getField(Object objectValue) {
       if (objectValue instanceof PyjObject pyObject) {
         if (field.name().equals("__class__")) {
@@ -7077,16 +6514,10 @@ public class Script {
      * execGlobalStatements}.
      */
     public void execGlobalStatements() {
-      if (code == null) {
-        for (var statement : globalStatements) {
-          globals.exec(statement);
-        }
-      } else {
-        Context context = this;
-        var virtualMachine = VirtualMachine.getInstance();
-        while (virtualMachine.hasMoreInstructions(context)) {
-          context = virtualMachine.executeNextInstruction(context);
-        }
+      Context context = this;
+      var virtualMachine = VirtualMachine.getInstance();
+      while (virtualMachine.hasMoreInstructions(context)) {
+        context = virtualMachine.executeNextInstruction(context);
       }
       globalStatements.clear();
     }
@@ -7129,9 +6560,6 @@ public class Script {
     final ClassMethodName classMethodName;
     private Object returnValue = NOT_ASSIGNED; // NOT_ASSIGNED when no return value yet.
     private Object ctorResult; // Non-null if this is a ctor.
-    private int loopDepth = 0;
-    private boolean breakingLoop = false;
-    private boolean continuingLoop = false;
     private boolean isGenerator = false;
 
     protected GlobalContext globals;
@@ -7287,16 +6715,6 @@ public class Script {
       return filename.endsWith(".pyj") || filename.endsWith(".py") || filename.equals("<stdin>");
     }
 
-    /** Call this instead of Statement.exec directly for proper attribution with exceptions. */
-    public void exec(Statement statement) {
-      try {
-        statement.exec(this);
-      } catch (Exception e) {
-        appendScriptStack(statement.lineno(), e);
-        throw e;
-      }
-    }
-
     void appendScriptStack(int lineno, Exception e) {
       var callStack = globals.getCallStack();
       var stackTrace = e.getStackTrace();
@@ -7344,7 +6762,7 @@ public class Script {
       if (this != globals && code.globals.contains(name)) {
         globals.set(name, value);
       } else if (enclosingContext != null && code.nonlocals.contains(name)) {
-        // TODO(maxuser)! Verify that this works for multiple levels of nested functions without an
+        // TODO(maxuser): Verify that this works for multiple levels of nested functions without an
         // intervening nonlocal declaration.
         enclosingContext.set(name, value);
       } else {
@@ -7390,7 +6808,7 @@ public class Script {
         globals.del(name);
         return;
       }
-      // TODO(maxuser)! Support del of nonlocal variables.
+      // TODO(maxuser): Support del of nonlocal variables.
       Integer index = code.variableNameToIndex.apply(name);
       if (index == null) {
         throw new IllegalArgumentException(String.format("Name '%s' is not defined", name));
@@ -7398,54 +6816,11 @@ public class Script {
       variables.set(index, NOT_ASSIGNED);
     }
 
-    public void enterLoop() {
-      ++loopDepth;
-    }
-
-    public void exitLoop() {
-      --loopDepth;
-      if (loopDepth < 0) {
-        throw new IllegalStateException("Exited more loops than were entered");
-      }
-      breakingLoop = false;
-      continuingLoop = false;
-    }
-
-    public void breakLoop() {
-      if (loopDepth <= 0) {
-        throw new IllegalStateException("'break' outside loop");
-      }
-      breakingLoop = true;
-    }
-
-    public void continueLoop() {
-      if (loopDepth <= 0) {
-        throw new IllegalStateException("'continue' outside loop");
-      }
-      continuingLoop = true;
-    }
-
     public void returnWithValue(Object returnValue) {
       if (this == globals) {
         throw new IllegalStateException("'return' outside function");
       }
       this.returnValue = returnValue;
-    }
-
-    public boolean skipStatement() {
-      return hasReturnValue() || breakingLoop || continuingLoop || globals.halted();
-    }
-
-    public boolean shouldBreak() {
-      return breakingLoop;
-    }
-
-    public boolean shouldContinue() {
-      return continuingLoop;
-    }
-
-    public boolean resetContinueBit() {
-      return continuingLoop = false;
     }
 
     public boolean hasReturnValue() {

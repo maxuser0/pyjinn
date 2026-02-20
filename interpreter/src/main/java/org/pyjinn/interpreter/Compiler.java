@@ -465,14 +465,46 @@ class Compiler {
     }
   }
 
-  private void compileFunctionDef(FunctionDef function, Code code) {
+  private void compileFunctionDef(FunctionDef functionDef, Code code) {
+    compileFunctionDefaults(functionDef, code);
     code.addInstruction(
-        lineno, new Instruction.CreateFunction(function, compileFunction(function)));
+        lineno, new Instruction.CreateFunction(functionDef, compileFunction(functionDef)));
     code.addInstruction(
-        lineno, new Instruction.StoreToVariableByName(function.identifier().name()));
+        lineno, new Instruction.StoreToVariableByName(functionDef.identifier().name()));
+  }
+
+  private void compileFunctionDefaults(FunctionDef functionDef, Code code) {
+    for (var keywordDefault : functionDef.keywordDefaults().reversed()) {
+      if (keywordDefault == null) {
+        code.addInstruction(
+            lineno, new Instruction.PushData(Script.FunctionDef.NO_KEYWORD_DEFAULT));
+      } else {
+        compileExpression(keywordDefault, code);
+      }
+    }
+    for (var argDefault : functionDef.defaults().reversed()) {
+      compileExpression(argDefault, code);
+    }
   }
 
   private void compileClassDef(ClassDef classDef, Code code) {
+    if (classDef.getDataclassDecorator().isEmpty()
+        || classDef.methodDefs().stream()
+            .noneMatch(methodDef -> methodDef.identifier().name().equals("__init__"))) {
+      for (var field : classDef.fields().reversed()) {
+        field.defaultValue().ifPresent(f -> compileExpression(f, code));
+      }
+    }
+
+    for (var methodDef : classDef.methodDefs().reversed()) {
+      for (var d : methodDef.defaults().reversed()) {
+        compileExpression(d, code);
+      }
+      for (var d : methodDef.keywordDefaults().reversed()) {
+        compileExpression(d, code);
+      }
+    }
+
     code.addInstruction(lineno, new Instruction.DefineClass(classDef, this::compileFunction));
   }
 
@@ -557,7 +589,8 @@ class Compiler {
     compileExpression(call.method(), code);
     int numArgs = 0;
     for (var kwarg : call.kwargs().reversed()) {
-      code.addInstruction(lineno, new Instruction.PushData(kwarg));
+      compileExpression(kwarg.value(), code);
+      code.addInstruction(lineno, new Instruction.CreateKeywordArg(kwarg.name()));
       ++numArgs;
     }
     for (var param : call.params().reversed()) {
@@ -660,6 +693,7 @@ class Compiler {
       compileExpression(formattedValue.value(), code);
       code.addInstruction(lineno, new Instruction.FormattedValue(formattedValue.format()));
     } else if (expr instanceof Lambda lambda) {
+      compileFunctionDefaults(lambda.functionDef(), code);
       code.addInstruction(
           lineno,
           new Instruction.CreateFunction(

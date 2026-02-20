@@ -1765,6 +1765,21 @@ public class ScriptTest {
   }
 
   @Test
+  public void classFields() throws Exception {
+    execute(
+        """
+        class Foo:
+          x = 11
+          y = 22
+
+        foo_x = Foo.x
+        foo_y = Foo.y
+        """);
+    assertEquals(11, getVariable("foo_x"));
+    assertEquals(22, getVariable("foo_y"));
+  }
+
+  @Test
   public void setGlobalVariableFromOutsideScript() throws Exception {
     script = new Script();
     script.set("foo", 42);

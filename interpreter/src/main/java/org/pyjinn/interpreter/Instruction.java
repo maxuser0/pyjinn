@@ -73,19 +73,22 @@ sealed interface Instruction {
 
   record KeywordArg(String name, Object value) {}
 
+  record CreateKeywordArg(String name) implements Instruction {
+    @Override
+    public Context execute(Context context) {
+      context.pushData(new KeywordArg(name, context.popData()));
+      ++context.ip;
+      return context;
+    }
+  }
+
   record FunctionCall(String filename, int lineno, int numArgs) implements Instruction {
     @Override
     public Context execute(Context context) {
       Object[] params = new Object[numArgs];
       for (int i = 0; i < numArgs; ++i) {
         Object value = context.popData();
-        if (value instanceof Script.KeywordArg arg) {
-          params[i] = new KeywordArg(arg.name(), arg.value().eval(context));
-        } else if (value instanceof StarredExpression expr) {
-          params[i] = new StarredValue(expr.value().eval(context));
-        } else {
-          params[i] = value;
-        }
+        params[i] = value;
       }
       var function = context.popData();
       return call(filename, lineno, context, function, params);
@@ -404,17 +407,25 @@ sealed interface Instruction {
     }
   }
 
-  record CreateFunction(FunctionDef function, Code code) implements Instruction {
+  record CreateFunction(FunctionDef functionDef, Code code) implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.pushData(new BoundFunction(function, context, code));
+      var defaults = new ArrayList<Object>();
+      for (int i = 0; i < functionDef.defaults().size(); ++i) {
+        defaults.add(context.popData());
+      }
+      var keywordDefaults = new ArrayList<Object>();
+      for (int i = 0; i < functionDef.keywordDefaults().size(); ++i) {
+        keywordDefaults.add(context.popData());
+      }
+      context.pushData(new BoundFunction(functionDef, context, defaults, keywordDefaults, code));
       ++context.ip;
       return context;
     }
 
     @Override
     public int stackOffset() {
-      return 1;
+      return 1 - functionDef.defaults().size() - functionDef.keywordDefaults().size();
     }
   }
 
@@ -435,7 +446,13 @@ sealed interface Instruction {
 
     @Override
     public Context execute(Context context) {
-      var listCompFunc = new BoundFunction(function, /* enclosingContext= */ context, code);
+      var listCompFunc =
+          new BoundFunction(
+              function,
+              /* enclosingContext= */ context,
+              /* defaults= */ List.of(),
+              /* keywordDefaults= */ List.of(),
+              code);
       return FunctionCall.executeCompiledFunctionUnknownSource(context, listCompFunc, NO_PARAMS);
     }
 
@@ -451,6 +468,23 @@ sealed interface Instruction {
       context.set(classDef.identifier().name(), classDef.compile(context, compiler));
       ++context.ip;
       return context;
+    }
+
+    @Override
+    public int stackOffset() {
+      int offset =
+          -classDef.methodDefs().stream()
+              .map(m -> m.defaults().size() + m.keywordDefaults().size())
+              .mapToInt(Integer::intValue)
+              .sum();
+
+      if (classDef.getDataclassDecorator().isEmpty()
+          || classDef.methodDefs().stream()
+              .noneMatch(methodDef -> methodDef.identifier().name().equals("__init__"))) {
+        offset -=
+            (int) classDef.fields().stream().filter(f -> f.defaultValue().isPresent()).count();
+      }
+      return offset;
     }
   }
 
@@ -513,7 +547,7 @@ sealed interface Instruction {
   record LoadJavaClass(JavaClassCall javaClassCall) implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.pushData(javaClassCall.eval(context));
+      context.pushData(javaClassCall.loadClass(context));
       ++context.ip;
       return context;
     }
