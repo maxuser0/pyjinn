@@ -1660,10 +1660,6 @@ public class Script {
     }
   }
 
-  interface FunctionCompiler {
-    Code compile(FunctionDef functionDef);
-  }
-
   public record ClassFieldDef(Identifier identifier, Optional<Expression> defaultValue) {}
 
   // Type passed as an array of one element to defer creation of the type.
@@ -1692,13 +1688,71 @@ public class Script {
       List<ClassFieldDef> fields,
       List<FunctionDef> methodDefs)
       implements Statement {
-    PyjClass compile(Context context, FunctionCompiler compiler) {
-      var type = new PyjClass[1]; // Using array to pass to lambda for deferred type creation.
+
+    public Optional<Decorator> getDataclassDecorator() {
+      return decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
+    }
+
+    public boolean shouldGenerateDataclassCtor() {
+      return getDataclassDecorator().isPresent()
+          && methodDefs.stream()
+              .noneMatch(methodDef -> methodDef.identifier().name().equals("__init__"));
+    }
+
+    // Type passed as an array of one element to defer creation of the type.
+    FunctionDef generateDataclassCtor(PyjClass[] type) {
+      // Validate that all fields with default values appear after all fields without defaults.
+      List<Expression> defaults = new ArrayList<>();
+      for (var field : fields) {
+        if (field.defaultValue().isPresent()) {
+          defaults.add(field.defaultValue().get());
+        } else if (!defaults.isEmpty()) {
+          throw new IllegalArgumentException(
+              "non-default argument '%s' follows default argument"
+                  .formatted(field.identifier().name()));
+        }
+      }
+
+      var args = fields.stream().map(f -> new FunctionArg(f.identifier)).toList();
+      var argNames = fields.stream().map(f -> f.identifier.name()).toList();
+      var argNameToIndex = new HashMap<String, Integer>();
+      for (int i = 0; i < argNames.size(); ++i) {
+        argNameToIndex.put(argNames.get(i), i);
+      }
+
+      return new FunctionDef(
+          lineno,
+          identifier.name(),
+          new Identifier("__init__"),
+          /* decorators= */ List.of(),
+          args,
+          /* vararg= */ Optional.empty(),
+          /* kwarg= */ Optional.empty(),
+          defaults,
+          /* keywordOnlyArgs= */ List.of(),
+          /* keywordDefaults= */ List.of(),
+          new DataclassDefaultInit(type, fields, lineno),
+          /* globals= */ Set.of(),
+          /* nonlocals= */ Set.of(),
+          /* localVariableNameToIndex= */ argNameToIndex::get,
+          /* localVariableNames= */ argNames,
+          /* hasYieldExpression= */ false,
+          /* isAsync= */ false);
+    }
+
+    // Type passed as an array of one element to defer creation of the returned type.
+    PyjClass create(
+        Context context,
+        PyjClass[] type,
+        List<Code> compiledMethods,
+        Optional<Instruction.DataclassDefaultCtor> dataclassDefaultCtor) {
       Function ctor = null;
       Optional<Decorator> dataclass = getDataclassDecorator();
       var instanceMethods = new HashMap<String, Function>();
       var classLevelMethods = new HashMap<String, ClassLevelMethod>();
+      int methodIndex = -1; // Index into compiledMethods.
       for (var methodDef : methodDefs) {
+        ++methodIndex;
         String methodName = methodDef.identifier().name();
         var defaults = new ArrayList<Object>();
         for (int i = 0; i < methodDef.defaults().size(); ++i) {
@@ -1718,7 +1772,7 @@ public class Script {
                       context,
                       defaults,
                       keywordDefaults,
-                      compiler.compile(methodDef),
+                      compiledMethods.get(methodIndex),
                       /* isCtor= */ true));
           instanceMethods.put(methodName, ctor);
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("classmethod"))) {
@@ -1727,26 +1781,34 @@ public class Script {
               new ClassLevelMethod(
                   true,
                   new BoundFunction(
-                      methodDef, context, defaults, keywordDefaults, compiler.compile(methodDef))));
+                      methodDef,
+                      context,
+                      defaults,
+                      keywordDefaults,
+                      compiledMethods.get(methodIndex))));
         } else if (methodDef.decorators().stream().anyMatch(d -> d.name().equals("staticmethod"))) {
           classLevelMethods.put(
               methodName,
               new ClassLevelMethod(
                   false,
                   new BoundFunction(
-                      methodDef, context, defaults, keywordDefaults, compiler.compile(methodDef))));
+                      methodDef,
+                      context,
+                      defaults,
+                      keywordDefaults,
+                      compiledMethods.get(methodIndex))));
         } else {
           instanceMethods.put(
               methodName,
               new BoundFunction(
-                  methodDef, context, defaults, keywordDefaults, compiler.compile(methodDef)));
+                  methodDef, context, defaults, keywordDefaults, compiledMethods.get(methodIndex)));
         }
       }
 
       // Create default ctor if one hasn't been defined above.
       if (ctor == null) {
         if (dataclass.isPresent()) {
-          ctor = getDataclassDefaultCtor(context, compiler, type);
+          ctor = getDataclassDefaultCtor(context, dataclassDefaultCtor.get());
         } else {
           ctor =
               (env, params) -> {
@@ -1777,59 +1839,27 @@ public class Script {
       return type[0];
     }
 
-    public Optional<Decorator> getDataclassDecorator() {
-      return decorators.stream().filter(d -> d.name().equals("dataclass")).findFirst();
-    }
-
     // Type passed as an array of one element to defer creation of the type.
     private Function getDataclassDefaultCtor(
-        Context context, FunctionCompiler compiler, PyjClass[] type) {
+        Context context, Instruction.DataclassDefaultCtor dataclassDefaultCtor) {
       // Validate that all fields with default values appear after all fields without defaults.
-      List<Expression> defaults = new ArrayList<>();
       List<Object> defaultValues = new ArrayList<>();
       for (var field : fields) {
         if (field.defaultValue().isPresent()) {
-          defaults.add(field.defaultValue().get());
           defaultValues.add(context.popData());
-        } else if (!defaults.isEmpty()) {
+        } else if (!defaultValues.isEmpty()) {
           throw new IllegalArgumentException(
               "non-default argument '%s' follows default argument"
                   .formatted(field.identifier().name()));
         }
       }
 
-      var args = fields.stream().map(f -> new FunctionArg(f.identifier)).toList();
-      var argNames = fields.stream().map(f -> f.identifier.name()).toList();
-      var argNameToIndex = new HashMap<String, Integer>();
-      for (int i = 0; i < argNames.size(); ++i) {
-        argNameToIndex.put(argNames.get(i), i);
-      }
-
-      var functionDef =
-          new FunctionDef(
-              lineno,
-              identifier.name(),
-              new Identifier("__init__"),
-              /* decorators= */ List.of(),
-              args,
-              /* vararg= */ Optional.empty(),
-              /* kwarg= */ Optional.empty(),
-              defaults,
-              /* keywordOnlyArgs= */ List.of(),
-              /* keywordDefaults= */ List.of(),
-              new DataclassDefaultInit(type, fields, lineno),
-              /* globals= */ Set.of(),
-              /* nonlocals= */ Set.of(),
-              /* localVariableNameToIndex= */ argNameToIndex::get,
-              /* localVariableNames= */ argNames,
-              /* hasYieldExpression= */ false,
-              /* isAsync= */ false);
       return new BoundFunction(
-          functionDef,
+          dataclassDefaultCtor.functionDef(),
           context,
           defaultValues,
           /* keywordDefaults= */ List.of(),
-          compiler.compile(functionDef));
+          dataclassDefaultCtor.code());
     }
 
     // Example of "@dataclass(frozen=True)":

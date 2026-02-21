@@ -488,6 +488,8 @@ class Compiler {
   }
 
   private void compileClassDef(ClassDef classDef, Code code) {
+    // Fields are pushed onto the data stack, so process them in reverse order so they can be popped
+    // later in natural (forward) order.
     if (classDef.getDataclassDecorator().isEmpty()
         || classDef.methodDefs().stream()
             .noneMatch(methodDef -> methodDef.identifier().name().equals("__init__"))) {
@@ -496,6 +498,8 @@ class Compiler {
       }
     }
 
+    // Method arg defaults are pushed onto the data stack, so process them in reverse order so they
+    // can be popped later in natural (forward) order.
     for (var methodDef : classDef.methodDefs().reversed()) {
       for (var d : methodDef.defaults().reversed()) {
         compileExpression(d, code);
@@ -505,7 +509,29 @@ class Compiler {
       }
     }
 
-    code.addInstruction(lineno, new Instruction.DefineClass(classDef, this::compileFunction));
+    // Compiled methods are not pushed onto or popped from the data stack, so store them in the
+    // compiled class in their natural (forward) order.
+    var compiledMethods = classDef.methodDefs().stream().map(this::compileFunction).toList();
+
+    // Type passed as an array of one element to defer creation of the type.
+    // TODO(maxuser): Factor type[] out of class compilation so that the same class definition can
+    // be reused across multiple invocations that produce different types.
+    PyjClass[] type = new PyjClass[1];
+
+    var dataclassCtor =
+        classDef.shouldGenerateDataclassCtor()
+            ? Optional.of(classDef.generateDataclassCtor(type))
+            : Optional.<FunctionDef>empty();
+
+    code.addInstruction(
+        lineno,
+        new Instruction.DefineClass(
+            type,
+            new Instruction.CompiledClass(
+                classDef,
+                compiledMethods,
+                dataclassCtor.map(
+                    d -> new Instruction.DataclassDefaultCtor(d, compileFunction(d))))));
   }
 
   private void compileDataclassDefaultInit(DataclassDefaultInit dataclassInit, Code code) {

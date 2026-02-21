@@ -462,16 +462,31 @@ sealed interface Instruction {
     }
   }
 
-  record DefineClass(ClassDef classDef, FunctionCompiler compiler) implements Instruction {
+  record DataclassDefaultCtor(FunctionDef functionDef, Code code) {}
+
+  record CompiledClass(
+      ClassDef classDef,
+      List<Code> compiledMethods,
+      Optional<DataclassDefaultCtor> dataclassDefaultCtor) {}
+
+  record DefineClass(PyjClass[] type, CompiledClass compiledClass) implements Instruction {
     @Override
     public Context execute(Context context) {
-      context.set(classDef.identifier().name(), classDef.compile(context, compiler));
+      var classDef = compiledClass.classDef();
+      context.set(
+          classDef.identifier().name(),
+          classDef.create(
+              context,
+              type,
+              compiledClass.compiledMethods(),
+              compiledClass.dataclassDefaultCtor()));
       ++context.ip;
       return context;
     }
 
     @Override
     public int stackOffset() {
+      var classDef = compiledClass.classDef();
       int offset =
           -classDef.methodDefs().stream()
               .map(m -> m.defaults().size() + m.keywordDefaults().size())
