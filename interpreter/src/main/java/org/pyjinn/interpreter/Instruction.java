@@ -467,19 +467,28 @@ sealed interface Instruction {
   record CompiledClass(
       ClassDef classDef,
       List<Code> compiledMethods,
-      Optional<DataclassDefaultCtor> dataclassDefaultCtor) {}
+      Optional<ClassDef.DataclassCtorFactory> dataclassCtorFactory) {}
 
-  record DefineClass(PyjClass[] type, CompiledClass compiledClass) implements Instruction {
+  record DefineClass(
+      CompiledClass compiledClass, java.util.function.Function<FunctionDef, Code> functionCompiler)
+      implements Instruction {
     @Override
     public Context execute(Context context) {
       var classDef = compiledClass.classDef();
+      var type = new PyjClassContainer(classDef.identifier().name());
       context.set(
           classDef.identifier().name(),
           classDef.create(
               context,
               type,
               compiledClass.compiledMethods(),
-              compiledClass.dataclassDefaultCtor()));
+              compiledClass
+                  .dataclassCtorFactory()
+                  .map(
+                      factory -> {
+                        var func = factory.createFunctionDef(type);
+                        return new DataclassDefaultCtor(func, functionCompiler.apply(func));
+                      })));
       ++context.ip;
       return context;
     }

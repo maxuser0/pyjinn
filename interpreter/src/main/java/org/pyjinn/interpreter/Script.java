@@ -1533,14 +1533,11 @@ public class Script {
     }
   }
 
-  // `type` is an array of length 1 because CtorFunction needs to be instantiated before the
-  // surrounding class is fully defined. (Alternatively, PyjClass could be mutable so that it's
-  // instantiated before CtorFunction.)
-  public record CtorFunction(PyjClass[] type, BoundFunction function) implements Function {
+  public record CtorFunction(PyjClassContainer type, BoundFunction function) implements Function {
     @Override
     public Object call(Environment env, Object... params) {
       Object[] ctorParams = new Object[params.length + 1];
-      var self = new PyjObject(type[0]);
+      var self = new PyjObject(type.get());
       ctorParams[0] = self;
       System.arraycopy(params, 0, ctorParams, 1, params.length);
       function.call(env, ctorParams);
@@ -1662,11 +1659,10 @@ public class Script {
 
   public record ClassFieldDef(Identifier identifier, Optional<Expression> defaultValue) {}
 
-  // Type passed as an array of one element to defer creation of the type.
-  public record DataclassDefaultInit(PyjClass[] type, List<ClassFieldDef> fields, int lineno)
+  public record DataclassDefaultInit(PyjClassContainer type, List<ClassFieldDef> fields, int lineno)
       implements Statement {
     public PyjObject create(Context context) {
-      var object = new PyjObject(type[0]);
+      var object = new PyjObject(type.get());
       for (var field : fields) {
         // TODO(maxuser): Support lookup of ClassFieldDef by variable index.
         String name = field.identifier().name();
@@ -1678,6 +1674,31 @@ public class Script {
     @Override
     public int lineno() {
       return lineno;
+    }
+  }
+
+  /** A container for a class type that is initialized lazily. */
+  static class PyjClassContainer {
+    private final String name;
+    private PyjClass type;
+
+    public PyjClassContainer(String name) {
+      this.name = name;
+    }
+
+    public void init(PyjClass type) {
+      if (this.type != null) {
+        throw new IllegalStateException("Type already initialized for class '%s'".formatted(name));
+      }
+      this.type = type;
+    }
+
+    public PyjClass get() {
+      if (type == null) {
+        throw new IllegalStateException(
+            "Invalid access to uninitialized class '%s'".formatted(name));
+      }
+      return type;
     }
   }
 
@@ -1699,8 +1720,11 @@ public class Script {
               .noneMatch(methodDef -> methodDef.identifier().name().equals("__init__"));
     }
 
-    // Type passed as an array of one element to defer creation of the type.
-    FunctionDef generateDataclassCtor(PyjClass[] type) {
+    interface DataclassCtorFactory {
+      FunctionDef createFunctionDef(PyjClassContainer type);
+    }
+
+    DataclassCtorFactory getDataclassCtorFactory() {
       // Validate that all fields with default values appear after all fields without defaults.
       List<Expression> defaults = new ArrayList<>();
       for (var field : fields) {
@@ -1719,7 +1743,16 @@ public class Script {
       for (int i = 0; i < argNames.size(); ++i) {
         argNameToIndex.put(argNames.get(i), i);
       }
+      java.util.function.Function<String, Integer> argNameToIndexFunc = argNameToIndex::get;
+      return type -> generateDataclassCtor(args, defaults, argNameToIndexFunc, argNames, type);
+    }
 
+    FunctionDef generateDataclassCtor(
+        List<FunctionArg> args,
+        List<Expression> defaults,
+        java.util.function.Function<String, Integer> argNameToIndex,
+        List<String> argNames,
+        PyjClassContainer type) {
       return new FunctionDef(
           lineno,
           identifier.name(),
@@ -1734,16 +1767,15 @@ public class Script {
           new DataclassDefaultInit(type, fields, lineno),
           /* globals= */ Set.of(),
           /* nonlocals= */ Set.of(),
-          /* localVariableNameToIndex= */ argNameToIndex::get,
+          /* localVariableNameToIndex= */ argNameToIndex,
           /* localVariableNames= */ argNames,
           /* hasYieldExpression= */ false,
           /* isAsync= */ false);
     }
 
-    // Type passed as an array of one element to defer creation of the returned type.
     PyjClass create(
         Context context,
-        PyjClass[] type,
+        PyjClassContainer type,
         List<Code> compiledMethods,
         Optional<Instruction.DataclassDefaultCtor> dataclassDefaultCtor) {
       Function ctor = null;
@@ -1813,12 +1845,12 @@ public class Script {
           ctor =
               (env, params) -> {
                 Function.expectNumParams(params, 0, identifier.name() + ".__init__");
-                return new PyjObject(type[0]);
+                return new PyjObject(type.get());
               };
         }
       }
 
-      type[0] =
+      type.init(
           new PyjClass(
               identifier.name(),
               ctor,
@@ -1826,20 +1858,19 @@ public class Script {
               instanceMethods,
               classLevelMethods,
               dataclass.map(d -> dataclassHashCode(fields)),
-              dataclass.map(d -> dataclassToString(fields)));
+              dataclass.map(d -> dataclassToString(fields))));
       if (dataclass.isEmpty()) {
         // Class fields that depend on each other are not supported.
         // Pop default field values in the reverse order from which they were pushed.
         for (var field : fields) {
           if (field.defaultValue().isPresent()) {
-            type[0].__dict__.__setitem__(field.identifier().name(), context.popData());
+            type.get().__dict__.__setitem__(field.identifier().name(), context.popData());
           }
         }
       }
-      return type[0];
+      return type.get();
     }
 
-    // Type passed as an array of one element to defer creation of the type.
     private Function getDataclassDefaultCtor(
         Context context, Instruction.DataclassDefaultCtor dataclassDefaultCtor) {
       // Validate that all fields with default values appear after all fields without defaults.
@@ -1969,7 +2000,7 @@ public class Script {
      *
      * @param methodName name of PyjObject method to call
      * @param params arguments passed to PyjObject method
-     * @return return value wrapped in an array of 1 element, or empty array if no matching method
+     * @return return value from the method or UNDEFINED_RESULT if no matching method
      */
     public Object callMethod(Environment env, String methodName, Object... params) {
       if (__dict__ == null) {

@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 import org.pyjinn.interpreter.Instruction.JumpPlaceholder;
 import org.pyjinn.interpreter.Script.*;
+import org.pyjinn.interpreter.Script.ClassDef.DataclassCtorFactory;
 
 class Compiler {
   /**
@@ -513,25 +514,16 @@ class Compiler {
     // compiled class in their natural (forward) order.
     var compiledMethods = classDef.methodDefs().stream().map(this::compileFunction).toList();
 
-    // Type passed as an array of one element to defer creation of the type.
-    // TODO(maxuser): Factor type[] out of class compilation so that the same class definition can
-    // be reused across multiple invocations that produce different types.
-    PyjClass[] type = new PyjClass[1];
-
-    var dataclassCtor =
+    var dataclassCtorFactory =
         classDef.shouldGenerateDataclassCtor()
-            ? Optional.of(classDef.generateDataclassCtor(type))
-            : Optional.<FunctionDef>empty();
+            ? Optional.of(classDef.getDataclassCtorFactory())
+            : Optional.<DataclassCtorFactory>empty();
 
     code.addInstruction(
         lineno,
         new Instruction.DefineClass(
-            type,
-            new Instruction.CompiledClass(
-                classDef,
-                compiledMethods,
-                dataclassCtor.map(
-                    d -> new Instruction.DataclassDefaultCtor(d, compileFunction(d))))));
+            new Instruction.CompiledClass(classDef, compiledMethods, dataclassCtorFactory),
+            this::compileFunction));
   }
 
   private void compileDataclassDefaultInit(DataclassDefaultInit dataclassInit, Code code) {

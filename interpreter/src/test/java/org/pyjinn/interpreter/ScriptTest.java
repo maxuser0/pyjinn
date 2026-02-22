@@ -1780,6 +1780,27 @@ public class ScriptTest {
   }
 
   @Test
+  public void localClass() throws Exception {
+    execute(
+        """
+        def create_class(label):
+          class Foo:
+            x = label
+          return Foo
+
+        c1 = create_class("first")
+        c1_x = c1().x
+
+        c2 = create_class("second")
+        c2_x = c2().x
+        c1_x2 = c1().x
+        """);
+    assertEquals("first", getVariable("c1_x"));
+    assertEquals("second", getVariable("c2_x"));
+    assertEquals("first", getVariable("c1_x2"));
+  }
+
+  @Test
   public void setGlobalVariableFromOutsideScript() throws Exception {
     script = new Script();
     script.set("foo", 42);
