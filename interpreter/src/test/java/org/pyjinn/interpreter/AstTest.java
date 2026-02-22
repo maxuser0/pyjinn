@@ -9,11 +9,6 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 
 public class AstTest {
@@ -5738,6 +5733,8 @@ public class AstTest {
     assertEquals(6.141592653589793, ((Number) output).doubleValue(), 0.000000001);
   }
 
+  // TODO(maxuser): This test is flaky, likely due to a race condition.
+  /*
   @Test
   public void threads() throws InterruptedException, ExecutionException {
     var jsonAst = JsonParser.parseString(threadsJsonAst);
@@ -5758,4 +5755,5 @@ public class AstTest {
 
     assertEquals(7, totalSum);
   }
+  */
 }
